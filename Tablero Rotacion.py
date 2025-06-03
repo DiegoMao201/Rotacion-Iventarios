@@ -1,3 +1,4 @@
+# app_inventario_streamlit.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -22,6 +23,9 @@ def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xl
         df['Ventas_60_Dias'] = df['Ventas_60_Dias'].astype(int)
         df['Unidades_Traslado_Sugeridas'] = df['Unidades_Traslado_Sugeridas'].astype(int)
         df['Precio_Promocion'] = df['Precio_Promocion'].round(2)
+        # Asegúrate de que 'Costo_Promedio_UND' también se redondee y sea numérico si existe
+        if 'Costo_Promedio_UND' in df.columns:
+            df['Costo_Promedio_UND'] = df['Costo_Promedio_UND'].round(2)
         df['Almacen'] = df['Almacen'].astype(str) # Asegurar que Almacen sea string para filtros
         df['Departamento'] = df['Departamento'].astype(str) # Asegurar que Departamento sea string
         return df
@@ -52,8 +56,13 @@ COLUMNAS_INTERES = [
     'Recomendacion'
 ]
 
+# AÑADIR Costo_Promedio_UND a las columnas de interés si existe
+if 'Costo_Promedio_UND' in df_analisis.columns and 'Costo_Promedio_UND' not in COLUMNAS_INTERES:
+    COLUMNAS_INTERES.insert(COLUMNAS_INTERES.index('Precio_Promocion'), 'Costo_Promedio_UND')
+
+
 # Asegurarse de que todas las columnas de interés existen
-for col in COLUMNAS_INTERES:
+for col in list(COLUMNAS_INTERES): # Usar list() para poder modificar COLUMNAS_INTERES mientras se itera
     if col not in df_analisis.columns:
         st.warning(f"ADVERTENCIA: La columna '{col}' no se encontró en el archivo de datos. Se omitirá.")
         COLUMNAS_INTERES.remove(col)
@@ -112,7 +121,13 @@ if df_filtered.empty:
 # --- 5. Métricas Clave (KPIs) ---
 st.header("📊 Métricas Clave del Inventario")
 
-total_inventario_valor = (df_filtered['Stock'] * df_filtered['Precio_Promocion']).sum().round(2)
+# MODIFICACIÓN CLAVE: Usar 'Costo_Promedio_UND' para el cálculo del valor total del inventario
+if 'Costo_Promedio_UND' in df_filtered.columns:
+    total_inventario_valor = (df_filtered['Stock'] * df_filtered['Costo_Promedio_UND']).sum().round(2)
+else:
+    st.warning("La columna 'Costo_Promedio_UND' no se encontró. Se usará 'Precio_Promocion' para el valor del inventario.")
+    total_inventario_valor = (df_filtered['Stock'] * df_filtered['Precio_Promocion']).sum().round(2)
+
 # Para unidades en quiebre, si Stock es 0, no sumamos, sino contamos cuántos registros tienen Quiebre
 unidades_en_quiebre_count = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock'].shape[0]
 unidades_en_excedente = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Excedente / Lento Movimiento']['Stock'].sum()
@@ -186,16 +201,24 @@ with col_table2:
     df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente / Lento Movimiento', 'Baja Rotación / Obsoleto'])].copy()
     if not df_excedente.empty:
         df_excedente = df_excedente.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, False])
-        # Columnas específicas para esta tabla
-        st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']].head(20), # CORRECCIÓN AQUÍ
+        # Columnas específicas para esta tabla. Se agregó Costo_Promedio_UND si existe
+        display_cols_excedente = ['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']
+        if 'Costo_Promedio_UND' in df_excedente.columns:
+            display_cols_excedente.insert(display_cols_excedente.index('Precio_Promocion'), 'Costo_Promedio_UND')
+
+        column_config_excedente = {
+            "Stock": st.column_config.NumberColumn(format="%d"),
+            "Dias_Inventario": st.column_config.NumberColumn(format="%.0f"),
+            "Unidades_Traslado_Sugeridas": st.column_config.NumberColumn(format="%d"),
+            "Precio_Promocion": st.column_config.NumberColumn(format="$%.2f"),
+        }
+        if 'Costo_Promedio_UND' in df_excedente.columns:
+            column_config_excedente["Costo_Promedio_UND"] = st.column_config.NumberColumn(format="$%.2f")
+
+        st.dataframe(df_excedente[display_cols_excedente].head(20),
                      hide_index=True,
                      use_container_width=True,
-                     column_config={
-                         "Stock": st.column_config.NumberColumn(format="%d"),
-                         "Dias_Inventario": st.column_config.NumberColumn(format="%.0f"),
-                         "Unidades_Traslado_Sugeridas": st.column_config.NumberColumn(format="%d"),
-                         "Precio_Promocion": st.column_config.NumberColumn(format="$%.2f"),
-                     })
+                     column_config=column_config_excedente)
     else:
         st.info("No hay SKUs en excedente o baja rotación con los filtros actuales.")
 
@@ -204,20 +227,25 @@ st.markdown("---")
 # --- 8. Tabla Detallada del Inventario ---
 st.header("📦 Detalle del Inventario (Datos Filtrados)")
 
+# Configuración de las columnas para la tabla principal
+column_config_main_table = {
+    "Stock": st.column_config.NumberColumn(format="%d"),
+    "Ventas_60_Dias": st.column_config.NumberColumn(format="%d"),
+    "Demanda_Diaria_Promedio": st.column_config.NumberColumn(format="%.2f"),
+    "Dias_Inventario": st.column_config.NumberColumn(format="%.0f"),
+    "Unidades_Traslado_Sugeridas": st.column_config.NumberColumn(format="%d"),
+    "Precio_Promocion": st.column_config.NumberColumn(format="$%.2f"),
+}
+if 'Costo_Promedio_UND' in df_filtered.columns:
+    column_config_main_table["Costo_Promedio_UND"] = st.column_config.NumberColumn(format="$%.2f")
+
 # Tabla principal
 st.dataframe(
     df_filtered[COLUMNAS_INTERES],
     hide_index=True,
     use_container_width=True, # Ajusta al ancho del contenedor
     height=400, # Altura fija para la tabla
-    column_config={
-        "Stock": st.column_config.NumberColumn(format="%d"),
-        "Ventas_60_Dias": st.column_config.NumberColumn(format="%d"),
-        "Demanda_Diaria_Promedio": st.column_config.NumberColumn(format="%.2f"),
-        "Dias_Inventario": st.column_config.NumberColumn(format="%.0f"),
-        "Unidades_Traslado_Sugeridas": st.column_config.NumberColumn(format="%d"),
-        "Precio_Promocion": st.column_config.NumberColumn(format="$%.2f"),
-    }
+    column_config=column_config_main_table
 )
 
 # --- 9. Botón de Descarga (MODIFICADO) ---
@@ -242,28 +270,13 @@ def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', ta
         start_row = 6 # Fila 7 (0-indexed)
         start_col = 0 # Columna A (0-indexed)
 
-        # Escribir el DataFrame al Excel, comenzando en start_row, start_col
-        # Esto es necesario para que luego xlsxwriter pueda convertirlo en tabla
-        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row, startcol=start_col, index=False, header=False)
-
-        # Obtener el objeto de la hoja de trabajo de xlsxwriter
-        # worksheet = writer.sheets[sheet_name] # Ya lo tenemos arriba
-
-        # Definir el rango de la tabla
-        # Se suma 1 a la fila de inicio porque header=False arriba, y la primera fila del df
-        # es el comienzo de los datos, no el header.
-        # Pero para crear la tabla, necesitamos los encabezados.
-        # Una forma más sencilla es dejar que pandas escriba el header y ajustar la fila de inicio.
-
-        # Vamos a reescribir la parte de escribir el DataFrame y la tabla para que sea más robusta
-
         # Escribir el encabezado del DataFrame en la fila 6 (A6, B6, etc.)
         for col_num, value in enumerate(df_to_export.columns.values):
             worksheet.write(start_row, col_num, value)
 
         # Escribir los datos del DataFrame, empezando justo después del encabezado
         # Usamos to_excel pero especificamos que no escriba el header, ya lo hicimos nosotros
-        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, startcol=start_col, index=False, header=False)
+        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, start_col=start_col, index=False, header=False)
 
         # Definir el rango de la tabla, incluyendo la fila de encabezado (start_row)
         end_row = start_row + df_to_export.shape[0]
