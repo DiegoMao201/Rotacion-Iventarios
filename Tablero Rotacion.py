@@ -1,4 +1,3 @@
-# app_inventario_streamlit.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -198,7 +197,7 @@ with col_table1:
 
 with col_table2:
     st.subheader("🟢 SKUs en Excedente / Baja Rotación")
-    df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente / Lento Movimiento', 'Baja Rotación / Obsoleto'])].copy()
+    df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Lento Movimiento', 'Baja Rotación / Obsoleto'])].copy()
     if not df_excedente.empty:
         df_excedente = df_excedente.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, False])
         # Columnas específicas para esta tabla. Se agregó Costo_Promedio_UND si existe
@@ -276,7 +275,7 @@ def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', ta
 
         # Escribir los datos del DataFrame, empezando justo después del encabezado
         # Usamos to_excel pero especificamos que no escriba el header, ya lo hicimos nosotros
-        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, start_col=start_col, index=False, header=False)
+        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, startcol=start_col, index=False, header=False)
 
         # Definir el rango de la tabla, incluyendo la fila de encabezado (start_row)
         end_row = start_row + df_to_export.shape[0]
