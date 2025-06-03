@@ -114,7 +114,8 @@ if df_filtered.empty:
 st.header("📊 Métricas Clave del Inventario")
 
 total_inventario_valor = (df_filtered['Stock'] * df_filtered['Precio_Promocion']).sum().round(2)
-unidades_en_quiebre = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock']['Stock'].sum() # Stock en 0, pero se cuenta el registro
+# Para unidades en quiebre, si Stock es 0, no sumamos, sino contamos cuántos registros tienen Quiebre
+unidades_en_quiebre_count = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock'].shape[0]
 unidades_en_excedente = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Excedente / Lento Movimiento']['Stock'].sum()
 unidades_sugeridas_traslado = df_filtered['Unidades_Traslado_Sugeridas'].sum()
 
@@ -123,7 +124,7 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric(label="Valor Total del Inventario Filtrado", value=f"${total_inventario_valor:,.2f}")
 with col2:
-    st.metric(label="Unidades en Quiebre de Stock", value=f"{unidades_en_quiebre:,.0f} unid.")
+    st.metric(label="SKUs en Quiebre de Stock", value=f"{unidades_en_quiebre_count:,.0f} SKUs") # Cambiado a SKUs
 with col3:
     st.metric(label="Unidades en Excedente", value=f"{unidades_en_excedente:,.0f} unid.")
 with col4:
@@ -187,7 +188,7 @@ with col_table2:
     if not df_excedente.empty:
         df_excedente = df_excedente.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, False])
         # Columnas específicas para esta tabla
-        st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']].head(20),
+        st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', ' ' 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']].head(20),
                      hide_index=True,
                      use_container_width=True,
                      column_config={
@@ -220,23 +221,73 @@ st.dataframe(
     }
 )
 
-# --- 9. Botón de Descarga ---
+# --- 9. Botón de Descarga (MODIFICADO) ---
 @st.cache_data # Cachear la función de conversión para mejorar el rendimiento
-def convert_df_to_excel(df):
+def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', table_name='Inventario_Tabla'):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Inventario Filtrado')
+        # Escribir un título en la hoja
+        workbook = writer.book
+        worksheet = workbook.add_worksheet(sheet_name)
+        writer.sheets[sheet_name] = worksheet # Asignar la hoja de trabajo a writer para que pandas la use
+
+        # Escribir información introductoria
+        worksheet.write('A1', 'Reporte de Inventario Filtrado y Optimización')
+        worksheet.write('A2', 'Generado desde el Tablero de Control de Inventario.')
+        worksheet.write('A3', f'Fecha de descarga: {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}')
+        worksheet.write('A4', 'Esta tabla incluye los datos filtrados en el tablero.')
+        worksheet.write('A5', '---------------------------------------------------')
+
+
+        # Definir la posición de inicio de la tabla (ej. celda A7)
+        start_row = 6 # Fila 7 (0-indexed)
+        start_col = 0 # Columna A (0-indexed)
+
+        # Escribir el DataFrame al Excel, comenzando en start_row, start_col
+        # Esto es necesario para que luego xlsxwriter pueda convertirlo en tabla
+        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row, startcol=start_col, index=False, header=False)
+
+        # Obtener el objeto de la hoja de trabajo de xlsxwriter
+        # worksheet = writer.sheets[sheet_name] # Ya lo tenemos arriba
+
+        # Definir el rango de la tabla
+        # Se suma 1 a la fila de inicio porque header=False arriba, y la primera fila del df
+        # es el comienzo de los datos, no el header.
+        # Pero para crear la tabla, necesitamos los encabezados.
+        # Una forma más sencilla es dejar que pandas escriba el header y ajustar la fila de inicio.
+
+        # Vamos a reescribir la parte de escribir el DataFrame y la tabla para que sea más robusta
+
+        # Escribir el encabezado del DataFrame en la fila 6 (A6, B6, etc.)
+        for col_num, value in enumerate(df_to_export.columns.values):
+            worksheet.write(start_row, col_num, value)
+
+        # Escribir los datos del DataFrame, empezando justo después del encabezado
+        # Usamos to_excel pero especificamos que no escriba el header, ya lo hicimos nosotros
+        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, startcol=start_col, index=False, header=False)
+
+        # Definir el rango de la tabla, incluyendo la fila de encabezado (start_row)
+        end_row = start_row + df_to_export.shape[0]
+        end_col = start_col + df_to_export.shape[1] - 1 # Ajustar a 0-indexed
+
+        # Crear la tabla de Excel
+        # Asegúrate de que el nombre de la tabla sea único en el libro si tienes múltiples tablas
+        worksheet.add_table(start_row, start_col, end_row, end_col, {'name': table_name, 'header_row': True})
+
+
     processed_data = output.getvalue()
     return processed_data
 
-excel_data = convert_df_to_excel(df_filtered[COLUMNAS_INTERES])
+excel_data = convert_df_to_excel_table(df_filtered[COLUMNAS_INTERES],
+                                       sheet_name='Inventario Filtrado',
+                                       table_name='Datos_Inventario_Filtrado')
 
 st.download_button(
-    label="Descargar Datos Filtrados a Excel",
+    label="Descargar Datos Filtrados a Excel (Formato Tabla)",
     data=excel_data,
-    file_name="inventario_filtrado_streamlit.xlsx",
+    file_name="inventario_filtrado_con_tabla.xlsx", # Nuevo nombre de archivo
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    help="Descarga la tabla de inventario con los filtros aplicados."
+    help="Descarga la tabla de inventario con los filtros aplicados en formato de tabla de Excel."
 )
 
 st.markdown("---")
