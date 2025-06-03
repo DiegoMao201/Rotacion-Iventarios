@@ -19,13 +19,21 @@ def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xl
         df = pd.read_excel(file_path)
         # Asegurar tipos de datos correctos
         df['Stock'] = df['Stock'].astype(int)
-        df['Ventas_60_Dias'] = df['Ventas_60_Dias'].astype(int)
-        df['Unidades_Traslado_Sugeridas'] = df['Unidades_Traslado_Sugeridas'].astype(int)
-        df['Precio_Promocion'] = df['Precio_Promocion'].round(2)
+        df['Ventas_60_Dias'] = pd.to_numeric(df['Ventas_60_Dias'], errors='coerce').fillna(0).astype(int) # Convertir a numérico y luego a int
+        df['Unidades_Traslado_Sugeridas'] = pd.to_numeric(df['Unidades_Traslado_Sugeridas'], errors='coerce').fillna(0).astype(int) # Convertir a numérico y luego a int
+        df['Precio_Promocion'] = pd.to_numeric(df['Precio_Promocion'], errors='coerce').fillna(0).round(2) # Convertir a numérico y redondear
+        
         # Asegúrate de que 'Costo_Promedio_UND' también se redondee y sea numérico si existe
         if 'Costo_Promedio_UND' in df.columns:
-            df['Costo_Promedio_UND'] = df['Costo_Promedio_UND'].round(2)
+            df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_Promedio_UND'], errors='coerce').fillna(0).round(2)
+        
         df['Almacen'] = df['Almacen'].astype(str) # Asegurar que Almacen sea string para filtros
+
+        # --- DEBUG: Imprimir valores únicos de la columna 'Almacen' después de la conversión a string ---
+        print(f"DEBUG: Valores únicos de 'Almacen' en Streamlit: {sorted(df['Almacen'].unique())}")
+        print(f"DEBUG: ¿'155' está presente en los almacenes? {'155' in df['Almacen'].unique()}")
+        # --- FIN DEBUG ---
+
         df['Departamento'] = df['Departamento'].astype(str) # Asegurar que Departamento sea string
         return df
     except FileNotFoundError:
