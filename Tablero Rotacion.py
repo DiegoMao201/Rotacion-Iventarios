@@ -1,4 +1,3 @@
-# app_inventario_streamlit.py
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -142,8 +141,8 @@ with col_graph1:
     estado_counts = df_filtered['Estado_Inventario_Local'].value_counts().reset_index()
     estado_counts.columns = ['Estado', 'Cantidad']
     fig_estado = px.pie(estado_counts, values='Cantidad', names='Estado',
-                        title='Distribución del Inventario por Estado',
-                        color_discrete_sequence=px.colors.qualitative.Set3)
+                         title='Distribución del Inventario por Estado',
+                         color_discrete_sequence=px.colors.qualitative.Set3)
     fig_estado.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#000000', width=1)))
     st.plotly_chart(fig_estado, use_container_width=True)
 
@@ -188,7 +187,7 @@ with col_table2:
     if not df_excedente.empty:
         df_excedente = df_excedente.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, False])
         # Columnas específicas para esta tabla
-        st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', ' ' 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']].head(20),
+        st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']].head(20), # CORRECCIÓN AQUÍ
                      hide_index=True,
                      use_container_width=True,
                      column_config={
