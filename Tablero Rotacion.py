@@ -18,29 +18,26 @@ def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xl
     try:
         df = pd.read_excel(file_path)
         # Asegurar tipos de datos correctos
-        df['Stock'] = df['Stock'].astype(int)
-        df['Ventas_60_Dias'] = pd.to_numeric(df['Ventas_60_Dias'], errors='coerce').fillna(0).astype(int) # Convertir a numérico y luego a int
-        df['Unidades_Traslado_Sugeridas'] = pd.to_numeric(df['Unidades_Traslado_Sugeridas'], errors='coerce').fillna(0).astype(int) # Convertir a numérico y luego a int
-        df['Precio_Promocion'] = pd.to_numeric(df['Precio_Promocion'], errors='coerce').fillna(0).round(2) # Convertir a numérico y redondear
+        # Aplicar max(0, x) al Stock al cargar para asegurar que no haya negativos
+        df['Stock'] = df['Stock'].apply(lambda x: max(0, x)).astype(int) 
+        df['Ventas_60_Dias'] = pd.to_numeric(df['Ventas_60_Dias'], errors='coerce').fillna(0).astype(int) 
+        df['Unidades_Traslado_Sugeridas'] = pd.to_numeric(df['Unidades_Traslado_Sugeridas'], errors='coerce').fillna(0).astype(int) 
+        df['Precio_Promocion'] = pd.to_numeric(df['Precio_Promocion'], errors='coerce').fillna(0).round(2) 
         
-        # Asegúrate de que 'Costo_Promedio_UND' también se redondee y sea numérico si existe
         if 'Costo_Promedio_UND' in df.columns:
-            # Corregido: Usar df['Costo_Promedio_UND'] en lugar de df['Costo_PROMEDIO_UND']
             df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_Promedio_UND'], errors='coerce').fillna(0).round(2)
         
-        df['Almacen'] = df['Almacen'].astype(str) # Asegurar que Almacen sea string para filtros
+        df['Almacen'] = df['Almacen'].astype(str) 
 
-        # --- DEBUG: Imprimir valores únicos de la columna 'Almacen' después de la conversión a string ---
         print(f"DEBUG: Valores únicos de 'Almacen' en Streamlit: {sorted(df['Almacen'].unique())}")
         print(f"DEBUG: ¿'155' está presente en los almacenes? {'155' in df['Almacen'].unique()}")
-        # --- FIN DEBUG ---
 
-        df['Departamento'] = df['Departamento'].astype(str) # Asegurar que Departamento sea string
+        df['Departamento'] = df['Departamento'].astype(str) 
         return df
     except FileNotFoundError:
         st.error(f"ERROR: El archivo '{file_path}' no fue encontrado.")
         st.warning("Por favor, asegúrate de que el script de análisis de inventario haya sido ejecutado y el archivo Excel esté en la misma carpeta.")
-        st.stop() # Detiene la ejecución del script
+        st.stop() 
     except Exception as e:
         st.error(f"Error al cargar o procesar los datos: {e}")
         st.stop()
@@ -55,7 +52,7 @@ COLUMNAS_INTERES = [
     'Departamento',
     'Stock',
     'Ventas_60_Dias',
-    'Demanda_Diaria_Promedio', # Puede ser útil
+    'Demanda_Diaria_Promedio', 
     'Dias_Inventario',
     'Estado_Inventario_Local',
     'Unidades_Traslado_Sugeridas',
@@ -64,52 +61,43 @@ COLUMNAS_INTERES = [
     'Recomendacion'
 ]
 
-# AÑADIR Costo_Promedio_UND a las columnas de interés si existe
 if 'Costo_Promedio_UND' in df_analisis.columns and 'Costo_Promedio_UND' not in COLUMNAS_INTERES:
     COLUMNAS_INTERES.insert(COLUMNAS_INTERES.index('Precio_Promocion'), 'Costo_Promedio_UND')
 
 
-# Asegurarse de que todas las columnas de interés existen
-for col in list(COLUMNAS_INTERES): # Usar list() para poder modificar COLUMNAS_INTERES mientras se itera
+for col in list(COLUMNAS_INTERES): 
     if col not in df_analisis.columns:
         st.warning(f"ADVERTENCIA: La columna '{col}' no se encontró en el archivo de datos. Se omitirá.")
         COLUMNAS_INTERES.remove(col)
 
-# --- 3. Título del Tablero ---
 st.title("📦 Tablero de Control y Optimización de Inventario")
 st.markdown("---")
 
-# --- 4. Barra Lateral para Filtros ---
 st.sidebar.header("⚙️ Opciones de Filtrado")
 
-# Filtro por Almacén
 selected_almacenes = st.sidebar.multiselect(
     "Selecciona Almacén(es):",
     options=sorted(df_analisis['Almacen'].unique()),
     default=[]
 )
 
-# Filtro por Departamento
 selected_departamentos = st.sidebar.multiselect(
     "Selecciona Departamento(s):",
     options=sorted(df_analisis['Departamento'].unique()),
     default=[]
 )
 
-# Búsqueda por SKU
 search_sku = st.sidebar.text_input(
     "Buscar por SKU (Referencia):",
     placeholder="Ej: SKU12345"
 )
 
-# Filtro por Estado de Inventario Local
 selected_estados = st.sidebar.multiselect(
     "Filtrar por Estado de Inventario:",
     options=sorted(df_analisis['Estado_Inventario_Local'].unique()),
     default=[]
 )
 
-# --- Aplicar Filtros ---
 df_filtered = df_analisis.copy()
 
 if selected_almacenes:
@@ -123,23 +111,19 @@ if selected_estados:
 
 if df_filtered.empty:
     st.warning("No se encontraron datos con los filtros seleccionados. Intenta ajustar tus filtros.")
-    st.stop() # Detiene la ejecución si no hay datos
+    st.stop() 
 
 
-# --- 5. Métricas Clave (KPIs) ---
 st.header("📊 Métricas Clave del Inventario")
 
-# MODIFICACIÓN CLAVE: Usar 'Costo_Promedio_UND' para el cálculo del valor total del inventario
 if 'Costo_Promedio_UND' in df_filtered.columns:
     total_inventario_valor = (df_filtered['Stock'] * df_filtered['Costo_Promedio_UND']).sum().round(2)
 else:
     st.warning("La columna 'Costo_Promedio_UND' no se encontró. Se usará 'Precio_Promocion' para el valor del inventario.")
     total_inventario_valor = (df_filtered['Stock'] * df_filtered['Precio_Promocion']).sum().round(2)
 
-# Para unidades en quiebre, si Stock es 0, no sumamos, sino contamos cuántos registros tienen Quiebre
 unidades_en_quiebre_count = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock'].shape[0]
 
-# --- CAMBIO CLAVE AQUÍ: Sumar stock de 'Excedente' y 'Baja Rotación / Obsoleto' ---
 unidades_en_excedente = df_filtered[
     df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])
 ]['Stock'].sum()
@@ -151,7 +135,7 @@ col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric(label="Valor Total del Inventario Filtrado", value=f"${total_inventario_valor:,.2f}")
 with col2:
-    st.metric(label="SKUs en Quiebre de Stock", value=f"{unidades_en_quiebre_count:,.0f} SKUs") # Cambiado a SKUs
+    st.metric(label="SKUs en Quiebre de Stock", value=f"{unidades_en_quiebre_count:,.0f} SKUs") 
 with col3:
     st.metric(label="Unidades en Excedente", value=f"{unidades_en_excedente:,.0f} unid.")
 with col4:
@@ -159,13 +143,11 @@ with col4:
 
 st.markdown("---")
 
-# --- 6. Visualizaciones (Gráficos) ---
 st.header("📈 Gráficos de Inventario")
 
 col_graph1, col_graph2 = st.columns(2)
 
 with col_graph1:
-    # Gráfico de Distribución por Estado de Inventario
     estado_counts = df_filtered['Estado_Inventario_Local'].value_counts().reset_index()
     estado_counts.columns = ['Estado', 'Cantidad']
     fig_estado = px.pie(estado_counts, values='Cantidad', names='Estado',
@@ -175,8 +157,6 @@ with col_graph1:
     st.plotly_chart(fig_estado, use_container_width=True)
 
 with col_graph2:
-    # Gráfico de Rotación de Inventario por Departamento (promedio)
-    # Solo incluir departamentos con stock > 0 para una rotación significativa
     df_rotacion_dept = df_filtered[df_filtered['Stock'] > 0].groupby('Departamento')['Rotacion_60_Dias'].mean().reset_index()
     df_rotacion_dept = df_rotacion_dept.sort_values(by='Rotacion_60_Dias', ascending=False)
     fig_rotacion = px.bar(df_rotacion_dept, x='Departamento', y='Rotacion_60_Dias',
@@ -187,7 +167,6 @@ with col_graph2:
 
 st.markdown("---")
 
-# --- 7. Tablas de Resumen (Críticos y Excedente) ---
 st.header("📋 Resumen de SKUs Críticos y Excedentes")
 
 col_table1, col_table2 = st.columns(2)
@@ -197,7 +176,6 @@ with col_table1:
     df_criticos = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Bajo Stock / Reordenar', 'Quiebre de Stock'])].copy()
     if not df_criticos.empty:
         df_criticos = df_criticos.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, True])
-        # Columnas específicas para esta tabla
         st.dataframe(df_criticos[['SKU', 'Almacen', 'Stock', 'Ventas_60_Dias', 'Dias_Inventario', 'Recomendacion']].head(20),
                      hide_index=True,
                      use_container_width=True,
@@ -211,11 +189,9 @@ with col_table1:
 
 with col_table2:
     st.subheader("🟢 SKUs en Excedente / Baja Rotación")
-    # Asegúrate de que las categorías aquí coincidan con las del script de generación de Excel
     df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])].copy()
     if not df_excedente.empty:
         df_excedente = df_excedente.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, False])
-        # Columnas específicas para esta tabla. Se agregó Costo_Promedio_UND si existe
         display_cols_excedente = ['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Precio_Promocion']
         if 'Costo_Promedio_UND' in df_excedente.columns:
             display_cols_excedente.insert(display_cols_excedente.index('Precio_Promocion'), 'Costo_Promedio_UND')
@@ -238,10 +214,8 @@ with col_table2:
 
 st.markdown("---")
 
-# --- 8. Tabla Detallada del Inventario ---
 st.header("📦 Detalle del Inventario (Datos Filtrados)")
 
-# Configuración de las columnas para la tabla principal
 column_config_main_table = {
     "Stock": st.column_config.NumberColumn(format="%d"),
     "Ventas_60_Dias": st.column_config.NumberColumn(format="%d"),
@@ -253,17 +227,15 @@ column_config_main_table = {
 if 'Costo_Promedio_UND' in df_filtered.columns:
     column_config_main_table["Costo_Promedio_UND"] = st.column_config.NumberColumn(format="$%.2f")
 
-# Tabla principal
 st.dataframe(
     df_filtered[COLUMNAS_INTERES],
     hide_index=True,
-    use_container_width=True, # Ajusta al ancho del contenedor
-    height=400, # Altura fija para la tabla
+    use_container_width=True, 
+    height=400, 
     column_config=column_config_main_table
 )
 
-# --- 9. Botón de Descarga (MODIFICADO) ---
-@st.cache_data # Cachear la función de conversión para mejorar el rendimiento
+@st.cache_data 
 def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', table_name='Inventario_Tabla'):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -271,16 +243,14 @@ def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', ta
         worksheet = workbook.add_worksheet(sheet_name)
         writer.sheets[sheet_name] = worksheet 
 
-        # Escribir información introductoria
         worksheet.write('A1', 'Reporte de Inventario Filtrado y Optimización')
         worksheet.write('A2', 'Generado desde el Tablero de Control de Inventario.')
         worksheet.write('A3', f'Fecha de descarga: {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")}')
         worksheet.write('A4', 'Esta tabla incluye los datos filtrados en el tablero.')
         worksheet.write('A5', '---------------------------------------------------')
 
-        # Definir la posición de inicio de la tabla (ej. celda A7)
-        start_row = 6 # Fila 7 (0-indexed)
-        start_col = 0 # Columna A (0-indexed)
+        start_row = 6 
+        start_col = 0 
 
         # Escribir los encabezados de las columnas manualmente
         for col_num, value in enumerate(df_to_export.columns.values):
@@ -289,12 +259,16 @@ def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', ta
         # Escribir los datos del DataFrame, empezando una fila debajo de los encabezados
         df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, startcol=start_col, index=False, header=False)
 
-        # Definir el rango de la tabla, incluyendo la fila de encabezado (start_row)
         end_row = start_row + df_to_export.shape[0]
-        end_col = start_col + df_to_export.shape[1] - 1 # Ajustar a 0-indexed
+        end_col = start_col + df_to_export.shape[1] - 1 
 
-        # Crear la tabla de Excel
-        worksheet.add_table(start_row, start_col, end_row, end_col, {'name': table_name, 'header_row': True})
+        # Crear la tabla de Excel, especificando los nombres de las columnas directamente
+        table_columns = [{'header': col} for col in df_to_export.columns.values]
+        worksheet.add_table(start_row, start_col, end_row, end_col, {
+            'name': table_name, 
+            'header_row': True,
+            'columns': table_columns 
+        })
 
     processed_data = output.getvalue()
     return processed_data
@@ -306,12 +280,14 @@ excel_data = convert_df_to_excel_table(df_filtered[COLUMNAS_INTERES],
 st.download_button(
     label="Descargar Datos Filtrados a Excel (Formato Tabla)",
     data=excel_data,
-    file_name="inventario_filtrado_con_tabla.xlsx", # Nuevo nombre de archivo
+    file_name="inventario_filtrado_con_tabla.xlsx", 
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     help="Descarga la tabla de inventario con los filtros aplicados en formato de tabla de Excel."
 )
 
 st.markdown("---")
 st.caption("Desarrollado con ❤️ por tu Asistente de IA.")
+
+
 
 
