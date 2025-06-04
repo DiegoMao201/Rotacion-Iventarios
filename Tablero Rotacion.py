@@ -25,7 +25,7 @@ def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xl
         
         # Asegúrate de que 'Costo_Promedio_UND' también se redondee y sea numérico si existe
         if 'Costo_Promedio_UND' in df.columns:
-            df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_Promedio_UND'], errors='coerce').fillna(0).round(2)
+            df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_PROMEDIO_UND'], errors='coerce').fillna(0).round(2)
         
         df['Almacen'] = df['Almacen'].astype(str) # Asegurar que Almacen sea string para filtros
 
@@ -266,10 +266,9 @@ st.dataframe(
 def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', table_name='Inventario_Tabla'):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Escribir un título en la hoja
         workbook = writer.book
         worksheet = workbook.add_worksheet(sheet_name)
-        writer.sheets[sheet_name] = worksheet # Asignar la hoja de trabajo a writer para que pandas la use
+        writer.sheets[sheet_name] = worksheet 
 
         # Escribir información introductoria
         worksheet.write('A1', 'Reporte de Inventario Filtrado y Optimización')
@@ -278,27 +277,20 @@ def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', ta
         worksheet.write('A4', 'Esta tabla incluye los datos filtrados en el tablero.')
         worksheet.write('A5', '---------------------------------------------------')
 
-
         # Definir la posición de inicio de la tabla (ej. celda A7)
         start_row = 6 # Fila 7 (0-indexed)
         start_col = 0 # Columna A (0-indexed)
 
-        # Escribir el encabezado del DataFrame en la fila 6 (A6, B6, etc.)
-        for col_num, value in enumerate(df_to_export.columns.values):
-            worksheet.write(start_row, col_num, value)
+        # Escribir el DataFrame al Excel, incluyendo el encabezado, comenzando en start_row, start_col
+        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row, startcol=start_col, index=False, header=True)
 
-        # Escribir los datos del DataFrame, empezando justo después del encabezado
-        # Usamos to_excel pero especificamos que no escriba el header, ya lo hicimos nosotros
-        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, startcol=start_col, index=False, header=False)
-
-        # Definir el rango de la tabla, incluyendo la fila de encabezado (start_row)
+        # Definir el rango de la tabla
+        # La fila final de la tabla será start_row (para el encabezado) + df_to_export.shape[0] (para los datos)
         end_row = start_row + df_to_export.shape[0]
         end_col = start_col + df_to_export.shape[1] - 1 # Ajustar a 0-indexed
 
         # Crear la tabla de Excel
-        # Asegúrate de que el nombre de la tabla sea único en el libro si tienes múltiples tablas
         worksheet.add_table(start_row, start_col, end_row, end_col, {'name': table_name, 'header_row': True})
-
 
     processed_data = output.getvalue()
     return processed_data
@@ -317,4 +309,5 @@ st.download_button(
 
 st.markdown("---")
 st.caption("Desarrollado con ❤️ por tu Asistente de IA.")
+
 
