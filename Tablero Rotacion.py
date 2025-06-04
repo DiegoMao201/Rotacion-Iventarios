@@ -137,7 +137,12 @@ else:
 
 # Para unidades en quiebre, si Stock es 0, no sumamos, sino contamos cuántos registros tienen Quiebre
 unidades_en_quiebre_count = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock'].shape[0]
-unidades_en_excedente = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Excedente / Lento Movimiento']['Stock'].sum()
+
+# --- CAMBIO CLAVE AQUÍ: Sumar stock de 'Excedente' y 'Baja Rotación / Obsoleto' ---
+unidades_en_excedente = df_filtered[
+    df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])
+]['Stock'].sum()
+
 unidades_sugeridas_traslado = df_filtered['Unidades_Traslado_Sugeridas'].sum()
 
 col1, col2, col3, col4 = st.columns(4)
@@ -205,7 +210,8 @@ with col_table1:
 
 with col_table2:
     st.subheader("🟢 SKUs en Excedente / Baja Rotación")
-    df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Lento Movimiento', 'Baja Rotación / Obsoleto'])].copy()
+    # Asegúrate de que las categorías aquí coincidan con las del script de generación de Excel
+    df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])].copy()
     if not df_excedente.empty:
         df_excedente = df_excedente.sort_values(by=['Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, False])
         # Columnas específicas para esta tabla. Se agregó Costo_Promedio_UND si existe
@@ -311,3 +317,4 @@ st.download_button(
 
 st.markdown("---")
 st.caption("Desarrollado con ❤️ por tu Asistente de IA.")
+
