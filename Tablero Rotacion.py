@@ -25,7 +25,8 @@ def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xl
         
         # Asegúrate de que 'Costo_Promedio_UND' también se redondee y sea numérico si existe
         if 'Costo_Promedio_UND' in df.columns:
-            df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_PROMEDIO_UND'], errors='coerce').fillna(0).round(2)
+            # Corregido: Usar df['Costo_Promedio_UND'] en lugar de df['Costo_PROMEDIO_UND']
+            df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_Promedio_UND'], errors='coerce').fillna(0).round(2)
         
         df['Almacen'] = df['Almacen'].astype(str) # Asegurar que Almacen sea string para filtros
 
@@ -281,11 +282,14 @@ def convert_df_to_excel_table(df_to_export, sheet_name='Inventario Filtrado', ta
         start_row = 6 # Fila 7 (0-indexed)
         start_col = 0 # Columna A (0-indexed)
 
-        # Escribir el DataFrame al Excel, incluyendo el encabezado, comenzando en start_row, start_col
-        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row, startcol=start_col, index=False, header=True)
+        # Escribir los encabezados de las columnas manualmente
+        for col_num, value in enumerate(df_to_export.columns.values):
+            worksheet.write(start_row, col_num, value)
 
-        # Definir el rango de la tabla
-        # La fila final de la tabla será start_row (para el encabezado) + df_to_export.shape[0] (para los datos)
+        # Escribir los datos del DataFrame, empezando una fila debajo de los encabezados
+        df_to_export.to_excel(writer, sheet_name=sheet_name, startrow=start_row + 1, startcol=start_col, index=False, header=False)
+
+        # Definir el rango de la tabla, incluyendo la fila de encabezado (start_row)
         end_row = start_row + df_to_export.shape[0]
         end_col = start_col + df_to_export.shape[1] - 1 # Ajustar a 0-indexed
 
