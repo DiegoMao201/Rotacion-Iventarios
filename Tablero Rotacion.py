@@ -1,4 +1,5 @@
-import streamlit as st
+# app_inventario_streamlit.py
+iimport streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -287,7 +288,3 @@ st.download_button(
 
 st.markdown("---")
 st.caption("Desarrollado con ❤️ por tu Asistente de IA.")
-
-
-
-
