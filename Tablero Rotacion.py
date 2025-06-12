@@ -18,7 +18,6 @@ st.set_page_config(
 def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xlsx'):
     try:
         df = pd.read_excel(file_path)
-        st.info(f"Columnas encontradas en el archivo: {list(df.columns)}")
         # Asegurar tipos de datos correctos
         # Aplicar max(0, x) al Stock al cargar para asegurar que no haya negativos
         df['Stock'] = df['Stock'].apply(lambda x: max(0, x)).astype(int) 
@@ -30,9 +29,6 @@ def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xl
             df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_Promedio_UND'], errors='coerce').fillna(0).round(2)
         
         df['Almacen'] = df['Almacen'].astype(str) 
-
-        print(f"DEBUG: Valores únicos de 'Almacen' en Streamlit: {sorted(df['Almacen'].unique())}")
-        print(f"DEBUG: ¿'155' está presente en los almacenes? {'155' in df['Almacen'].unique()}")
 
         df['Departamento'] = df['Departamento'].astype(str) 
         return df
