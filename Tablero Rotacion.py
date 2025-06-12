@@ -18,6 +18,7 @@ st.set_page_config(
 def load_data(file_path='Analisis_Inventario_Resultados_con_Reparto_Detallado.xlsx'):
     try:
         df = pd.read_excel(file_path)
+        st.info(f"Columnas encontradas en el archivo: {list(df.columns)}")
         # Asegurar tipos de datos correctos
         # Aplicar max(0, x) al Stock al cargar para asegurar que no haya negativos
         df['Stock'] = df['Stock'].apply(lambda x: max(0, x)).astype(int) 
@@ -50,21 +51,13 @@ COLUMNAS_INTERES = [
     'SKU',
     'Descripcion',
     'Almacen',
-    'Departamento',
     'Stock',
-    'Ventas_60_Dias',
-    'Demanda_Diaria_Promedio', 
-    'Dias_Inventario',
     'Estado_Inventario_Local',
     'Unidades_Traslado_Sugeridas',
     'Sugerencia_Traslado',
-    'Precio_Promocion',
-    'Recomendacion'
+    'PESO_ARTICULO',
+    'PESO_TOTAL'  # Agregada columna calculada de peso total
 ]
-
-if 'Costo_Promedio_UND' in df_analisis.columns and 'Costo_Promedio_UND' not in COLUMNAS_INTERES:
-    COLUMNAS_INTERES.insert(COLUMNAS_INTERES.index('Precio_Promocion'), 'Costo_Promedio_UND')
-
 
 for col in list(COLUMNAS_INTERES): 
     if col not in df_analisis.columns:
