@@ -1,0 +1,347 @@
+---
+title: "Curso basico"
+format: docx
+jupyter: python3
+---
+
+# Usando Quarto para elaborar informes reproducibles con Python 
+En este curso aprenderás a crear gráficos, diseñar tablas interactivas y utilizar herramientas avanzadas para realizar análisis de datos de manera efectiva.  
+
+```{python}
+import pandas as pd
+import numpy as np
+
+def analizar_inventario_con_reparto(nombre_archivo='Rotacion.xlsx', almacen_excluido='155'):
+    """
+    Realiza un análisis de inventario, calcula métricas clave, segmenta productos,
+    identifica oportunidades de reparto y genera un DataFrame con las recomendaciones.
+
+    Args:
+        nombre_archivo (str): Nombre del archivo Excel de entrada.
+        almacen_excluido (str): El código del almacén que, aunque se incluye en el análisis general,
+                                puede tener un rol específico (ej. bodega principal).
+
+    Returns:
+        pd.DataFrame: DataFrame con el análisis completo y las recomendaciones.
+                      Retorna un DataFrame vacío si hay un error al cargar el archivo.
+    """
+    try:
+        df = pd.read_excel(nombre_archivo)
+        print(f"Archivo '{nombre_archivo}' cargado exitosamente.")
+        # --- DEBUG: Mostrar los primeros registros y tipos de datos del archivo de entrada ---
+        print("\n--- DEBUG: Primeras 5 filas del archivo de entrada ---")
+        print(df.head())
+        print("\n--- DEBUG: Tipos de datos del archivo de entrada ---")
+        print(df.dtypes)
+    except FileNotFoundError:
+        print(f"Error: El archivo '{nombre_archivo}' no fue encontrado. Asegúrate de que esté en la misma carpeta que el script.")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Error al cargar el archivo Excel: {e}")
+        return pd.DataFrame()
+
+    # --- NUEVO: Limpiar nombres de columnas (eliminar espacios extra) ---
+    df.columns = df.columns.str.strip()
+    print("\n--- DEBUG: Nombres de columnas después de limpiar espacios ---")
+    print(df.columns.tolist())
+
+
+    # --- Renombrar columnas para facilitar el manejo ---
+    column_mapping = {
+        'Referencia': 'SKU',
+        'Código almacén': 'Almacen',
+        'DEPARTAMENMTO': 'Departamento',
+        'Descripción': 'Descripcion',
+        'UNIDADES_VENDIDAS': 'Ventas_60_Dias',
+        'Stock': 'Stock',
+        'PRECIO DE PROMOCION': 'Precio_Promocion',
+        'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
+        # Posibles variantes de la columna de peso
+        'PESO ARTICULO': 'PESO_ARTICULO',
+        'Peso_Articulo': 'PESO_ARTICULO',
+        'Peso articulo': 'PESO_ARTICULO',
+        'PesoArticulo': 'PESO_ARTICULO',
+        'peso_articulo': 'PESO_ARTICULO',
+        'peso articulo': 'PESO_ARTICULO',
+        'PESO_ARTICULO': 'PESO_ARTICULO'
+    }
+    df.rename(columns=column_mapping, inplace=True)
+    print("\n--- DEBUG: Nombres de columnas después de renombrar ---")
+    print(df.columns.tolist())
+
+    # --- Preprocesamiento de Datos ---
+    # CAMBIO CLAVE: Manejar la coma como separador decimal manualmente para compatibilidad
+    # Convertir a string, reemplazar coma por punto, luego convertir a numérico
+    df['Ventas_60_Dias'] = df['Ventas_60_Dias'].astype(str).str.replace(',', '.', regex=False)
+    df['Ventas_60_Dias'] = pd.to_numeric(df['Ventas_60_Dias'], errors='coerce').fillna(0)
+    
+    df['Stock'] = pd.to_numeric(df['Stock'], errors='coerce').fillna(0)
+    
+    df['Precio_Promocion'] = df['Precio_Promocion'].astype(str).str.replace(',', '.', regex=False)
+    df['Precio_Promocion'] = pd.to_numeric(df['Precio_Promocion'], errors='coerce').fillna(0) 
+    
+    # Asegúrate de que 'Costo_Promedio_UND' exista antes de intentar procesarla
+    if 'Costo_Promedio_UND' in df.columns:
+        df['Costo_Promedio_UND'] = df['Costo_Promedio_UND'].astype(str).str.replace(',', '.', regex=False)
+        df['Costo_Promedio_UND'] = pd.to_numeric(df['Costo_Promedio_UND'], errors='coerce').fillna(0) 
+    else:
+        print("ADVERTENCIA: La columna 'Costo_Promedio_UND' no se encontró después del mapeo. Asegúrate de que 'COSTO_PROMEDIO_UND' exista en tu archivo de entrada.")
+        df['Costo_Promedio_UND'] = 0 # Asignar 0 o NaN si no existe para evitar errores posteriores
+
+    # Agregar columna de peso si existe
+    if 'PESO_ARTICULO' in df.columns:
+        df['PESO_ARTICULO'] = pd.to_numeric(df['PESO_ARTICULO'], errors='coerce').fillna(0)
+        df['PESO_TOTAL'] = 0  # Inicializar, se recalcula después
+    else:
+        df['PESO_ARTICULO'] = 0
+        df['PESO_TOTAL'] = 0
+
+    df['Stock'] = df['Stock'].apply(lambda x: max(0, x)) # Asegurar stock no negativo DESDE EL INICIO
+    df['Almacen'] = df['Almacen'].astype(str)
+    df['Departamento'] = df['Departamento'].astype(str)
+
+    # --- DEBUG: Comprobar la columna 'Almacen' después del preprocesamiento ---
+    print("\n--- DEBUG: Valores únicos en la columna 'Almacen' después de astype(str) ---")
+    print(sorted(df['Almacen'].unique()))
+    print(f"¿'155' está en los almacenes únicos? {'155' in df['Almacen'].unique()}")
+    print(f"¿'439' está en los almacenes únicos? {'439' in df['Almacen'].unique()}")
+
+
+    # --- NO EXCLUIR EL ALMACÉN 155 DE df_analisis ---
+    df_analisis = df.copy() # Ahora df_analisis incluye todos los almacenes
+
+    if df_analisis.empty:
+        print(f"El DataFrame está vacío después del preprocesamiento. No hay datos para analizar.")
+        return pd.DataFrame()
+    print(f"DataFrame para análisis incluye todos los almacenes. Total de filas: {len(df_analisis)}")
+
+    # --- DEBUG: Mostrar datos específicos para los almacenes 155 y 439 ---
+    print("\n--- DEBUG: Datos para el Almacén '155' ---")
+    print(df_analisis[df_analisis['Almacen'] == '155'].head())
+    print(f"Total de filas para Almacén '155': {len(df_analisis[df_analisis['Almacen'] == '155'])}")
+
+    print("\n--- DEBUG: Datos para el Almacén '439' ---")
+    print(df_analisis[df_analisis['Almacen'] == '439'].head())
+    print(f"Total de filas para Almacén '439': {len(df_analisis[df_analisis['Almacen'] == '439'])}")
+
+
+    # --- Cálculo de Métricas Clave ---
+    df_analisis['Demanda_Diaria_Promedio'] = df_analisis['Ventas_60_Dias'] / 60
+    df_analisis['Rotacion_60_Dias'] = df_analisis.apply(
+        lambda row: row['Ventas_60_Dias'] / row['Stock'] if row['Stock'] > 0 else 0,
+        axis=1
+    )
+    df_analisis['Dias_Inventario'] = df_analisis.apply(
+        lambda row: (row['Stock'] / row['Demanda_Diaria_Promedio']) if row['Demanda_Diaria_Promedio'] > 0 else np.inf,
+        axis=1
+    )
+
+    # --- Segmentación de Productos ---
+
+    # Segmentación ABC basada en Ventas Globales del SKU
+    df_ventas_sku_global = df_analisis.groupby('SKU')['Ventas_60_Dias'].sum().reset_index()
+    df_ventas_sku_global = df_ventas_sku_global.sort_values(by='Ventas_60_Dias', ascending=False).reset_index(drop=True)
+    df_ventas_sku_global['Ventas_Acumuladas'] = df_ventas_sku_global['Ventas_60_Dias'].cumsum()
+
+    total_ventas_global = df_ventas_sku_global['Ventas_60_Dias'].sum()
+    if total_ventas_global == 0:
+        df_ventas_sku_global['Porcentaje_Ventas_Acumuladas'] = 0
+    else:
+        df_ventas_sku_global['Porcentaje_Ventas_Acumuladas'] = df_ventas_sku_global['Ventas_Acumuladas'] / total_ventas_global
+
+    def segmentar_abc(porcentaje):
+        if porcentaje <= 0.80:
+            return 'A'
+        elif porcentaje <= 0.95:
+            return 'B'
+        else:
+            return 'C'
+
+    df_ventas_sku_global['Segmento_ABC'] = df_ventas_sku_global['Porcentaje_Ventas_Acumuladas'].apply(segmentar_abc)
+    df_analisis = pd.merge(df_analisis, df_ventas_sku_global[['SKU', 'Segmento_ABC']], on='SKU', how='left')
+
+    # Segmentación por Estado de Inventario Local (por SKU en cada almacén)
+    def segmentar_estado_inventario(row):
+        # 1. Quiebre de Stock (Stock 0 con demanda)
+        if row['Stock'] == 0 and row['Demanda_Diaria_Promedio'] > 0:
+            return 'Quiebre de Stock'
+        # 2. Baja Rotación / Obsoleto (Stock > 0 sin demanda)
+        elif row['Demanda_Diaria_Promedio'] == 0 and row['Stock'] > 0:
+            return 'Baja Rotación / Obsoleto'
+        # 3. Bajo Stock / Reordenar (Stock bajo con demanda)
+        elif row['Dias_Inventario'] < 15 and row['Demanda_Diaria_Promedio'] > 0:
+            return 'Bajo Stock / Reordenar'
+        # 4. Excedente (Stock > 0 y Dias_Inventario > 45)
+        elif row['Dias_Inventario'] > 45 and row['Stock'] > 0:
+            return 'Excedente'
+        else:
+            return 'Normal'
+
+    df_analisis['Estado_Inventario_Local'] = df_analisis.apply(segmentar_estado_inventario, axis=1)
+
+    # --- Inicializar las nuevas columnas ANTES de la lógica de llenado ---
+    df_analisis['Recomendacion'] = ''
+    df_analisis['Sugerencia_Traslado'] = ''
+    df_analisis['Unidades_Traslado_Sugeridas'] = 0 # Nueva columna inicializada a 0
+
+
+    # --- Lógica de Reparto de Inventario para Recomendaciones Detalladas ---
+    print("\n--- Iniciando lógica de sugerencia de traslados ---")
+    for sku in df_analisis['SKU'].unique():
+        df_sku = df_analisis[df_analisis['SKU'] == sku].copy()
+
+        # Identificar almacenes con necesidad (Bajo Stock o Quiebre)
+        almacenes_necesidad = df_sku[(df_sku['Estado_Inventario_Local'].isin(['Bajo Stock / Reordenar', 'Quiebre de Stock'])) & (df_sku['Demanda_Diaria_Promedio'] > 0)]
+        almacenes_necesidad = almacenes_necesidad.sort_values(by='Dias_Inventario', ascending=True)
+
+        # Identificar almacenes con excedente
+        almacenes_excedente = df_sku[
+            (df_sku['Estado_Inventario_Local'] == 'Excedente') | 
+            (df_sku['Estado_Inventario_Local'] == 'Baja Rotación / Obsoleto') 
+        ]
+        almacenes_excedente = almacenes_excedente[almacenes_excedente['Stock'] > 0] 
+        almacenes_excedente = almacenes_excedente.sort_values(by='Dias_Inventario', ascending=False)
+
+        for idx_necesidad, row_necesidad in almacenes_necesidad.iterrows():
+            almacen_destino = row_necesidad['Almacen']
+            stock_actual_destino = row_necesidad['Stock']
+            demanda_diaria_destino = row_necesidad['Demanda_Diaria_Promedio']
+
+            stock_objetivo_necesidad = demanda_diaria_destino * 30 
+            cantidad_necesaria = max(0, stock_objetivo_necesidad - stock_actual_destino)
+            total_unidades_sugeridas_para_destino = 0 
+
+            if cantidad_necesaria > 0:
+                origenes_sugeridos_text = []
+                temp_cantidad_necesaria = cantidad_necesaria 
+
+                almacenes_excedente_para_traslado = almacenes_excedente[almacenes_excedente['Almacen'] != almacen_destino]
+
+                for idx_excedente, row_excedente in almacenes_excedente_para_traslado.iterrows():
+                    almacen_origen = row_excedente['Almacen']
+                    stock_actual_origen = row_excedente['Stock']
+
+                    if stock_actual_origen > 0:
+                        cantidad_posible_a_mover = min(temp_cantidad_necesaria, stock_actual_origen)
+
+                        if cantidad_posible_a_mover > 0:
+                            origenes_sugeridos_text.append(f"Almacén {almacen_origen} ({int(cantidad_posible_a_mover)} unid.)") 
+                            total_unidades_sugeridas_para_destino += cantidad_posible_a_mover
+                            temp_cantidad_necesaria -= cantidad_posible_a_mover
+                            
+                            # --- ELIMINADO: Ya no se reduce el stock original en el DataFrame ---
+                            # df_analisis.loc[idx_excedente, 'Stock'] -= cantidad_posible_a_mover
+                            # df_analisis.loc[idx_excedente, 'Stock'] = max(0, df_analisis.loc[idx_excedente, 'Stock']) 
+
+                            if temp_cantidad_necesaria <= 0:
+                                break
+
+                if origenes_sugeridos_text:
+                    if len(origenes_sugeridos_text) == 1:
+                        df_analisis.loc[idx_necesidad, 'Sugerencia_Traslado'] = f"Desde {origenes_sugeridos_text[0]}."
+                    else:
+                        df_analisis.loc[idx_necesidad, 'Sugerencia_Traslado'] = f"Desde: {', '.join(origenes_sugeridos_text)}."
+                    df_analisis.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(total_unidades_sugeridas_para_destino)
+                else:
+                    df_analisis.loc[idx_necesidad, 'Sugerencia_Traslado'] = "No se identificaron almacenes con excedente disponible para este SKU."
+                    df_analisis.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = 0
+
+    print("--- Lógica de sugerencia de traslados finalizada. ---")
+
+    # Calcular PESO_TOTAL como Unidades_Traslado_Sugeridas * PESO_ARTICULO
+    if 'PESO_ARTICULO' in df_analisis.columns and 'Unidades_Traslado_Sugeridas' in df_analisis.columns:
+        df_analisis['PESO_TOTAL'] = df_analisis['Unidades_Traslado_Sugeridas'] * df_analisis['PESO_ARTICULO']
+    else:
+        df_analisis['PESO_TOTAL'] = 0
+
+    # --- Consejos Generales basados en el Estado_Inventario_Local ---
+    df_analisis.loc[df_analisis['Estado_Inventario_Local'] == 'Baja Rotación / Obsoleto', 'Recomendacion'] += 'Considerar liquidación o descontinuación si no hay demanda global. '
+    df_analisis.loc[df_analisis['Estado_Inventario_Local'] == 'Excedente', 'Recomendacion'] += 'Alto excedente. Evaluar promociones agresivas o traslados. '
+    df_analisis.loc[df_analisis['Estado_Inventario_Local'] == 'Bajo Stock / Reordenar', 'Recomendacion'] += 'Revisar urgencia de reabastecimiento con proveedor. '
+    df_analisis.loc[df_analisis['Estado_Inventario_Local'] == 'Quiebre de Stock', 'Recomendacion'] += '¡Prioridad máxima! Contactar proveedor y/o otros almacenes para reabastecimiento. '
+    df_analisis.loc[df_analisis['Estado_Inventario_Local'] == 'Normal', 'Recomendacion'] += 'Mantener monitoreo constante. '
+
+    # Consejos adicionales basados en Segmento ABC y rotación
+    df_analisis.loc[(df_analisis['Segmento_ABC'] == 'C') & (df_analisis['Rotacion_60_Dias'] < 0.1) & (df_analisis['Stock'] > 0), 'Recomendacion'] += 'Producto "C" de muy baja rotación: riesgo de obsolescencia. '
+    df_analisis.loc[(df_analisis['Segmento_ABC'] == 'A') & (df_analisis['Dias_Inventario'] > 45) & (df_analisis['Stock'] > 0), 'Recomendacion'] += 'Producto "A" con stock excesivo: analizar causas para evitar sobreproducción/compra. '
+    df_analisis.loc[(df_analisis['Segmento_ABC'] == 'A') & (df_analisis['Dias_Inventario'] < 30) & (df_analisis['Demanda_Diaria_Promedio'] > 0), 'Recomendacion'] += 'Producto "A" crítico: asegurar stock de seguridad para evitar quiebres. '
+
+    # Establecer mensajes por defecto si las columnas quedaron vacías o incompletas
+    df_analisis.loc[df_analisis['Recomendacion'].astype(str).str.strip() == '', 'Recomendacion'] = 'Estado óptimo o no aplica recomendación específica.'
+    df_analisis.loc[df_analisis['Sugerencia_Traslado'].astype(str).str.strip() == '', 'Sugerencia_Traslado'] = 'No aplica traslado.'
+    df_analisis.loc[df_analisis['Unidades_Traslado_Sugeridas'] == 0, 'Sugerencia_Traslado'] = 'No aplica traslado.'
+
+    # --- MANTENIDO: Asegurar que el Stock sea no negativo antes de la exportación final (doble verificación) ---
+    df_analisis['Stock'] = df_analisis['Stock'].apply(lambda x: max(0, x))
+
+
+    # --- Debugging: Verificar columnas antes de la exportación ---
+    print("\nColumnas del DataFrame final antes de exportar:")
+    print(df_analisis.columns.tolist())
+    print("\nPrimeras 15 filas de las columnas de sugerencia/recomendación:")
+    print(df_analisis[['SKU', 'Almacen', 'Stock', 'Ventas_60_Dias', 'Estado_Inventario_Local', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Recomendacion', 'Costo_Promedio_UND']].head(15))
+    print("\nConteo de sugerencias de traslado activas (unidades > 0):", df_analisis[df_analisis['Unidades_Traslado_Sugeridas'] > 0].shape[0])
+    print("\nConteo de SKUs en Quiebre de Stock:", df_analisis[df_analisis['Estado_Inventario_Local'] == 'Quiebre de Stock'].shape[0])
+    print("\nConteo de SKUs en Excedente:", df_analisis[df_analisis['Estado_Inventario_Local'] == 'Excedente'].shape[0])
+    print("\nConteo de SKUs en Lento Movimiento (ya no es una categoría principal):", df_analisis[df_analisis['Estado_Inventario_Local'] == 'Lento Movimiento'].shape[0])
+    print("\nConteo de SKUs en Baja Rotación / Obsoleto:", df_analisis[df_analisis['Estado_Inventario_Local'] == 'Baja Rotación / Obsoleto'].shape[0])
+
+
+    # --- Preparar DataFrame para exportación ---
+    columnas_exportar = [
+        'SKU',
+        'Almacen',
+        'Departamento',
+        'Descripcion',
+        'Ventas_60_Dias',
+        'Stock',
+        'Demanda_Diaria_Promedio',
+        'Rotacion_60_Dias',
+        'Dias_Inventario',
+        'Segmento_ABC',
+        'Estado_Inventario_Local',
+        'Precio_Promocion',
+        'Costo_Promedio_UND',
+        'Unidades_Traslado_Sugeridas',
+        'Sugerencia_Traslado',
+        'Recomendacion',
+        'PESO_ARTICULO',
+        'PESO_TOTAL'
+    ]
+    columnas_exportar = [col for col in columnas_exportar if col in df_analisis.columns]
+    df_final = df_analisis[columnas_exportar]
+
+    # Opcional: Ordenar el DataFrame para una mejor visualización en el Excel
+    df_final = df_final.sort_values(by=['Departamento', 'SKU', 'Almacen', 'Estado_Inventario_Local', 'Dias_Inventario'], ascending=[True, True, True, True, True])
+
+    print("Análisis de inventario completado.")
+    return df_final
+
+def generar_excel_analisis(df_analisis, nombre_salida='Analisis_Inventario_Resultados.xlsx'):
+    """
+    Guarda el DataFrame de análisis en un archivo Excel.
+    """
+    if not df_analisis.empty:
+        try:
+            with pd.ExcelWriter(nombre_salida, engine='openpyxl') as writer:
+                df_analisis.to_excel(writer, sheet_name='Analisis Inventario', index=False)
+            print(f"Análisis de inventario guardado en '{nombre_salida}' exitosamente.")
+        except Exception as e:
+            print(f"Error al guardar el archivo Excel: {e}")
+    else:
+        print("El DataFrame de análisis está vacío, no se generó el archivo Excel.")
+
+# --- Ejecución principal del script ---
+if __name__ == "__main__":
+    archivo_excel_entrada = 'Rotacion.xlsx'
+    almacen_a_excluir = '155' 
+
+    df_resultados = analizar_inventario_con_reparto(archivo_excel_entrada, almacen_a_excluir)
+
+    if not df_resultados.empty:
+        generar_excel_analisis(df_resultados, 'Analisis_Inventario_Resultados_con_Reparto_Detallado.xlsx')
+    else:
+        print("No se pudo generar el archivo de resultados debido a un error previo.")
+
+
+`````
