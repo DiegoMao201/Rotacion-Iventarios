@@ -3,3 +3,5 @@ pandas
 plotly
 openpyxl
 xlsxwriter
+dropbox
+pdf2
