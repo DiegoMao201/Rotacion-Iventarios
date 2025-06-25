@@ -115,14 +115,19 @@ def analizar_inventario_completo(df_crudo, almacen_principal='155'):
     total_ventas = ventas_sku.sum()
     porcentaje_acumulado = ventas_acumuladas / total_ventas if total_ventas > 0 else 0
     
-    def segmentar_abc(sku):
-        if total_ventas == 0: return 'C'
-        p = porcentaje_acumulado.get(sku, 1)
+    # Creamos un mapeo de SKU a su porcentaje acumulado
+    sku_to_percent = df.groupby('SKU')['Ventas_60_Dias'].sum()
+    if total_ventas > 0:
+        sku_to_percent = sku_to_percent.sort_values(ascending=False).cumsum() / total_ventas
+    else:
+        sku_to_percent = pd.Series(0, index=sku_to_percent.index)
+
+    def segmentar_abc(p):
         if p <= 0.8: return 'A'
         if p <= 0.95: return 'B'
         return 'C'
-    
-    df['Segmento_ABC'] = df['SKU'].map(df.groupby('SKU')['Ventas_60_Dias'].sum()).map(segmentar_abc)
+
+    df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc)
 
     # --- Segmentación por Estado de Inventario Local ---
     def segmentar_estado(row):
@@ -204,131 +209,124 @@ def convert_df_to_excel(df):
 st.title("📦 Tablero de Control y Optimización de Inventario")
 st.markdown("Análisis automatizado a partir de los datos más recientes en Dropbox.")
 
-# Cargar y analizar los datos
+# Cargar los datos crudos
 df_crudo = cargar_datos_desde_dropbox()
 
-if df_crudo is None or df_crudo.empty:
-    st.error("No se pudieron cargar los datos de Dropbox. El tablero no puede continuar.")
-    st.stop()
+# --- ESTRUCTURA PRINCIPAL DE LA APLICACIÓN ---
+# Se verifica si los datos se cargaron correctamente antes de intentar mostrar el tablero.
+if df_crudo is not None and not df_crudo.empty:
 
-# --- BARRA LATERAL CON FILTROS Y OPCIONES ---
-st.sidebar.header("⚙️ Opciones de Análisis y Filtrado")
+    # --- BARRA LATERAL CON FILTROS Y OPCIONES ---
+    st.sidebar.header("⚙️ Opciones de Análisis y Filtrado")
+    
+    almacen_principal_input = st.sidebar.text_input(
+        "Código del Almacén Principal/Bodega:",
+        value='155',
+        help="Este almacén se considera como la fuente principal en las sugerencias de reparto, pero no se excluye del análisis."
+    )
 
-almacen_principal_input = st.sidebar.text_input(
-    "Código del Almacén Principal/Bodega:",
-    value='155',
-    help="Este almacén se considera como la fuente principal en las sugerencias de reparto, pero no se excluye del análisis."
-)
+    # Ejecutar el análisis completo con el DataFrame cargado
+    df_analisis = analizar_inventario_completo(df_crudo, almacen_principal_input)
 
-# Ejecutar el análisis completo con el DataFrame cargado
-df_analisis = analizar_inventario_completo(df_crudo, almacen_principal_input)
+    # Filtros basados en el DataFrame analizado
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Filtros del Tablero")
 
-# Filtros basados en el DataFrame analizado
-st.sidebar.markdown("---")
-st.sidebar.subheader("Filtros del Tablero")
+    selected_almacenes = st.sidebar.multiselect("Almacén(es):", sorted(df_analisis['Almacen'].unique()))
+    selected_departamentos = st.sidebar.multiselect("Departamento(s):", sorted(df_analisis['Departamento'].unique()))
+    search_sku = st.sidebar.text_input("Buscar por SKU (Referencia):")
+    selected_estados = st.sidebar.multiselect("Estado de Inventario:", sorted(df_analisis['Estado_Inventario_Local'].unique()))
 
-# Opciones de filtrado (tu lógica original)
-selected_almacenes = st.sidebar.multiselect("Almacén(es):", sorted(df_analisis['Almacen'].unique()))
-selected_departamentos = st.sidebar.multiselect("Departamento(s):", sorted(df_analisis['Departamento'].unique()))
-search_sku = st.sidebar.text_input("Buscar por SKU (Referencia):")
-selected_estados = st.sidebar.multiselect("Estado de Inventario:", sorted(df_analisis['Estado_Inventario_Local'].unique()))
+    # Aplicar filtros
+    df_filtered = df_analisis.copy()
+    if selected_almacenes:
+        df_filtered = df_filtered[df_filtered['Almacen'].isin(selected_almacenes)]
+    if selected_departamentos:
+        df_filtered = df_filtered[df_filtered['Departamento'].isin(selected_departamentos)]
+    if search_sku:
+        df_filtered = df_filtered[df_filtered['SKU'].str.contains(search_sku, case=False, na=False)]
+    if selected_estados:
+        df_filtered = df_filtered[df_filtered['Estado_Inventario_Local'].isin(selected_estados)]
 
-# Aplicar filtros
-df_filtered = df_analisis.copy()
-if selected_almacenes:
-    df_filtered = df_filtered[df_filtered['Almacen'].isin(selected_almacenes)]
-if selected_departamentos:
-    df_filtered = df_filtered[df_filtered['Departamento'].isin(selected_departamentos)]
-if search_sku:
-    df_filtered = df_filtered[df_filtered['SKU'].str.contains(search_sku, case=False, na=False)]
-if selected_estados:
-    df_filtered = df_filtered[df_filtered['Estado_Inventario_Local'].isin(selected_estados)]
+    # --- CUERPO PRINCIPAL DEL TABLERO ---
+    
+    # Se muestra el tablero completo SOLO SI hay datos después de filtrar.
+    if not df_filtered.empty:
+        # KPIs
+        st.header("📊 Métricas Clave (Inventario Filtrado)")
+        costo_col = 'Costo_Promedio_UND' if 'Costo_Promedio_UND' in df_filtered.columns and df_filtered['Costo_Promedio_UND'].sum() > 0 else 'Precio_Promocion'
+        total_inventario_valor = (df_filtered['Stock'] * df_filtered[costo_col]).sum()
+        quiebre_count = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock']['SKU'].nunique()
+        unidades_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]['Stock'].sum()
+        unidades_sugeridas_traslado = df_filtered['Unidades_Traslado_Sugeridas'].sum()
 
-if df_filtered.empty:
-    st.warning("No se encontraron datos con los filtros seleccionados. Intenta con otros filtros.")
-    st.stop()
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Valor Total Inventario", f"${total_inventario_valor:,.2f}", help=f"Calculado con la columna '{costo_col}'")
+        col2.metric("SKUs en Quiebre de Stock", f"{quiebre_count:,.0f}")
+        col3.metric("Unidades en Excedente", f"{unidades_excedente:,.0f}")
+        col4.metric("Unidades para Traslado", f"{unidades_sugeridas_traslado:,.0f}")
+        st.markdown("---")
 
-# --- CUERPO PRINCIPAL DEL TABLERO ---
+        # Gráficos
+        st.header("📈 Visualización del Inventario")
+        col_graph1, col_graph2 = st.columns(2)
+        with col_graph1:
+            estado_counts = df_filtered['Estado_Inventario_Local'].value_counts()
+            fig_estado = px.pie(estado_counts, values=estado_counts.values, names=estado_counts.index,
+                                title='Distribución de SKUs por Estado', hole=0.3)
+            fig_estado.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#FFFFFF', width=2)))
+            st.plotly_chart(fig_estado, use_container_width=True)
+        with col_graph2:
+            df_rotacion_dept = df_filtered[df_filtered['Stock'] > 0].groupby('Departamento')['Rotacion_60_Dias'].mean().nlargest(15)
+            fig_rotacion = px.bar(df_rotacion_dept, y=df_rotacion_dept.index, x='Rotacion_60_Dias',
+                                  title='Top 15 Departamentos por Rotación Promedio',
+                                  labels={'Rotacion_60_Dias': 'Rotación (Ventas/Stock)', 'index': 'Departamento'},
+                                  orientation='h')
+            st.plotly_chart(fig_rotacion, use_container_width=True)
+        st.markdown("---")
 
-# KPIs (tu lógica original)
-st.header("📊 Métricas Clave (Inventario Filtrado)")
+        # Tablas de detalle
+        st.header("📋 Tablas de Acción Prioritaria")
+        col_table1, col_table2 = st.columns(2)
+        with col_table1:
+            st.subheader("🚨 Oportunidades de Reparto (Quiebre/Bajo Stock)")
+            df_criticos = df_filtered[df_filtered['Unidades_Traslado_Sugeridas'] > 0].sort_values(by='Dias_Inventario')
+            if not df_criticos.empty:
+                st.dataframe(df_criticos[['SKU', 'Almacen', 'Stock', 'Estado_Inventario_Local', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado']].head(20),
+                               hide_index=True, use_container_width=True, height=300)
+            else:
+                st.info("No se encontraron oportunidades de reparto con los filtros actuales.")
+        with col_table2:
+            st.subheader("🟢 Mayor Excedente / Baja Rotación")
+            df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])].sort_values(by='Dias_Inventario', ascending=False)
+            if not df_excedente.empty:
+                st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Segmento_ABC', 'Recomendacion']].head(20),
+                               hide_index=True, use_container_width=True, height=300)
+            else:
+                st.info("No hay SKUs en excedente o baja rotación con los filtros actuales.")
+        st.markdown("---")
 
-costo_col = 'Costo_Promedio_UND' if 'Costo_Promedio_UND' in df_filtered.columns and df_filtered['Costo_Promedio_UND'].sum() > 0 else 'Precio_Promocion'
-total_inventario_valor = (df_filtered['Stock'] * df_filtered[costo_col]).sum()
-quiebre_count = df_filtered[df_filtered['Estado_Inventario_Local'] == 'Quiebre de Stock']['SKU'].nunique()
-unidades_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]['Stock'].sum()
-unidades_sugeridas_traslado = df_filtered['Unidades_Traslado_Sugeridas'].sum()
+        # Tabla de datos completa y botón de descarga
+        st.header("📦 Detalle Completo del Inventario (Filtrado)")
+        columnas_mostrar = [
+            'SKU', 'Descripcion', 'Almacen', 'Stock', 'Estado_Inventario_Local',
+            'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Recomendacion',
+            'Ventas_60_Dias', 'Dias_Inventario', 'Segmento_ABC', 'PESO_TOTAL'
+        ]
+        columnas_existentes = [col for col in columnas_mostrar if col in df_filtered.columns]
+        st.dataframe(df_filtered[columnas_existentes], hide_index=True, use_container_width=True, height=500)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Valor Total Inventario", f"${total_inventario_valor:,.2f}", help=f"Calculado con la columna '{costo_col}'")
-col2.metric("SKUs en Quiebre de Stock", f"{quiebre_count:,.0f}")
-col3.metric("Unidades en Excedente", f"{unidades_excedente:,.0f}")
-col4.metric("Unidades para Traslado", f"{unidades_sugeridas_traslado:,.0f}")
-st.markdown("---")
-
-# Gráficos (tu lógica original)
-st.header("📈 Visualización del Inventario")
-col_graph1, col_graph2 = st.columns(2)
-
-with col_graph1:
-    estado_counts = df_filtered['Estado_Inventario_Local'].value_counts()
-    fig_estado = px.pie(estado_counts, values=estado_counts.values, names=estado_counts.index,
-                        title='Distribución de SKUs por Estado', hole=0.3)
-    fig_estado.update_traces(textposition='inside', textinfo='percent+label', marker=dict(line=dict(color='#FFFFFF', width=2)))
-    st.plotly_chart(fig_estado, use_container_width=True)
-
-with col_graph2:
-    df_rotacion_dept = df_filtered[df_filtered['Stock'] > 0].groupby('Departamento')['Rotacion_60_Dias'].mean().nlargest(15)
-    fig_rotacion = px.bar(df_rotacion_dept, y=df_rotacion_dept.index, x='Rotacion_60_Dias',
-                          title='Top 15 Departamentos por Rotación Promedio',
-                          labels={'Rotacion_60_Dias': 'Rotación (Ventas/Stock)', 'index': 'Departamento'},
-                          orientation='h')
-    st.plotly_chart(fig_rotacion, use_container_width=True)
-
-st.markdown("---")
-
-# Tablas de detalle (tu lógica original)
-st.header("📋 Tablas de Acción Prioritaria")
-col_table1, col_table2 = st.columns(2)
-
-with col_table1:
-    st.subheader("🚨 Oportunidades de Reparto (Quiebre/Bajo Stock)")
-    df_criticos = df_filtered[df_filtered['Unidades_Traslado_Sugeridas'] > 0].sort_values(by='Dias_Inventario')
-    if not df_criticos.empty:
-        st.dataframe(df_criticos[['SKU', 'Almacen', 'Stock', 'Estado_Inventario_Local', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado']].head(20),
-                       hide_index=True, use_container_width=True, height=300)
+        excel_data = convert_df_to_excel(df_filtered[columnas_existentes])
+        st.download_button(
+            label="📥 Descargar Datos Filtrados a Excel",
+            data=excel_data,
+            file_name=f"analisis_inventario_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            help="Descarga la tabla de datos actual con todos los filtros aplicados."
+        )
     else:
-        st.info("No se encontraron oportunidades de reparto con los filtros actuales.")
+        # Mensaje que se muestra si los filtros no arrojan resultados.
+        st.warning("No se encontraron datos con los filtros seleccionados. Por favor, ajusta tus filtros en la barra lateral.")
 
-with col_table2:
-    st.subheader("🟢 Mayor Excedente / Baja Rotación")
-    df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])].sort_values(by='Dias_Inventario', ascending=False)
-    if not df_excedente.empty:
-        st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Segmento_ABC', 'Recomendacion']].head(20),
-                       hide_index=True, use_container_width=True, height=300)
-    else:
-        st.info("No hay SKUs en excedente o baja rotación con los filtros actuales.")
-
-st.markdown("---")
-
-# Tabla de datos completa y botón de descarga
-st.header("📦 Detalle Completo del Inventario (Filtrado)")
-
-columnas_mostrar = [
-    'SKU', 'Descripcion', 'Almacen', 'Stock', 'Estado_Inventario_Local',
-    'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Recomendacion',
-    'Ventas_60_Dias', 'Dias_Inventario', 'Segmento_ABC', 'PESO_TOTAL'
-]
-columnas_existentes = [col for col in columnas_mostrar if col in df_filtered.columns]
-
-st.dataframe(df_filtered[columnas_existentes], hide_index=True, use_container_width=True, height=500)
-
-# Botón de descarga (tu lógica original mejorada)
-excel_data = convert_df_to_excel(df_filtered[columnas_existentes])
-st.download_button(
-    label="📥 Descargar Datos Filtrados a Excel",
-    data=excel_data,
-    file_name=f"analisis_inventario_{pd.Timestamp.now().strftime('%Y%m%d')}.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    help="Descarga la tabla de datos actual con todos los filtros aplicados."
-)
+# El script termina de forma natural si df_crudo es None,
+# mostrando el mensaje de error de la función cargar_datos_desde_dropbox().
