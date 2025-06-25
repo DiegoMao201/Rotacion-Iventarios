@@ -28,7 +28,9 @@ def cargar_datos_desde_dropbox():
     Se conecta a Dropbox usando credenciales de st.secrets, descarga el archivo CSV
     de inventario y lo carga en un DataFrame de Pandas.
     """
-    st.info("Conectando a Dropbox para obtener los datos más recientes...")
+    # Usamos un placeholder para el mensaje de carga
+    info_message = st.empty()
+    info_message.info("Conectando a Dropbox para obtener los datos más recientes...")
     try:
         # Lee las credenciales y la ruta del archivo desde secrets.toml
         dbx_creds = st.secrets["dropbox"]
@@ -41,36 +43,41 @@ def cargar_datos_desde_dropbox():
         ) as dbx:
             metadata, res = dbx.files_download(path=dbx_creds["file_path"])
             
-            # Lee el contenido del archivo CSV directamente en pandas
-            # NOTA: Si tu CSV usa ';' como separador, cambia a: pd.read_csv(..., sep=';')
             with io.BytesIO(res.content) as stream:
-                df_crudo = pd.read_csv(stream)
+                # *** CORRECCIÓN CLAVE ***
+                # Se especifica la codificación 'latin1' para evitar errores con caracteres especiales (ej. tildes, ñ)
+                # que son comunes en archivos generados desde sistemas en español.
+                df_crudo = pd.read_csv(stream, encoding='latin1')
             
+            # Limpiamos el mensaje de "cargando" y mostramos éxito
+            info_message.empty()
             st.success("¡Datos cargados exitosamente desde Dropbox!")
             return df_crudo
 
     except dropbox.exceptions.AuthError as err:
-        st.error(f"Error de autenticación con Dropbox: {err}. Verifica tus credenciales en los 'secrets' de Streamlit.")
+        info_message.error(f"Error de autenticación con Dropbox: {err}. Verifica tus credenciales en los 'secrets' de Streamlit.")
         return None
     except dropbox.exceptions.ApiError as err:
-        st.error(f"Error de API con Dropbox: {err}. Asegúrate que la ruta del archivo en tus 'secrets' sea correcta: '{st.secrets.get('dropbox', {}).get('file_path', 'No configurado')}'.")
+        info_message.error(f"Error de API con Dropbox: {err}. Asegúrate que la ruta del archivo en tus 'secrets' sea correcta: '{st.secrets.get('dropbox', {}).get('file_path', 'No configurado')}'.")
         return None
     except Exception as e:
-        st.error(f"Ocurrió un error inesperado al cargar los datos: {e}")
+        info_message.error(f"Ocurrió un error inesperado al cargar los datos: {e}")
         return None
 
 # --- 3. LÓGICA DE ANÁLISIS DE INVENTARIO (ADAPTADA DE TU .QMD) ---
 # Esta es la función principal que contiene toda tu lógica de negocio.
 # También se cachea para que el análisis pesado se haga solo una vez por carga de datos.
 @st.cache_data
-def analizar_inventario_completo(df_crudo, almacen_principal='155'):
+def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
     """
     Aplica toda la lógica de análisis del QMD a un DataFrame.
+    El guion bajo en _df_crudo es una convención para indicar que el DataFrame
+    no debe ser modificado directamente.
     """
-    if df_crudo is None or df_crudo.empty:
+    if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
         
-    df = df_crudo.copy()
+    df = _df_crudo.copy()
 
     # Limpieza y renombrado de columnas (tu lógica original)
     df.columns = df.columns.str.strip()
@@ -110,24 +117,21 @@ def analizar_inventario_completo(df_crudo, almacen_principal='155'):
     df['Dias_Inventario'] = df.apply(lambda r: (r['Stock'] / r['Demanda_Diaria_Promedio']) if r['Demanda_Diaria_Promedio'] > 0 else np.inf, axis=1)
     
     # --- Segmentación ABC ---
-    ventas_sku = df.groupby('SKU')['Ventas_60_Dias'].sum().sort_values(ascending=False)
-    ventas_acumuladas = ventas_sku.cumsum()
+    ventas_sku = df.groupby('SKU')['Ventas_60_Dias'].sum()
     total_ventas = ventas_sku.sum()
-    porcentaje_acumulado = ventas_acumuladas / total_ventas if total_ventas > 0 else 0
     
     # Creamos un mapeo de SKU a su porcentaje acumulado
-    sku_to_percent = df.groupby('SKU')['Ventas_60_Dias'].sum()
     if total_ventas > 0:
-        sku_to_percent = sku_to_percent.sort_values(ascending=False).cumsum() / total_ventas
+        sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas
     else:
-        sku_to_percent = pd.Series(0, index=sku_to_percent.index)
+        sku_to_percent = pd.Series(0, index=ventas_sku.index)
 
     def segmentar_abc(p):
         if p <= 0.8: return 'A'
         if p <= 0.95: return 'B'
         return 'C'
 
-    df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc)
+    df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc).fillna('C')
 
     # --- Segmentación por Estado de Inventario Local ---
     def segmentar_estado(row):
@@ -142,18 +146,20 @@ def analizar_inventario_completo(df_crudo, almacen_principal='155'):
     df['Sugerencia_Traslado'] = 'No aplica traslado.'
     df['Unidades_Traslado_Sugeridas'] = 0
     
-    df_con_stock = df[df['Stock'] > 0].copy()
+    # Trabajamos sobre una copia para no afectar el df original durante la iteración
+    df_reparto = df.copy()
 
-    for sku in df['SKU'].unique():
-        necesidad_mask = (df['SKU'] == sku) & (df['Estado_Inventario_Local'].isin(['Quiebre de Stock', 'Bajo Stock / Reordenar']))
+    for sku in df_reparto['SKU'].unique():
+        necesidad_mask = (df_reparto['SKU'] == sku) & (df_reparto['Estado_Inventario_Local'].isin(['Quiebre de Stock', 'Bajo Stock / Reordenar']))
         if not necesidad_mask.any():
             continue
 
-        excedente_df = df_con_stock[(df_con_stock['SKU'] == sku) & (df_con_stock['Almacen'] != almacen_principal)].copy()
+        # Almacenes con excedente real para este SKU
+        excedente_df = df_reparto[(df_reparto['SKU'] == sku) & (df_reparto['Stock'] > 0) & (df_reparto['Almacen'] != almacen_principal)].copy()
         
-        for idx_necesidad in df[necesidad_mask].index:
-            demanda_diaria_destino = df.loc[idx_necesidad, 'Demanda_Diaria_Promedio']
-            stock_actual_destino = df.loc[idx_necesidad, 'Stock']
+        for idx_necesidad in df_reparto[necesidad_mask].index:
+            demanda_diaria_destino = df_reparto.loc[idx_necesidad, 'Demanda_Diaria_Promedio']
+            stock_actual_destino = df_reparto.loc[idx_necesidad, 'Stock']
             stock_objetivo = demanda_diaria_destino * 30
             cantidad_necesaria = max(0, stock_objetivo - stock_actual_destino)
             
@@ -163,17 +169,22 @@ def analizar_inventario_completo(df_crudo, almacen_principal='155'):
             origenes_sugeridos = []
             unidades_acumuladas = 0
 
+            # Iterar sobre los almacenes con excedente para este SKU
             for idx_excedente, row_excedente in excedente_df.iterrows():
                 if row_excedente['Stock'] > 0:
                     cantidad_a_mover = min(cantidad_necesaria, row_excedente['Stock'])
                     origenes_sugeridos.append(f"Almacén {row_excedente['Almacen']} ({int(cantidad_a_mover)} u.)")
+                    
+                    # Actualizar el stock disponible en la copia temporal para que no se ofrezca dos veces
                     excedente_df.loc[idx_excedente, 'Stock'] -= cantidad_a_mover
+                    
                     cantidad_necesaria -= cantidad_a_mover
                     unidades_acumuladas += cantidad_a_mover
                     if cantidad_necesaria <= 0:
                         break
             
             if origenes_sugeridos:
+                # Asignar los resultados al DataFrame original
                 df.loc[idx_necesidad, 'Sugerencia_Traslado'] = f"Desde: {', '.join(origenes_sugeridos)}"
                 df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(unidades_acumuladas)
     
@@ -195,11 +206,10 @@ def analizar_inventario_completo(df_crudo, almacen_principal='155'):
 
 # --- FUNCIÓN AUXILIAR PARA DESCARGA DE EXCEL ---
 @st.cache_data
-def convert_df_to_excel(df):
+def convert_df_to_excel(_df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Análisis Inventario')
-        # Aquí se podría añadir formato adicional si se desea
+        _df.to_excel(writer, index=False, sheet_name='Análisis Inventario')
     processed_data = output.getvalue()
     return processed_data
 
@@ -222,7 +232,7 @@ if df_crudo is not None and not df_crudo.empty:
     almacen_principal_input = st.sidebar.text_input(
         "Código del Almacén Principal/Bodega:",
         value='155',
-        help="Este almacén se considera como la fuente principal en las sugerencias de reparto, pero no se excluye del análisis."
+        help="Este almacén se considera como la fuente principal en las sugerencias de reparto."
     )
 
     # Ejecutar el análisis completo con el DataFrame cargado
@@ -232,10 +242,15 @@ if df_crudo is not None and not df_crudo.empty:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Filtros del Tablero")
 
-    selected_almacenes = st.sidebar.multiselect("Almacén(es):", sorted(df_analisis['Almacen'].unique()))
-    selected_departamentos = st.sidebar.multiselect("Departamento(s):", sorted(df_analisis['Departamento'].unique()))
+    # Obtener listas de opciones únicas y ordenadas para los filtros
+    opciones_almacen = sorted(df_analisis['Almacen'].unique())
+    opciones_departamento = sorted(df_analisis['Departamento'].unique())
+    opciones_estado = sorted(df_analisis['Estado_Inventario_Local'].unique())
+
+    selected_almacenes = st.sidebar.multiselect("Almacén(es):", opciones_almacen, default=opciones_almacen)
+    selected_departamentos = st.sidebar.multiselect("Departamento(s):", opciones_departamento)
     search_sku = st.sidebar.text_input("Buscar por SKU (Referencia):")
-    selected_estados = st.sidebar.multiselect("Estado de Inventario:", sorted(df_analisis['Estado_Inventario_Local'].unique()))
+    selected_estados = st.sidebar.multiselect("Estado de Inventario:", opciones_estado)
 
     # Aplicar filtros
     df_filtered = df_analisis.copy()
@@ -328,5 +343,8 @@ if df_crudo is not None and not df_crudo.empty:
         # Mensaje que se muestra si los filtros no arrojan resultados.
         st.warning("No se encontraron datos con los filtros seleccionados. Por favor, ajusta tus filtros en la barra lateral.")
 
-# El script termina de forma natural si df_crudo es None,
-# mostrando el mensaje de error de la función cargar_datos_desde_dropbox().
+# Mensaje final si la carga inicial de datos falla.
+# El script termina de forma natural, mostrando el mensaje de error de la función cargar_datos_desde_dropbox().
+else:
+    st.warning("La carga de datos inicial ha fallado o el archivo está vacío. Por favor, revisa los mensajes de error de arriba.")
+
