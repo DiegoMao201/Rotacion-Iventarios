@@ -4,4 +4,3 @@ plotly
 openpyxl
 xlsxwriter
 dropbox
-pdf2
