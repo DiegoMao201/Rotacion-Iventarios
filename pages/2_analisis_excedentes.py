@@ -8,7 +8,6 @@ st.set_page_config(page_title="Análisis de Excedentes", layout="wide", page_ico
 st.title("📉 Análisis de Excedentes y Baja Rotación")
 st.markdown("Identifica y gestiona el inventario que está inmovilizando capital en tu tienda.")
 
-# --- LECTURA DE DATOS DESDE SESSION_STATE ---
 if 'df_analisis' in st.session_state:
     df_analisis_completo = st.session_state['df_analisis']
 
@@ -21,7 +20,6 @@ if 'df_analisis' in st.session_state:
         df_excedentes = df_tienda[df_tienda['Accion_Requerida'].str.contains('LIQUIDAR')].copy()
         df_excedentes['Dias_Inventario'] = (df_excedentes['Stock'] / df_excedentes['Demanda_Diaria_Promedio']).replace([np.inf, -np.inf], 9999)
 
-        # --- KPIs de Excedentes ---
         valor_excedente = df_excedentes['Valor_Inventario'].sum()
         valor_total = df_tienda['Valor_Inventario'].sum()
         porc_excedente = (valor_excedente / valor_total * 100) if valor_total > 0 else 0
@@ -32,7 +30,6 @@ if 'df_analisis' in st.session_state:
 
         st.markdown("---")
 
-        # --- Gráfico y Tabla Principal ---
         col_viz, col_tabla = st.columns([1, 2])
         with col_viz:
             st.subheader("Excedente por Departamento")
