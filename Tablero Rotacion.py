@@ -44,16 +44,15 @@ def cargar_datos_desde_dropbox():
             metadata, res = dbx.files_download(path=dbx_creds["file_path"])
             
             with io.BytesIO(res.content) as stream:
-                # *** CORRECCIÓN FINAL Y MÁS ROBUSTA ***
-                # Se añaden los parámetros quotechar y quoting para manejar correctamente
-                # las comas dentro de los campos de texto (ej. en las descripciones).
+                # *** CORRECCIÓN DEFINITIVA ***
+                # Se cambia el separador a '|' (pipe) para evitar errores con comas
+                # dentro de los campos de texto. Asegúrate de que tu comando sqlcmd
+                # también use este separador con el parámetro -s"|".
                 df_crudo = pd.read_csv(
                     stream, 
                     encoding='latin1', 
-                    sep=',', 
-                    engine='python',
-                    quotechar='"', # Define el caracter para encerrar texto.
-                    quoting=1      # QUOTE_MINIMAL: respeta las comillas en el archivo.
+                    sep='|', # Separador robusto
+                    engine='python'
                 )
             
             # Limpiamos el mensaje de "cargando" y mostramos éxito
@@ -365,3 +364,5 @@ if df_crudo is not None and not df_crudo.empty:
 else:
     # Mensaje final si la carga inicial de datos falla.
     st.warning("La carga de datos inicial ha fallado o el archivo está vacío. Por favor, revisa los mensajes de error de arriba.")
+
+
