@@ -28,7 +28,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- NUEVA FUNCIÓN PARA CÁLCULO DE DEMANDA PONDERADA ---
+# --- FUNCIÓN DE CÁLCULO DE DEMANDA (SIN CAMBIOS) ---
 def calcular_demanda_ponderada(historial_str, dias_periodo=60):
     if not isinstance(historial_str, str) or historial_str == '':
         return 0
@@ -54,16 +54,34 @@ def calcular_demanda_ponderada(historial_str, dias_periodo=60):
 
 
 # --- 2. LÓGICA DE CARGA Y ANÁLISIS ---
+
+# --- MEJORA: Carga de datos robusta sin depender de encabezados ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
     info_message = st.empty()
     info_message.info("Conectando a Dropbox para obtener los datos más recientes...", icon="☁️")
+    
+    # *** CORRECCIÓN CLAVE ***
+    # Definimos aquí los nombres de las columnas en el orden exacto que genera la consulta SQL.
+    column_names = [
+        'DEPARTAMENTO', 'REFERENCIA', 'DESCRIPCION', 'MARCA', 'PESO_ARTICULO',
+        'UNIDADES_VENDIDAS', 'STOCK', 'COSTO_PROMEDIO_UND', 'CODALMACEN',
+        'LEAD_TIME_PROVEEDOR', 'HISTORIAL_VENTAS'
+    ]
+
     try:
         dbx_creds = st.secrets["dropbox"]
         with dropbox.Dropbox(app_key=dbx_creds["app_key"], app_secret=dbx_creds["app_secret"], oauth2_refresh_token=dbx_creds["refresh_token"]) as dbx:
             metadata, res = dbx.files_download(path=dbx_creds["file_path"])
             with io.BytesIO(res.content) as stream:
-                df_crudo = pd.read_csv(stream, encoding='latin1', sep='|')
+                # Le decimos a Pandas que no hay encabezado (header=None) y le pasamos los nombres correctos.
+                df_crudo = pd.read_csv(
+                    stream, 
+                    encoding='latin1', 
+                    sep='|',
+                    header=None,
+                    names=column_names
+                )
         info_message.empty()
         return df_crudo
     except Exception as e:
@@ -72,21 +90,13 @@ def cargar_datos_desde_dropbox():
 
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_dias=10, dias_seguridad=7):
+    # El resto de esta función no necesita la validación porque la carga de datos ya asegura las columnas.
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
     
     df = _df_crudo.copy()
+    # Estandarizamos los nombres de columna que acabamos de asignar
     df.columns = df.columns.str.strip().str.upper()
-
-    # --- MEJORA: Validación de columnas esenciales ---
-    # Comprobamos que las columnas vitales de la consulta SQL existan en el archivo CSV.
-    columnas_requeridas = ['CODALMACEN', 'REFERENCIA', 'STOCK', 'UNIDADES_VENDIDAS', 'MARCA']
-    columnas_faltantes = [col for col in columnas_requeridas if col not in df.columns]
-    
-    if columnas_faltantes:
-        st.error(f"**Error Crítico en el Archivo de Datos:** No se encontraron las siguientes columnas en tu archivo CSV: **{', '.join(columnas_faltantes)}**. Por favor, revisa tu consulta SQL y asegúrate de que esté generando estas columnas correctamente.", icon="🚨")
-        return pd.DataFrame() # Detenemos la ejecución de forma segura.
-
     
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
@@ -95,6 +105,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     }
     df.rename(columns=column_mapping, inplace=True)
     
+    # El resto de la función es idéntica a la anterior...
     df['Almacen'] = df['Almacen'].astype(str)
     almacen_map = {'155': 'Cedi', '156': 'Armenia', '157': 'Manizales', '189': 'Olaya', '238': 'Laureles', '439': 'FerreBox'}
     df['Almacen_Nombre'] = df['Almacen'].map(almacen_map).fillna(df['Almacen'])
@@ -167,7 +178,6 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
 
     return df
-
 
 # --- INTERFAZ DE USUARIO ---
 # (Sin cambios en esta sección)
