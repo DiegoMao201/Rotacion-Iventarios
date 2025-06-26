@@ -184,15 +184,13 @@ if df_crudo is not None and not df_crudo.empty:
             df_abastecimiento = df_filtered[df_filtered['Accion_Requerida'].isin(['COMPRA NECESARIA', 'ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])].sort_values(by='Segmento_ABC')
             st.info(f"Tienes **{df_abastecimiento.shape[0]} SKUs** que requieren tu atención inmediata.", icon="💡")
             st.dataframe(df_abastecimiento[['SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Accion_Requerida']].head(5), hide_index=True, use_container_width=True)
-            # NOTA: Asegúrate de que este nombre de archivo coincida 100% con el de tu carpeta 'pages'
-            st.page_link("pages/1_🚚_Gestión_de_Traslados_y_Compras.py", label="Ir a Gestión de Abastecimiento", icon="🚚")
+            st.page_link("pages/1_gestion_abastecimiento.py", label="Ir a Gestión de Abastecimiento", icon="🚚")
         with col_accion2:
             st.markdown('<p class="section-header">💸 Acciones de Optimización</p>', unsafe_allow_html=True)
             df_optimizacion = df_filtered[df_filtered['Accion_Requerida'].str.contains('LIQUIDAR')].sort_values(by='Valor_Inventario', ascending=False)
             st.warning(f"Tienes **{df_optimizacion.shape[0]} SKUs** con baja rotación o excedente.", icon="💰")
             st.dataframe(df_optimizacion[['SKU', 'Descripcion', 'Stock', 'Valor_Inventario', 'Estado_Inventario']].head(5), hide_index=True, use_container_width=True, column_config={"Valor_Inventario": st.column_config.NumberColumn(format="$ %d")})
-            # NOTA: Asegúrate de que este nombre de archivo coincida 100% con el de tu carpeta 'pages'
-            st.page_link("pages/2_📉_Análisis_de_Excedentes.py", label="Analizar Excedentes", icon="📉")
+            st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
 
         st.markdown("---")
         
