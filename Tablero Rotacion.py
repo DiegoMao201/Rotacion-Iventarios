@@ -55,28 +55,40 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
-        'REFERENCIA': 'SKU', 'MARCA': 'Marca', 'PESO_ARTICULO': 'Peso_Articulo' # <-- MEJORA: Incluir peso
+        'REFERENCIA': 'SKU', 'MARCA': 'Marca', 'PESO_ARTICULO': 'Peso_Articulo'
     }
     df.rename(columns=column_mapping, inplace=True)
     
-    essential_cols = ['Almacen', 'SKU', 'Stock', 'Ventas_60_Dias']
-    if not all(col in df.columns for col in essential_cols):
-        st.error("Faltan columnas esenciales en el archivo de origen.", icon="🚨")
-        return pd.DataFrame()
+    # --- MEJORA: Renombrar Marcas según tu imagen ---
+    # Convertimos la columna marca a string para un mapeo seguro
+    df['Marca'] = df['Marca'].astype(str)
 
-    numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo'] # <-- MEJORA: Incluir peso
+    marca_map = {
+        '41': 'TERINSA', '50': 'P8-ASC-MEGA', '54': 'MPY-International',
+        '55': 'DPP-AN COLORANTS LATAM', '56': 'DPP-Pintuco Profesional',
+        '57': 'ASC-Mega', '58': 'DPP-Pintuco', '59': 'DPP-Madetec',
+        '60': 'POW-Interpon', '61': 'various', '62': 'DPP-ICO',
+        '63': 'DPP-Terinsa', '64': 'MPY-Pintuco', '65': 'non-AN Third Party',
+        '66': 'ICO-AN Packaging', '67': 'ASC-Automotive OEM', '68': 'POW-Resicoat'
+    }
+    # Creamos una nueva columna 'Marca_Nombre' con los nombres legibles
+    df['Marca_Nombre'] = df['Marca'].map(marca_map).fillna('Complementarios')
+
+    numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
         else:
-            df[col] = 0 # Si la columna de peso no existe, se crea con ceros
+            df[col] = 0
     
+    # El resto de la lógica de negocio se mantiene, pero ahora usaremos 'Marca_Nombre'
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     df['Almacen'] = df['Almacen'].astype(str)
     df['Demanda_Diaria_Promedio'] = df['Ventas_60_Dias'] / 60
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
+    df['Rotacion_60_Dias'] = df.apply(lambda r: r['Ventas_60_Dias'] / r['Stock'] if r['Stock'] > 0 else 0, axis=1)
 
     df_ventas_total = df.copy()
     df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
@@ -105,35 +117,26 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
             return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
-
-    # --- LÓGICA DE SUGERENCIAS Y PESO (CORREGIDA Y MEJORADA) ---
+    
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
-    
     df_analisis = df.copy()
     skus_necesitados = df_analisis[df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])]['SKU'].unique()
-
     for sku in skus_necesitados:
         necesidad_mask = (df_analisis['SKU'] == sku) & (df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO']))
         excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden'])].copy()
         excedente_df['Stock_Disponible_Traslado'] = excedente_df['Stock'] - excedente_df['Punto_Reorden']
-        
         almacenes_con_excedente = excedente_df[excedente_df['Stock_Disponible_Traslado'] > 0]
-        
         for idx_necesidad in df_analisis[necesidad_mask].index:
             almacen_necesitado = df_analisis.loc[idx_necesidad, 'Almacen']
             origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen'] != almacen_necesitado]
-            
             if not origenes_disponibles.empty:
                 sugerencias = []
                 for _, origen in origenes_disponibles.iterrows():
                     unidades_disponibles = int(origen['Stock_Disponible_Traslado'])
                     sugerencias.append(f"Alm. {origen['Almacen']} ({unidades_disponibles} u.)")
-                
-                # *** CORRECCIÓN DEL BUG: Asignar la sugerencia detallada ***
                 df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
-                
                 stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
                 cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
                 df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_necesaria))
@@ -144,15 +147,13 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
                     df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria))
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
 
-    # *** MEJORA: Cálculo del peso sugerido ***
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
     
     return df
 
 # --- INTERFAZ DE USUARIO ---
-# La UI se mantiene igual, ya que los cambios de lógica se reflejarán en los datos.
-st.title("🚀 Plan de Acción de Inventario")
+st.title("🚀 Plan de Acción de Inventario por Marca")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
 df_crudo = cargar_datos_desde_dropbox()
@@ -168,9 +169,18 @@ if df_crudo is not None and not df_crudo.empty:
         lista_almacenes = sorted(df_analisis_completo['Almacen'].unique())
         selected_almacen = st.sidebar.selectbox("Selecciona tu Almacén:", lista_almacenes)
         
-        df_filtered = df_analisis_completo[df_analisis_completo['Almacen'] == selected_almacen]
+        df_tienda = df_analisis_completo[df_analisis_completo['Almacen'] == selected_almacen]
 
-        st.markdown('<p class="section-header">Métricas Clave de tu Tienda</p>', unsafe_allow_html=True)
+        # --- MEJORA: Filtro por Marca ---
+        lista_marcas = sorted(df_tienda['Marca_Nombre'].unique())
+        selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas)
+        
+        if not selected_marcas:
+            df_filtered = df_tienda
+        else:
+            df_filtered = df_tienda[df_tienda['Marca_Nombre'].isin(selected_marcas)]
+
+        st.markdown('<p class="section-header">Métricas Clave de tu Tienda (Filtrado por Marca)</p>', unsafe_allow_html=True)
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         valor_excedente = df_filtered[df_filtered['Estado_Inventario'] == 'Excedente']['Valor_Inventario'].sum()
         skus_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
@@ -187,33 +197,52 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown("---")
         
+        # --- MEJORA: Panel de Consejos Automáticos ---
+        st.markdown('<p class="section-header">💡 Consejos Automáticos</p>', unsafe_allow_html=True)
+        with st.container(border=True):
+            if skus_quiebre > 0:
+                marcas_criticas = df_filtered[(df_filtered['Estado_Inventario'] == 'Quiebre de Stock') & (df_filtered['Segmento_ABC'] == 'A')]['Marca_Nombre'].unique()
+                if len(marcas_criticas) > 0:
+                    st.warning(f"**Prioridad Alta:** Tienes quiebres en productos 'Clase A' de las marcas: **{', '.join(marcas_criticas)}**. La pérdida de ventas aquí es más costosa. Revisa la página de 'Gestión de Abastecimiento'.")
+                else:
+                    st.warning(f"**Atención:** Tienes **{skus_quiebre} SKUs en quiebre de stock**. Abastécelos pronto para no afectar el servicio al cliente.")
+
+            if (valor_excedente / valor_total_inv > 0.25) and valor_total_inv > 0:
+                st.error(f"**Alerta de Capital Inmovilizado:** Más del 25% de tu inventario (${valor_excedente:,.0f}) está en excedente. Es vital que vayas a la página de 'Análisis de Excedentes' y crees un plan de liquidación.")
+            
+            st.info("**Recordatorio de Rotación:** Revisa el gráfico de 'Rotación Promedio por Marca'. Las marcas con baja rotación podrían necesitar un impulso promocional, mientras que las de alta rotación deben tener su stock de seguridad bien vigilado.")
+
+        st.markdown("---")
+
         col_accion1, col_accion2 = st.columns(2)
         with col_accion1:
             st.markdown('<p class="section-header">🚨 Acciones de Abastecimiento</p>', unsafe_allow_html=True)
             df_abastecimiento = df_filtered[df_filtered['Accion_Requerida'].isin(['COMPRA NECESARIA', 'ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])].sort_values(by='Segmento_ABC')
-            st.info(f"Tienes **{df_abastecimiento.shape[0]} SKUs** que requieren tu atención inmediata.", icon="💡")
-            st.dataframe(df_abastecimiento[['SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Accion_Requerida']].head(5), hide_index=True, use_container_width=True)
+            st.dataframe(df_abastecimiento[['SKU', 'Marca_Nombre', 'Stock', 'Punto_Reorden', 'Accion_Requerida']].head(5), hide_index=True, use_container_width=True)
             st.page_link("pages/1_gestion_abastecimiento.py", label="Ir a Gestión de Abastecimiento", icon="🚚")
         with col_accion2:
             st.markdown('<p class="section-header">💸 Acciones de Optimización</p>', unsafe_allow_html=True)
             df_optimizacion = df_filtered[df_filtered['Accion_Requerida'].str.contains('LIQUIDAR')].sort_values(by='Valor_Inventario', ascending=False)
-            st.warning(f"Tienes **{df_optimizacion.shape[0]} SKUs** con baja rotación o excedente.", icon="💰")
-            st.dataframe(df_optimizacion[['SKU', 'Descripcion', 'Stock', 'Valor_Inventario', 'Estado_Inventario']].head(5), hide_index=True, use_container_width=True, column_config={"Valor_Inventario": st.column_config.NumberColumn(format="$ %d")})
+            st.dataframe(df_optimizacion[['SKU', 'Marca_Nombre', 'Stock', 'Valor_Inventario', 'Estado_Inventario']].head(5), hide_index=True, use_container_width=True, column_config={"Valor_Inventario": st.column_config.NumberColumn(format="$ %d")})
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
 
         st.markdown("---")
         
-        st.markdown('<p class="section-header">Distribución del Inventario</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Visualización por Marca</p>', unsafe_allow_html=True)
         col_viz1, col_viz2 = st.columns(2)
+
         with col_viz1:
-            df_distribucion = df_filtered.groupby('Estado_Inventario')['Valor_Inventario'].sum().reset_index()
-            fig = px.pie(df_distribucion, values='Valor_Inventario', names='Estado_Inventario', title='Distribución del Valor por Estado', hole=0.4, color_discrete_map={'Excedente':'#FF7F0E', 'Quiebre de Stock':'#D62728', 'Bajo Stock (Riesgo)':'#FFD700', 'Normal':'#2CA02C', 'Baja Rotación / Obsoleto': '#8C564B'})
-            fig.update_layout(legend_title_text='Estado')
+            # --- MEJORA: Gráfico por Marca ---
+            df_rotacion_marca = df_filtered[df_filtered['Stock'] > 0].groupby('Marca_Nombre')['Rotacion_60_Dias'].mean().nlargest(15).sort_values()
+            fig = px.bar(df_rotacion_marca, x='Rotacion_60_Dias', y=df_rotacion_marca.index, orientation='h',
+                         title='Top 15 Marcas por Rotación Promedio', text_auto='.2f',
+                         labels={'Rotacion_60_Dias': 'Rotación (Ventas/Stock)', 'y': 'Marca'})
             st.plotly_chart(fig, use_container_width=True)
         with col_viz2:
-            df_abc = df_filtered.groupby('Segmento_ABC')['Valor_Inventario'].sum().reset_index()
-            fig2 = px.bar(df_abc, x='Segmento_ABC', y='Valor_Inventario', title='Valor de Inventario por Segmento ABC', text_auto='.2s', labels={'Segmento_ABC': 'Segmento', 'Valor_Inventario': 'Valor del Inventario ($)'})
-            fig2.update_traces(textposition='outside')
+            df_valor_marca = df_filtered.groupby('Marca_Nombre')['Valor_Inventario'].sum().nlargest(15).reset_index()
+            fig2 = px.pie(df_valor_marca, values='Valor_Inventario', names='Marca_Nombre', 
+                          title='Distribución del Valor por Marca (Top 15)', hole=0.4)
+            fig2.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig2, use_container_width=True)
             
     else:
