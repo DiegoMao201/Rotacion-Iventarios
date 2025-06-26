@@ -28,39 +28,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- NUEVA FUNCIÓN PARA CÁLCULO DE DEMANDA PONDERADA (CORREGIDA) ---
+# --- NUEVA FUNCIÓN PARA CÁLCULO DE DEMANDA PONDERADA ---
 def calcular_demanda_ponderada(historial_str, dias_periodo=60):
-    """
-    Calcula la demanda diaria ponderada. Las ventas más recientes tienen más peso.
-    Devuelve un promedio diario.
-    """
     if not isinstance(historial_str, str) or historial_str == '':
         return 0
-
     total_unidades_ponderadas = 0
     total_pesos = 0
-    
     ventas = historial_str.split(',')
     fecha_hoy = datetime.now().date()
-
     for venta in ventas:
         try:
             fecha_str, cantidad_str = venta.split(':')
             fecha_venta = datetime.strptime(fecha_str, '%Y-%m-%d').date()
             cantidad = float(cantidad_str)
-            
             dias_atras = (fecha_hoy - fecha_venta).days
             peso = max(0, dias_periodo - dias_atras)
-            
-            # *** CORRECCIÓN: Se eliminó el espacio en el nombre de la variable ***
             total_unidades_ponderadas += cantidad * peso
             total_pesos += peso
         except (ValueError, IndexError):
             continue
-
     if total_pesos == 0:
         return 0
-    
     demanda_diaria = total_unidades_ponderadas / total_pesos
     return demanda_diaria
 
@@ -89,6 +77,16 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     
     df = _df_crudo.copy()
     df.columns = df.columns.str.strip().str.upper()
+
+    # --- MEJORA: Validación de columnas esenciales ---
+    # Comprobamos que las columnas vitales de la consulta SQL existan en el archivo CSV.
+    columnas_requeridas = ['CODALMACEN', 'REFERENCIA', 'STOCK', 'UNIDADES_VENDIDAS', 'MARCA']
+    columnas_faltantes = [col for col in columnas_requeridas if col not in df.columns]
+    
+    if columnas_faltantes:
+        st.error(f"**Error Crítico en el Archivo de Datos:** No se encontraron las siguientes columnas en tu archivo CSV: **{', '.join(columnas_faltantes)}**. Por favor, revisa tu consulta SQL y asegúrate de que esté generando estas columnas correctamente.", icon="🚨")
+        return pd.DataFrame() # Detenemos la ejecución de forma segura.
+
     
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
@@ -116,9 +114,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
             df[col] = 0
     
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
-    
     df['Demanda_Diaria_Promedio'] = df['Historial_Ventas'].apply(calcular_demanda_ponderada)
-
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
