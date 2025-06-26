@@ -19,7 +19,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. LÓGICA DE CARGA DE DATOS DESDE DROPBOX ---
+# --- 2. LÓGICA DE CARGA DE DATOS DESDE DROPBOX (VERSIÓN CORREGIDA) ---
 # Esta función reemplaza la lectura de archivos locales.
 # Se cachea para no descargar el archivo en cada interacción del usuario.
 @st.cache_data(ttl=600) # Cache expira cada 10 minutos
@@ -45,13 +45,14 @@ def cargar_datos_desde_dropbox():
             
             with io.BytesIO(res.content) as stream:
                 # *** CORRECCIÓN CLAVE ***
-                # Se cambia la codificación a 'utf-8-sig' para manejar caracteres invisibles (BOM)
-                # que a veces son añadidos por sqlcmd al inicio del archivo y que corrompen
-                # el nombre de la primera columna.
+                # Se cambia la codificación a 'latin1'. Este formato es mucho más flexible
+                # y es el estándar de facto para archivos generados por sistemas SQL en Windows,
+                # evitando el error 'invalid start byte' que ocurre con caracteres como 'ñ',
+                # tildes o símbolos especiales que no son compatibles con UTF-8.
                 df_crudo = pd.read_csv(
                     stream, 
-                    encoding='utf-8-sig', # Maneja el BOM
-                    sep='|', # Separador robusto
+                    encoding='latin1', # <-- CAMBIO CRÍTICO AQUÍ
+                    sep='|',           # Separador robusto
                     engine='python'
                 )
             
@@ -65,6 +66,9 @@ def cargar_datos_desde_dropbox():
         return None
     except dropbox.exceptions.ApiError as err:
         info_message.error(f"Error de API con Dropbox: {err}. Asegúrate que la ruta del archivo en tus 'secrets' sea correcta: '{st.secrets.get('dropbox', {}).get('file_path', 'No configurado')}'.")
+        return None
+    except UnicodeDecodeError as e:
+        info_message.error(f"Error de codificación al leer el archivo: {e}. El archivo no parece ser 'latin1' o 'utf-8'. Intenta guardarlo desde el origen con una de estas codificaciones.")
         return None
     except Exception as e:
         info_message.error(f"Ocurrió un error inesperado al cargar los datos: {e}")
@@ -312,9 +316,9 @@ if df_crudo is not None and not df_crudo.empty:
             with col_graph2:
                 df_rotacion_dept = df_filtered[df_filtered['Stock'] > 0].groupby('Departamento')['Rotacion_60_Dias'].mean().nlargest(15)
                 fig_rotacion = px.bar(df_rotacion_dept, y=df_rotacion_dept.index, x='Rotacion_60_Dias',
-                                      title='Top 15 Departamentos por Rotación Promedio',
-                                      labels={'Rotacion_60_Dias': 'Rotación (Ventas/Stock)', 'index': 'Departamento'},
-                                      orientation='h')
+                                    title='Top 15 Departamentos por Rotación Promedio',
+                                    labels={'Rotacion_60_Dias': 'Rotación (Ventas/Stock)', 'index': 'Departamento'},
+                                    orientation='h')
                 st.plotly_chart(fig_rotacion, use_container_width=True)
             st.markdown("---")
 
@@ -326,7 +330,7 @@ if df_crudo is not None and not df_crudo.empty:
                 df_criticos = df_filtered[df_filtered['Unidades_Traslado_Sugeridas'] > 0].sort_values(by='Dias_Inventario')
                 if not df_criticos.empty:
                     st.dataframe(df_criticos[['SKU', 'Almacen', 'Stock', 'Estado_Inventario_Local', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado']].head(20),
-                                   hide_index=True, use_container_width=True, height=300)
+                                 hide_index=True, use_container_width=True, height=300)
                 else:
                     st.info("No se encontraron oportunidades de reparto con los filtros actuales.")
             with col_table2:
@@ -334,7 +338,7 @@ if df_crudo is not None and not df_crudo.empty:
                 df_excedente = df_filtered[df_filtered['Estado_Inventario_Local'].isin(['Excedente', 'Baja Rotación / Obsoleto'])].sort_values(by='Dias_Inventario', ascending=False)
                 if not df_excedente.empty:
                     st.dataframe(df_excedente[['SKU', 'Almacen', 'Stock', 'Dias_Inventario', 'Segmento_ABC', 'Recomendacion']].head(20),
-                                   hide_index=True, use_container_width=True, height=300)
+                                 hide_index=True, use_container_width=True, height=300)
                 else:
                     st.info("No hay SKUs en excedente o baja rotación con los filtros actuales.")
             st.markdown("---")
