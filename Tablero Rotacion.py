@@ -17,17 +17,6 @@ st.set_page_config(
 # --- ESTILOS VISUALES Y CSS PERSONALIZADO ---
 st.markdown("""
 <style>
-    /* Estilo para contenedores de KPIs */
-    .kpi-container {
-        background-color: #262730;
-        border-radius: 10px;
-        padding: 20px;
-        border: 1px solid #3c3f4a;
-    }
-    /* Clases para deltas de KPI */
-    .kpi-delta-red { color: #FF4B4B; }
-    .kpi-delta-green { color: #28A745; }
-    /* Estilo para los títulos de sección */
     .section-header {
         color: #7792E3;
         font-weight: bold;
@@ -38,8 +27,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
-# --- 2. LÓGICA DE CARGA DE DATOS (SIN CAMBIOS) ---
+# --- 2. LÓGICA DE CARGA Y ANÁLISIS (Se mantiene igual) ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
     info_message = st.empty()
@@ -56,42 +44,31 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- 3. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN MEJORADA) ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_dias=10, dias_seguridad=7):
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
-
     df = _df_crudo.copy()
     df.columns = df.columns.str.strip().str.upper()
-    
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
         'REFERENCIA': 'SKU', 'MARCA': 'Marca'
     }
     df.rename(columns=column_mapping, inplace=True)
-    
     essential_cols = ['Almacen', 'SKU', 'Stock', 'Ventas_60_Dias']
     if not all(col in df.columns for col in essential_cols):
         st.error("Faltan columnas esenciales en el archivo de origen.", icon="🚨")
         return pd.DataFrame()
-
-    # --- Preprocesamiento y Cálculos Base ---
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
-    
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     df['Almacen'] = df['Almacen'].astype(str)
     df['Demanda_Diaria_Promedio'] = df['Ventas_60_Dias'] / 60
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
-    
-    # --- Lógica de Punto de Reorden (ROP) y Stock de Seguridad ---
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
-
-    # --- Clasificación ABC (Basada en Valor de Venta) ---
     df_ventas_total = df.copy()
     df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
     ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
@@ -100,56 +77,38 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas_valor
     else:
         sku_to_percent = pd.Series(0, index=ventas_sku.index)
-    
     def segmentar_abc(p):
         if p <= 0.8: return 'A'
         if p <= 0.95: return 'B'
         return 'C'
     df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc).fillna('C')
-
-    # --- Nueva Lógica de Estado y Acción Requerida ---
     def definir_estado_y_accion(row):
-        # Condición de Quiebre
         if row['Stock'] <= 0 and row['Demanda_Diaria_Promedio'] > 0:
             return 'Quiebre de Stock', 'ABASTECIMIENTO URGENTE'
-        # Condición de Bajo Stock (usando ROP)
         if row['Stock'] > 0 and row['Stock'] < row['Punto_Reorden']:
             return 'Bajo Stock (Riesgo)', 'REVISAR ABASTECIMIENTO'
-        # Condición de Excedente
         if row['Demanda_Diaria_Promedio'] > 0 and (row['Stock'] / row['Demanda_Diaria_Promedio']) > 90:
              return 'Excedente', 'LIQUIDAR / PROMOCIONAR'
-        # Condición de Obsoleto
         if row['Stock'] > 0 and row['Demanda_Diaria_Promedio'] <= 0:
             return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
         return 'Normal', 'MONITOREAR'
-
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
-
-    # --- Lógica de Sugerencia de Traslado y Compra ---
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
-    
     df_analisis = df.copy()
     skus_necesitados = df_analisis[df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])]['SKU'].unique()
-
     for sku in skus_necesitados:
-        # Almacenes con necesidad para este SKU
         idx_necesidad = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO']))].index
-        
-        # Almacenes con excedente de este SKU (excluyendo el principal)
         excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden']) & (df_analisis['Almacen'] != almacen_principal)].copy()
         excedente_df['Stock_Disponible_Traslado'] = excedente_df['Stock'] - excedente_df['Punto_Reorden']
-        
-        # Si hay stock disponible para trasladar en alguna tienda
         if excedente_df['Stock_Disponible_Traslado'].sum() > 0:
             for idx in idx_necesidad:
-                stock_objetivo = df_analisis.loc[idx, 'Punto_Reorden'] * 1.5 # Apuntar a un 50% más del ROP
+                stock_objetivo = df_analisis.loc[idx, 'Punto_Reorden'] * 1.5
                 cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx, 'Stock'])
                 if cantidad_necesaria > 0:
                     df.loc[idx, 'Sugerencia_Traslado'] = f"Buscar en tiendas con excedente."
                     df.loc[idx, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_necesaria))
-        # Si NO hay stock en ninguna tienda, se sugiere COMPRA
         else:
             for idx in idx_necesidad:
                 stock_objetivo = df_analisis.loc[idx, 'Punto_Reorden'] * 1.5
@@ -157,36 +116,37 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
                 if cantidad_necesaria > 0:
                     df.loc[idx, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria))
                     df.loc[idx, 'Accion_Requerida'] = 'COMPRA NECESARIA'
-    
     return df
 
 # --- INTERFAZ DE USUARIO ---
 st.title("🚀 Plan de Acción de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-# --- Carga de Datos y Filtros en la Barra Lateral ---
 df_crudo = cargar_datos_desde_dropbox()
 
 if df_crudo is not None and not df_crudo.empty:
     st.sidebar.header("⚙️ Filtros del Análisis")
     almacen_principal_input = st.sidebar.text_input("Código Almacén Principal/Bodega:", '155')
     
-    df_analisis = analizar_inventario_completo(df_crudo, almacen_principal_input)
+    # Se procesan todos los datos una sola vez
+    df_analisis_completo = analizar_inventario_completo(df_crudo, almacen_principal_input)
 
-    if not df_analisis.empty:
-        lista_almacenes = sorted(df_analisis['Almacen'].unique())
+    # *** PASO CLAVE: GUARDAR DATOS EN LA SESIÓN ***
+    # Esto permite que las otras páginas accedan a los datos sin re-calcularlos.
+    st.session_state['df_analisis'] = df_analisis_completo
+
+    if not df_analisis_completo.empty:
+        lista_almacenes = sorted(df_analisis_completo['Almacen'].unique())
         selected_almacen = st.sidebar.selectbox("Selecciona tu Almacén:", lista_almacenes)
         
-        df_filtered = df_analisis[df_analisis['Almacen'] == selected_almacen]
+        df_filtered = df_analisis_completo[df_analisis_completo['Almacen'] == selected_almacen]
 
         # --- KPIs PRINCIPALES ---
         st.markdown('<p class="section-header">Métricas Clave de tu Tienda</p>', unsafe_allow_html=True)
-        
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         valor_excedente = df_filtered[df_filtered['Estado_Inventario'] == 'Excedente']['Valor_Inventario'].sum()
         skus_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
         perdida_potencial = (df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['Demanda_Diaria_Promedio'] * df_filtered['Costo_Promedio_UND']).sum()
-
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric(label="💰 Valor Total del Inventario", value=f"${valor_total_inv:,.0f}")
@@ -198,33 +158,22 @@ if df_crudo is not None and not df_crudo.empty:
             st.metric(label="💸 Pérdida Diaria Potencial", value=f"${perdida_potencial:,.0f}", delta="Por quiebres", delta_color="inverse")
 
         st.markdown("---")
-
+        
         # --- SECCIONES DE ACCIÓN ---
         col_accion1, col_accion2 = st.columns(2)
-        
         with col_accion1:
             st.markdown('<p class="section-header">🚨 Acciones de Abastecimiento</p>', unsafe_allow_html=True)
             df_abastecimiento = df_filtered[df_filtered['Accion_Requerida'].isin(['COMPRA NECESARIA', 'ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])].sort_values(by='Segmento_ABC')
-            
             st.info(f"Tienes **{df_abastecimiento.shape[0]} SKUs** que requieren tu atención inmediata.", icon="💡")
-            
-            st.dataframe(
-                df_abastecimiento[['SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Accion_Requerida']].head(5),
-                hide_index=True, use_container_width=True
-            )
+            st.dataframe(df_abastecimiento[['SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Accion_Requerida']].head(5), hide_index=True, use_container_width=True)
+            # NOTA: Asegúrate de que este nombre de archivo coincida 100% con el de tu carpeta 'pages'
             st.page_link("pages/1_🚚_Gestión_de_Traslados_y_Compras.py", label="Ir a Gestión de Abastecimiento", icon="🚚")
-
         with col_accion2:
             st.markdown('<p class="section-header">💸 Acciones de Optimización</p>', unsafe_allow_html=True)
             df_optimizacion = df_filtered[df_filtered['Accion_Requerida'].str.contains('LIQUIDAR')].sort_values(by='Valor_Inventario', ascending=False)
-
             st.warning(f"Tienes **{df_optimizacion.shape[0]} SKUs** con baja rotación o excedente.", icon="💰")
-            
-            st.dataframe(
-                df_optimizacion[['SKU', 'Descripcion', 'Stock', 'Valor_Inventario', 'Estado_Inventario']].head(5),
-                hide_index=True, use_container_width=True,
-                column_config={"Valor_Inventario": st.column_config.NumberColumn(format="$ %d")}
-            )
+            st.dataframe(df_optimizacion[['SKU', 'Descripcion', 'Stock', 'Valor_Inventario', 'Estado_Inventario']].head(5), hide_index=True, use_container_width=True, column_config={"Valor_Inventario": st.column_config.NumberColumn(format="$ %d")})
+            # NOTA: Asegúrate de que este nombre de archivo coincida 100% con el de tu carpeta 'pages'
             st.page_link("pages/2_📉_Análisis_de_Excedentes.py", label="Analizar Excedentes", icon="📉")
 
         st.markdown("---")
@@ -232,18 +181,14 @@ if df_crudo is not None and not df_crudo.empty:
         # --- VISUALIZACIONES GENERALES ---
         st.markdown('<p class="section-header">Distribución del Inventario</p>', unsafe_allow_html=True)
         col_viz1, col_viz2 = st.columns(2)
-
         with col_viz1:
             df_distribucion = df_filtered.groupby('Estado_Inventario')['Valor_Inventario'].sum().reset_index()
-            fig = px.pie(df_distribucion, values='Valor_Inventario', names='Estado_Inventario', title='Distribución del Valor por Estado', hole=0.4,
-                         color_discrete_map={'Excedente':'#FF7F0E', 'Quiebre de Stock':'#D62728', 'Bajo Stock (Riesgo)':'#FFD700', 'Normal':'#2CA02C', 'Baja Rotación / Obsoleto': '#8C564B'})
+            fig = px.pie(df_distribucion, values='Valor_Inventario', names='Estado_Inventario', title='Distribución del Valor por Estado', hole=0.4, color_discrete_map={'Excedente':'#FF7F0E', 'Quiebre de Stock':'#D62728', 'Bajo Stock (Riesgo)':'#FFD700', 'Normal':'#2CA02C', 'Baja Rotación / Obsoleto': '#8C564B'})
             fig.update_layout(legend_title_text='Estado')
             st.plotly_chart(fig, use_container_width=True)
-
         with col_viz2:
             df_abc = df_filtered.groupby('Segmento_ABC')['Valor_Inventario'].sum().reset_index()
-            fig2 = px.bar(df_abc, x='Segmento_ABC', y='Valor_Inventario', title='Valor de Inventario por Segmento ABC', text_auto='.2s',
-                          labels={'Segmento_ABC': 'Segmento', 'Valor_Inventario': 'Valor del Inventario ($)'})
+            fig2 = px.bar(df_abc, x='Segmento_ABC', y='Valor_Inventario', title='Valor de Inventario por Segmento ABC', text_auto='.2s', labels={'Segmento_ABC': 'Segmento', 'Valor_Inventario': 'Valor del Inventario ($)'})
             fig2.update_traces(textposition='outside')
             st.plotly_chart(fig2, use_container_width=True)
             
