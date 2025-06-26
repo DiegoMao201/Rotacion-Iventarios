@@ -95,7 +95,7 @@ def cargar_datos_desde_dropbox():
         info_message.success("Datos cargados exitosamente desde Dropbox!", icon="✅")
         return df_crudo
     except Exception as e:
-        info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
+        info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="�")
         return None
 
 @st.cache_data
@@ -181,9 +181,14 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
 
         for idx_necesidad in df_analisis[necesidad_mask].index:
             almacen_necesitado_nombre = df_analisis.loc[idx_necesidad, 'Almacen_Nombre']
-            origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen_Nombre'] != almacen_necesitado_nombre]
             
-            # CORRECCIÓN 1: El stock objetivo ahora depende del segmento ABC.
+            # CORRECCIÓN DE KEYERROR: Se inicializa un DataFrame vacío para los orígenes
+            # y solo se filtra si hay almacenes con excedente para evitar el error.
+            origenes_disponibles = pd.DataFrame()
+            if not almacenes_con_excedente.empty:
+                origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen_Nombre'] != almacen_necesitado_nombre]
+            
+            # El stock objetivo ahora depende del segmento ABC.
             segmento = df_analisis.loc[idx_necesidad, 'Segmento_ABC']
             if segmento == 'A': multiplicador_stock_objetivo = 1.2
             elif segmento == 'B': multiplicador_stock_objetivo = 1.4
@@ -195,7 +200,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
             if not origenes_disponibles.empty:
                 total_disponible_para_traslado = origenes_disponibles['Stock_Disponible_Traslado'].sum()
                 
-                # CORRECCIÓN 2: La cantidad a trasladar se limita a lo realmente disponible.
+                # La cantidad a trasladar se limita a lo realmente disponible.
                 cantidad_real_a_trasladar = min(cantidad_necesaria_total, total_disponible_para_traslado)
                 
                 if cantidad_real_a_trasladar > 0:
@@ -203,7 +208,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
                     df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
                     df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_real_a_trasladar))
                 
-                # NUEVA FUNCIONALIDAD 3: Se sugiere comprar el remanente si el traslado es insuficiente.
+                # Se sugiere comprar el remanente si el traslado es insuficiente.
                 necesidad_restante = cantidad_necesaria_total - cantidad_real_a_trasladar
                 if necesidad_restante > 0:
                     df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(necesidad_restante))
@@ -266,7 +271,6 @@ if df_crudo is not None and not df_crudo.empty:
         col1.metric(label="💰 Valor Total Inventario", value=f"${valor_total_inv:,.0f}")
         col2.metric(label="📉 Valor en Excedente", value=f"${valor_excedente:,.0f}")
         col3.metric(label="📦 SKUs en Quiebre", value=f"{skus_quiebre}")
-        # CORRECCIÓN DE SINTAXIS: Se arregló el paréntesis y el argumento 'label'.
         col4.metric(label="🔄 Rotación General (60 Días)", value=f"{rotacion_general:.2f}")
 
         st.markdown("---")
@@ -295,6 +299,4 @@ if df_crudo is not None and not df_crudo.empty:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
-
-
-
+�
