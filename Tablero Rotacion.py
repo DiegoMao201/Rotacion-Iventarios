@@ -99,13 +99,17 @@ def cargar_datos_desde_dropbox():
         return None
 
 @st.cache_data
-def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7):
+def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
     """
-    Realiza el análisis completo del inventario, incluyendo la lógica de sugerencias
-    de compra y traslado completamente reestructurada y corregida.
+    Realiza el análisis completo del inventario.
+    La lógica de sugerencias ahora se basa en Días de Inventario Objetivo por segmento (Min-Max).
     """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
+    
+    if dias_objetivo is None:
+        dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
+
     df = _df_crudo.copy()
     
     # Mapeo y limpieza de columnas
@@ -182,25 +186,21 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
         for idx_necesidad in df_analisis[necesidad_mask].index:
             almacen_necesitado_nombre = df_analisis.loc[idx_necesidad, 'Almacen_Nombre']
             
-            # CORRECCIÓN DE KEYERROR: Se inicializa un DataFrame vacío para los orígenes
-            # y solo se filtra si hay almacenes con excedente para evitar el error.
             origenes_disponibles = pd.DataFrame()
             if not almacenes_con_excedente.empty:
                 origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen_Nombre'] != almacen_necesitado_nombre]
             
-            # El stock objetivo ahora depende del segmento ABC.
+            # --- MEJORA CLAVE: ESTRATEGIA DE REPOSICIÓN MIN-MAX ---
+            # El stock objetivo (Max) se basa en los "Días de Inventario Objetivo" configurables.
+            # El "Punto de Reorden" actúa como el "Min".
             segmento = df_analisis.loc[idx_necesidad, 'Segmento_ABC']
-            if segmento == 'A': multiplicador_stock_objetivo = 1.2
-            elif segmento == 'B': multiplicador_stock_objetivo = 1.4
-            else: multiplicador_stock_objetivo = 1.6
+            dias_inventario_objetivo = dias_objetivo.get(segmento, dias_objetivo['C']) # Default al valor de C
             
-            stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * multiplicador_stock_objetivo
+            stock_objetivo = df_analisis.loc[idx_necesidad, 'Demanda_Diaria_Promedio'] * dias_inventario_objetivo
             cantidad_necesaria_total = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
 
             if not origenes_disponibles.empty:
                 total_disponible_para_traslado = origenes_disponibles['Stock_Disponible_Traslado'].sum()
-                
-                # La cantidad a trasladar se limita a lo realmente disponible.
                 cantidad_real_a_trasladar = min(cantidad_necesaria_total, total_disponible_para_traslado)
                 
                 if cantidad_real_a_trasladar > 0:
@@ -208,13 +208,11 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
                     df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
                     df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_real_a_trasladar))
                 
-                # Se sugiere comprar el remanente si el traslado es insuficiente.
                 necesidad_restante = cantidad_necesaria_total - cantidad_real_a_trasladar
                 if necesidad_restante > 0:
                     df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(necesidad_restante))
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA Y/O TRASLADO'
             else:
-                # Si no hay traslados, toda la necesidad se convierte en compra.
                 if cantidad_necesaria_total > 0:
                     df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria_total))
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
@@ -231,11 +229,26 @@ st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el
 df_crudo = cargar_datos_desde_dropbox()
 
 if df_crudo is not None and not df_crudo.empty:
+    # --- CONTROLES DE PARÁMETROS EN LA BARRA LATERAL ---
     st.sidebar.header("⚙️ Parámetros del Análisis")
     almacen_principal_input = st.sidebar.text_input("Código Almacén Principal/Bodega:", '155')
-    dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad:", min_value=1, max_value=30, value=7, step=1)
+    dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad (Min):", min_value=1, max_value=30, value=7, step=1,
+                                             help="Define el colchón de seguridad sobre el Lead Time para calcular el Punto de Reorden (Mínimo).")
     
-    df_analisis_completo = analizar_inventario_completo(df_crudo, almacen_principal=almacen_principal_input, dias_seguridad=dias_seguridad_input)
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Días de Inventario Objetivo (Max)**")
+    st.sidebar.info("Define el nivel máximo de stock al que se debe reabastecer cada producto.", icon="🎯")
+    dias_obj_a = st.sidebar.slider("Clase A", min_value=15, max_value=45, value=30)
+    dias_obj_b = st.sidebar.slider("Clase B", min_value=30, max_value=60, value=45)
+    dias_obj_c = st.sidebar.slider("Clase C", min_value=45, max_value=90, value=60)
+
+    # Ejecutar análisis con los nuevos parámetros
+    dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
+    df_analisis_completo = analizar_inventario_completo(df_crudo, 
+                                                        almacen_principal=almacen_principal_input, 
+                                                        dias_seguridad=dias_seguridad_input,
+                                                        dias_objetivo=dias_objetivo_dict)
+    
     st.session_state['df_analisis'] = df_analisis_completo
 
     if not df_analisis_completo.empty:
@@ -258,6 +271,7 @@ if df_crudo is not None and not df_crudo.empty:
         if not selected_marcas: df_filtered = pd.DataFrame(columns=df_vista.columns)
         else: df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
 
+        # --- VISUALIZACIÓN DE MÉTRICAS Y CONSEJOS ---
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         df_excedente_kpi = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]
@@ -294,7 +308,7 @@ if df_crudo is not None and not df_crudo.empty:
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
-            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
+            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="�")
         with col_nav4:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
