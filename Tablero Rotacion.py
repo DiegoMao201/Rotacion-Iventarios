@@ -51,18 +51,17 @@ def parse_historial_para_analisis(historial_str):
 def calcular_demanda_y_tendencia(historial_str, dias_periodo=60):
     df_ventas = parse_historial_para_analisis(historial_str)
     
-    # *** CORRECCIÓN CLAVE ***
-    # Movemos esta comprobación al principio de todo. Si no hay ventas, no hacemos NADA más.
     if df_ventas.empty:
-        return 0, 0, 0 # Demanda, Tendencia, Estacionalidad
+        return 0, 0, 0 
 
-    # 1. Cálculo de Demanda Ponderada
-    fecha_hoy = datetime.now().date()
-    df_ventas['dias_atras'] = (fecha_hoy - df_ventas['Fecha'].dt.date).dt.days
+    fecha_hoy = datetime.now()
+    # *** CORRECCIÓN CLAVE ***
+    # Se reescribe la forma de calcular la diferencia en días para que sea robusta.
+    df_ventas['dias_atras'] = (fecha_hoy - df_ventas['Fecha']).dt.days
+    
     df_ventas['peso'] = np.maximum(0, dias_periodo - df_ventas['dias_atras'])
     demanda_ponderada = (df_ventas['Unidades'] * df_ventas['peso']).sum() / df_ventas['peso'].sum() if df_ventas['peso'].sum() > 0 else 0
 
-    # 2. Cálculo de Tendencia
     ventas_30d = df_ventas[df_ventas['dias_atras'] <= 30]
     tendencia = 0
     if len(ventas_30d) > 2:
@@ -71,7 +70,6 @@ def calcular_demanda_y_tendencia(historial_str, dias_periodo=60):
         slope, _ = np.polyfit(x, y, 1)
         tendencia = -slope 
 
-    # 3. Cálculo de Estacionalidad Reciente
     ventas_ultimos_30d = df_ventas[df_ventas['dias_atras'] <= 30]['Unidades'].sum()
     ventas_previos_30d = df_ventas[(df_ventas['dias_atras'] > 30) & (df_ventas['dias_atras'] <= 60)]['Unidades'].sum()
     estacionalidad = ventas_ultimos_30d - ventas_previos_30d
@@ -99,6 +97,7 @@ def cargar_datos_desde_dropbox():
 
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_dias=10, dias_seguridad=7):
+    # El resto del código no requiere cambios. La corrección está en la función de ayuda de arriba.
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
     df = _df_crudo.copy()
