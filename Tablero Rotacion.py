@@ -44,33 +44,22 @@ def parse_historial_para_analisis(historial_str, dias_periodo=60):
 def calcular_demanda_y_tendencia(historial_str, dias_periodo=60):
     df_ventas = parse_historial_para_analisis(historial_str, dias_periodo)
     if df_ventas.empty:
-        return 0, 0, 0 # Demanda, Tendencia, Estacionalidad
-
-    # 1. Cálculo de Demanda Ponderada
+        return 0, 0, 0
     fecha_hoy = datetime.now().date()
     df_ventas['dias_atras'] = (fecha_hoy - df_ventas['Fecha']).dt.days
     df_ventas['peso'] = np.maximum(0, dias_periodo - df_ventas['dias_atras'])
     demanda_ponderada = (df_ventas['Unidades'] * df_ventas['peso']).sum() / df_ventas['peso'].sum() if df_ventas['peso'].sum() > 0 else 0
-
-    # 2. Cálculo de Tendencia (Regresión lineal sobre los últimos 30 días)
     ventas_30d = df_ventas[df_ventas['dias_atras'] <= 30]
     tendencia = 0
     if len(ventas_30d) > 2:
-        # Usamos los días como 'x' y las unidades como 'y'
         x = ventas_30d['dias_atras'].values
         y = ventas_30d['Unidades'].values
-        # polyfit(x, y, 1) nos da [pendiente, intercepto]
         slope, _ = np.polyfit(x, y, 1)
-        # Invertimos la pendiente porque 'días atrás' decrece hacia el presente
-        tendencia = -slope 
-
-    # 3. Cálculo de Estacionalidad Reciente (Últimos 30d vs 31-60d)
+        tendencia = -slope
     ventas_ultimos_30d = df_ventas[df_ventas['dias_atras'] <= 30]['Unidades'].sum()
     ventas_previos_30d = df_ventas[(df_ventas['dias_atras'] > 30) & (df_ventas['dias_atras'] <= 60)]['Unidades'].sum()
     estacionalidad = ventas_ultimos_30d - ventas_previos_30d
-    
     return demanda_ponderada, tendencia, estacionalidad
-
 
 # --- 2. LÓGICA DE CARGA Y ANÁLISIS ---
 @st.cache_data(ttl=600)
@@ -96,43 +85,48 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         return pd.DataFrame()
     
     df = _df_crudo.copy()
-    df.columns = df.columns.str.strip().str.upper()
     
-    column_mapping = {'CODALMACEN': 'Almacen','UNIDADES_VENDIDAS': 'Ventas_60_Dias','REFERENCIA': 'SKU'}
-    df.rename(columns=column_mapping, inplace=True)
+    # --- CORRECCIÓN: Unificar el renombrado y uso de columnas ---
+    # Renombramos todo al inicio a un formato estándar y fácil de usar
+    column_mapping = {
+        'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
+        'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
+        'REFERENCIA': 'SKU', 'MARCA': 'Marca', 'PESO_ARTICULO': 'Peso_Articulo', 'HISTORIAL_VENTAS': 'Historial_Ventas',
+        'LEAD_TIME_PROVEEDOR': 'Lead_Time_Proveedor'
+    }
+    df.rename(columns=lambda c: column_mapping.get(c.strip().upper(), c.strip().upper()), inplace=True)
     
-    df['ALMACEN'] = df['ALMACEN'].astype(str)
+    df['Almacen'] = df['Almacen'].astype(str) # Ahora 'Almacen' existe y se usa consistentemente
     almacen_map = {'155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
-    df['Almacen_Nombre'] = df['ALMACEN'].map(almacen_map).fillna(df['ALMACEN'])
+    df['Almacen_Nombre'] = df['Almacen'].map(almacen_map).fillna(df['Almacen'])
     
-    if 'MARCA' in df.columns:
-        df['Marca_str'] = pd.to_numeric(df['MARCA'], errors='coerce').fillna(0).astype(int).astype(str)
+    if 'Marca' in df.columns:
+        df['Marca_str'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str)
         marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
         df['Marca_Nombre'] = df['Marca_str'].map(marca_map).fillna('Complementarios')
     else:
         df['Marca_Nombre'] = 'No especificada'
 
-    numeric_cols = ['VENTAS_60_DIAS', 'COSTO_PROMEDIO_UND', 'STOCK', 'PESO_ARTICULO']
+    numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
-    df['STOCK'] = df['STOCK'].apply(lambda x: max(0, x))
+    df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     
-    # --- MEJORA: Aplicar la nueva función para obtener demanda, tendencia y estacionalidad ---
-    analisis_ventas = df['HISTORIAL_VENTAS'].apply(lambda x: pd.Series(calcular_demanda_y_tendencia(x)))
+    analisis_ventas = df['Historial_Ventas'].apply(lambda x: pd.Series(calcular_demanda_y_tendencia(x)))
     analisis_ventas.columns = ['Demanda_Diaria_Promedio', 'Tendencia_Ventas', 'Estacionalidad_Reciente']
     df = pd.concat([df, analisis_ventas], axis=1)
 
-    df['Valor_Inventario'] = df['STOCK'] * df['COSTO_PROMEDIO_UND']
+    df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
-    df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['LEAD_TIME_PROVEEDOR']) + df['Stock_Seguridad']
-    df['Rotacion_60_Dias'] = df.apply(lambda r: r['VENTAS_60_DIAS'] / r['STOCK'] if r['STOCK'] > 0 else 0, axis=1)
+    df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
+    df['Rotacion_60_Dias'] = df.apply(lambda r: r['Ventas_60_Dias'] / r['Stock'] if r['Stock'] > 0 else 0, axis=1)
     
-    # La lógica de ABC, Estado y Sugerencias se mantiene pero ahora es más inteligente
-    # ... (Se omite por brevedad)
-    df_ventas_total = df.copy(); df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['VENTAS_60_DIAS'] * df_ventas_total['COSTO_PROMEDIO_UND']
-    ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum(); total_ventas_valor = ventas_sku.sum()
+    df_ventas_total = df.copy()
+    df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
+    ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
+    total_ventas_valor = ventas_sku.sum()
     if total_ventas_valor > 0: sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas_valor
     else: sku_to_percent = pd.Series(0, index=ventas_sku.index)
     def segmentar_abc(p):
@@ -141,10 +135,10 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         return 'C'
     df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc).fillna('C')
     def definir_estado_y_accion(row):
-        if row['STOCK'] <= 0 and row['Demanda_Diaria_Promedio'] > 0: return 'Quiebre de Stock', 'ABASTECIMIENTO URGENTE'
-        if row['STOCK'] > 0 and row['STOCK'] < row['Punto_Reorden']: return 'Bajo Stock (Riesgo)', 'REVISAR ABASTECIMIENTO'
-        if row['Demanda_Diaria_Promedio'] > 0 and (row['STOCK'] / row['Demanda_Diaria_Promedio']) > 90: return 'Excedente', 'LIQUIDAR / PROMOCIONAR'
-        if row['STOCK'] > 0 and row['Demanda_Diaria_Promedio'] <= 0: return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
+        if row['Stock'] <= 0 and row['Demanda_Diaria_Promedio'] > 0: return 'Quiebre de Stock', 'ABASTECIMIENTO URGENTE'
+        if row['Stock'] > 0 and row['Stock'] < row['Punto_Reorden']: return 'Bajo Stock (Riesgo)', 'REVISAR ABASTECIMIENTO'
+        if row['Demanda_Diaria_Promedio'] > 0 and (row['Stock'] / row['Demanda_Diaria_Promedio']) > 90: return 'Excedente', 'LIQUIDAR / PROMOCIONAR'
+        if row['Stock'] > 0 and row['Demanda_Diaria_Promedio'] <= 0: return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
     df['Sugerencia_Traslado'] = ''; df['Unidades_Traslado_Sugeridas'] = 0; df['Sugerencia_Compra'] = 0
@@ -152,8 +146,8 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     skus_necesitados = df_analisis[df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])]['SKU'].unique()
     for sku in skus_necesitados:
         necesidad_mask = (df_analisis['SKU'] == sku) & (df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO']))
-        excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['STOCK'] > df_analisis['Punto_Reorden'])].copy()
-        excedente_df['Stock_Disponible_Traslado'] = excedente_df['STOCK'] - excedente_df['Punto_Reorden']
+        excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden'])].copy()
+        excedente_df['Stock_Disponible_Traslado'] = excedente_df['Stock'] - excedente_df['Punto_Reorden']
         almacenes_con_excedente = excedente_df[excedente_df['Stock_Disponible_Traslado'] > 0]
         for idx_necesidad in df_analisis[necesidad_mask].index:
             almacen_necesitado_nombre = df_analisis.loc[idx_necesidad, 'Almacen_Nombre']
@@ -162,16 +156,16 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
                 sugerencias = [f"{origen['Almacen_Nombre']} ({int(origen['Stock_Disponible_Traslado'])} u.)" for _, origen in origenes_disponibles.iterrows()]
                 df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
                 stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
-                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'STOCK'])
+                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
                 df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_necesaria))
             else:
                 stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
-                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'STOCK'])
+                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
                 if cantidad_necesaria > 0:
                     df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria))
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
-    df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['PESO_ARTICULO']
-    df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['PESO_ARTICULO']
+    df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
+    df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
 
     return df
 
@@ -190,8 +184,9 @@ if df_crudo is not None and not df_crudo.empty:
 
     if not df_analisis_completo.empty:
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-        nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'ALMACEN']].drop_duplicates()
-        map_nombre_a_codigo = pd.Series(nombres_almacen.ALMACEN.values, index=nombres_almacen.Almacen_Nombre).to_dict()
+        # --- CORRECCIÓN: Usar 'Almacen' (con camel case) para el mapeo ---
+        nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
+        map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
         lista_seleccion_nombres = [opcion_consolidado] + sorted(nombres_almacen['Almacen_Nombre'].unique())
         selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
         
@@ -199,7 +194,7 @@ if df_crudo is not None and not df_crudo.empty:
             df_vista = df_analisis_completo
         else:
             codigo_almacen_seleccionado = map_nombre_a_codigo[selected_almacen_nombre]
-            df_vista = df_analisis_completo[df_analisis_completo['ALMACEN'] == codigo_almacen_seleccionado]
+            df_vista = df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado]
 
         lista_marcas = sorted(df_vista['Marca_Nombre'].unique())
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas)
@@ -212,8 +207,8 @@ if df_crudo is not None and not df_crudo.empty:
         df_excedente_kpi = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]
         valor_excedente = df_excedente_kpi['Valor_Inventario'].sum()
         skus_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
-        total_ventas_unidades = df_filtered['VENTAS_60_DIAS'].sum()
-        total_stock_unidades = df_filtered['STOCK'].sum()
+        total_ventas_unidades = df_filtered['Ventas_60_Dias'].sum()
+        total_stock_unidades = df_filtered['Stock'].sum()
         rotacion_general = total_ventas_unidades / total_stock_unidades if total_stock_unidades > 0 else 0
         
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -226,7 +221,6 @@ if df_crudo is not None and not df_crudo.empty:
         st.markdown("---")
         
         st.markdown('<p class="section-header">💡 Consejos Automáticos</p>', unsafe_allow_html=True)
-        # La lógica de consejos se mantiene, pero ahora puede ser más inteligente
         with st.container(border=True):
             productos_tendencia_fuerte = df_filtered[df_filtered['Tendencia_Ventas'] > 0.5]
             if not productos_tendencia_fuerte.empty:
@@ -245,8 +239,8 @@ if df_crudo is not None and not df_crudo.empty:
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
-            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊") # Renombrado
+            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
         with col_nav4:
-            st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈") # Nuevo
+            st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
