@@ -26,8 +26,9 @@ if 'df_analisis' in st.session_state:
 
     if not df_analisis_completo.empty:
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-        nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'ALMACEN']].drop_duplicates()
-        map_nombre_a_codigo = pd.Series(nombres_almacen.ALMACEN.values, index=nombres_almacen.Almacen_Nombre).to_dict()
+        # --- CORRECCIÓN: Usar 'Almacen' (con camel case) ---
+        nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
+        map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
         lista_seleccion_nombres = [opcion_consolidado] + sorted(nombres_almacen['Almacen_Nombre'].unique())
         selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres, key="sb_tendencias")
         
@@ -35,7 +36,7 @@ if 'df_analisis' in st.session_state:
             df_vista = df_analisis_completo
         else:
             codigo_almacen_seleccionado = map_nombre_a_codigo[selected_almacen_nombre]
-            df_vista = df_analisis_completo[df_analisis_completo['ALMACEN'] == codigo_almacen_seleccionado]
+            df_vista = df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado]
 
         lista_marcas = sorted(df_vista['Marca_Nombre'].unique())
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas, key="filtro_marca_tendencias")
@@ -53,7 +54,7 @@ if 'df_analisis' in st.session_state:
             st.subheader("🚀 Productos con Mayor Crecimiento")
             st.info("Estos productos están acelerando sus ventas. Considera aumentar su stock de seguridad.")
             top_crecimiento = df_filtered.sort_values(by='Tendencia_Ventas', ascending=False).head(10)
-            st.dataframe(top_crecimiento[['SKU', 'DESCRIPCION', 'Marca_Nombre', 'Tendencia_Ventas']], 
+            st.dataframe(top_crecimiento[['SKU', 'Descripcion', 'Marca_Nombre', 'Tendencia_Ventas']], 
                          column_config={"Tendencia_Ventas": st.column_config.NumberColumn(format="%.2f")},
                          hide_index=True, use_container_width=True)
 
@@ -61,7 +62,7 @@ if 'df_analisis' in st.session_state:
             st.subheader("🐌 Productos con Mayor Decremento")
             st.warning("Las ventas de estos productos están desacelerando. Evita reabastecer en exceso.")
             top_decremento = df_filtered[df_filtered['Tendencia_Ventas'] < 0].sort_values(by='Tendencia_Ventas', ascending=True).head(10)
-            st.dataframe(top_decremento[['SKU', 'DESCRIPCION', 'Marca_Nombre', 'Tendencia_Ventas']], 
+            st.dataframe(top_decremento[['SKU', 'Descripcion', 'Marca_Nombre', 'Tendencia_Ventas']], 
                          column_config={"Tendencia_Ventas": st.column_config.NumberColumn(format="%.2f")},
                          hide_index=True, use_container_width=True)
 
