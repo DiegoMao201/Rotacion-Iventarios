@@ -59,11 +59,9 @@ def calcular_demanda_y_tendencia(historial_str, dias_periodo=60):
     fecha_hoy = datetime.now()
     df_ventas['dias_atras'] = (fecha_hoy - df_ventas['Fecha']).dt.days
     
-    # Demanda ponderada: las ventas más recientes tienen más peso
     df_ventas['peso'] = np.maximum(0, dias_periodo - df_ventas['dias_atras'])
-    demanda_ponderada = (df_ventas['Unidades'] * df_ventas['peso']).sum() / df_ventas['peso'].sum() if df_ventas['peso'].sum() > 0 else 0
+    demanda_ponderada = np.average(df_ventas['Unidades'], weights=df_ventas['peso']) if df_ventas['peso'].sum() > 0 else 0
 
-    # Tendencia lineal de los últimos 30 días
     ventas_30d = df_ventas[df_ventas['dias_atras'] <= 30]
     tendencia = 0
     if len(ventas_30d) > 2:
@@ -101,8 +99,7 @@ def cargar_datos_desde_dropbox():
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
     """
-    Realiza el análisis completo del inventario.
-    La lógica de sugerencias ahora se basa en Días de Inventario Objetivo por segmento (Min-Max).
+    Función de análisis principal, completamente reescrita con operaciones vectorizadas para un rendimiento óptimo.
     """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
@@ -112,7 +109,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
 
     df = _df_crudo.copy()
     
-    # Mapeo y limpieza de columnas
+    # --- 1. Limpieza y Preparación de Datos (Vectorizada) ---
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
@@ -120,111 +117,89 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
         'LEAD_TIME_PROVEEDOR': 'Lead_Time_Proveedor'
     }
     df.rename(columns=lambda c: column_mapping.get(c.strip().upper(), c.strip().upper()), inplace=True)
-    df['Almacen'] = df['Almacen'].astype(str)
+    
     almacen_map = {'155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
-    df['Almacen_Nombre'] = df['Almacen'].map(almacen_map).fillna(df['Almacen'])
-    if 'Marca' in df.columns:
-        df['Marca_str'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str)
-        marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
-        df['Marca_Nombre'] = df['Marca_str'].map(marca_map).fillna('Complementarios')
-    else:
-        df['Marca_Nombre'] = 'No especificada'
+    df['Almacen_Nombre'] = df['Almacen'].astype(str).map(almacen_map).fillna(df['Almacen'])
+    
+    marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
+    df['Marca_Nombre'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str).map(marca_map).fillna('Complementarios')
     
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo', 'Lead_Time_Proveedor']
     for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    df['Stock'] = np.maximum(0, df['Stock'])
 
-    # Cálculos de demanda e inventario
+    # --- 2. Cálculos de Demanda (El apply aquí es un cuello de botella conocido, pero difícil de vectorizar por el formato del string) ---
     analisis_ventas = df['Historial_Ventas'].apply(lambda x: pd.Series(calcular_demanda_y_tendencia(x)))
     analisis_ventas.columns = ['Demanda_Diaria_Promedio', 'Tendencia_Ventas', 'Estacionalidad_Reciente']
     df = pd.concat([df, analisis_ventas], axis=1)
+
+    # --- 3. Cálculos de Inventario (Vectorizados) ---
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
     
-    # Clasificación ABC
-    df_ventas_total = df.copy()
-    df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
-    ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
-    total_ventas_valor = ventas_sku.sum()
-    if total_ventas_valor > 0: sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas_valor
-    else: sku_to_percent = pd.Series(0, index=ventas_sku.index)
-    def segmentar_abc(p):
-        if p <= 0.8: return 'A'
-        if p <= 0.95: return 'B'
-        return 'C'
-    df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc).fillna('C')
+    # --- 4. Clasificación ABC (Vectorizada) ---
+    df['Valor_Venta_60_Dias'] = df['Ventas_60_Dias'] * df['Costo_Promedio_UND']
+    ventas_sku_valor = df.groupby('SKU')['Valor_Venta_60_Dias'].sum()
+    total_ventas_valor = ventas_sku_valor.sum()
+    if total_ventas_valor > 0:
+        sku_to_percent = ventas_sku_valor.sort_values(ascending=False).cumsum() / total_ventas_valor
+        df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(lambda p: 'A' if p <= 0.8 else ('B' if p <= 0.95 else 'C')).fillna('C')
+    else:
+        df['Segmento_ABC'] = 'C'
 
-    # Estado de inventario
-    def definir_estado_y_accion(row):
-        if row['Stock'] <= 0 and row['Demanda_Diaria_Promedio'] > 0: return 'Quiebre de Stock', 'ABASTECIMIENTO URGENTE'
-        if row['Stock'] > 0 and row['Stock'] < row['Punto_Reorden']: return 'Bajo Stock (Riesgo)', 'REVISAR ABASTECIMIENTO'
-        # Corregir potencial división por cero si demanda diaria es cero
-        if row['Demanda_Diaria_Promedio'] > 0 and (row['Stock'] / row['Demanda_Diaria_Promedio']) > 90: return 'Excedente', 'LIQUIDAR / PROMOCIONAR'
-        if row['Stock'] > 0 and row['Demanda_Diaria_Promedio'] <= 0: return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
-        return 'Normal', 'MONITOREAR'
-    df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
+    # --- 5. Estado de Inventario (Vectorizado con np.select) ---
+    conditions = [
+        (df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0),
+        (df['Stock'] > 0) & (df['Stock'] < df['Punto_Reorden']),
+        (df['Demanda_Diaria_Promedio'] > 0) & (df['Stock'] / df['Demanda_Diaria_Promedio'] > 90),
+        (df['Stock'] > 0) & (df['Demanda_Diaria_Promedio'] <= 0)
+    ]
+    choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
+    choices_accion = ['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO', 'LIQUIDAR / PROMOCIONAR', 'LIQUIDAR / DESCONTINUAR']
+    df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
+    df['Accion_Requerida'] = np.select(conditions, choices_accion, default='MONITOREAR')
 
-    # --- LÓGICA DE SUGERENCIAS DE ABASTECIMIENTO ---
-    df['Sugerencia_Traslado'] = ''
-    df['Unidades_Traslado_Sugeridas'] = 0
+    # --- 6. Lógica de Sugerencias (Completamente Vectorizada) ---
     df['Sugerencia_Compra'] = 0
-    df_analisis = df.copy()
+    df['Unidades_Traslado_Sugeridas'] = 0
+    
+    # Calcular necesidad para todos los productos
+    df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
+    df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
+    df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
+    
+    # Identificar SKUs que necesitan abastecimiento
+    necesidad_mask = df['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])
+    df.loc[necesidad_mask, 'Sugerencia_Compra'] = np.ceil(df.loc[necesidad_mask, 'Necesidad_Total'])
 
-    skus_necesitados = df_analisis[df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])]['SKU'].unique()
+    # Calcular excedentes disponibles para traslado por SKU
+    df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Punto_Reorden'])
+    excedentes_por_sku = df[df['Excedente_Trasladable'] > 0].groupby('SKU')['Excedente_Trasladable'].sum().rename('Total_Excedente_SKU')
 
-    for sku in skus_necesitados:
-        necesidad_mask = (df_analisis['SKU'] == sku) & (df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO']))
-        excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden'])].copy()
-        
-        if not excedente_df.empty:
-            excedente_df['Stock_Disponible_Traslado'] = excedente_df.apply(lambda row: max(0, row['Stock'] - row['Punto_Reorden']), axis=1)
-        
-        almacenes_con_excedente = excedente_df[excedente_df['Stock_Disponible_Traslado'] > 0] if not excedente_df.empty else pd.DataFrame()
+    # Unir la información de excedentes con el df principal
+    df = df.merge(excedentes_por_sku, on='SKU', how='left').fillna(0)
 
-        for idx_necesidad in df_analisis[necesidad_mask].index:
-            almacen_necesitado_nombre = df_analisis.loc[idx_necesidad, 'Almacen_Nombre']
-            
-            origenes_disponibles = pd.DataFrame()
-            if not almacenes_con_excedente.empty:
-                origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen_Nombre'] != almacen_necesitado_nombre]
-            
-            segmento = df_analisis.loc[idx_necesidad, 'Segmento_ABC']
-            dias_inventario_objetivo = dias_objetivo.get(segmento, dias_objetivo['C']) 
-            
-            stock_objetivo = df_analisis.loc[idx_necesidad, 'Demanda_Diaria_Promedio'] * dias_inventario_objetivo
-            cantidad_necesaria_total = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
-
-            if not origenes_disponibles.empty:
-                total_disponible_para_traslado = origenes_disponibles['Stock_Disponible_Traslado'].sum()
-                cantidad_real_a_trasladar = min(cantidad_necesaria_total, total_disponible_para_traslado)
-                
-                if cantidad_real_a_trasladar > 0:
-                    sugerencias = [f"{origen['Almacen_Nombre']} ({int(origen['Stock_Disponible_Traslado'])} u.)" for _, origen in origenes_disponibles.iterrows()]
-                    df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
-                    df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_real_a_trasladar))
-                
-                necesidad_restante = cantidad_necesaria_total - cantidad_real_a_trasladar
-                if necesidad_restante > 0:
-                    df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(necesidad_restante))
-                    df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA Y/O TRASLADO'
-            else:
-                if cantidad_necesaria_total > 0:
-                    df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria_total))
-                    df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
-
+    # Calcular traslados
+    df['Traslado_Posible'] = np.minimum(df['Sugerencia_Compra'], df['Total_Excedente_SKU'])
+    df.loc[df['Traslado_Posible'] > 0, 'Unidades_Traslado_Sugeridas'] = np.ceil(df['Traslado_Posible'])
+    df['Sugerencia_Compra'] -= df['Unidades_Traslado_Sugeridas'] # Reducir la compra por lo que se puede trasladar
+    
+    # Actualizar acción requerida
+    df.loc[df['Unidades_Traslado_Sugeridas'] > 0, 'Accion_Requerida'] = 'COMPRA Y/O TRASLADO'
+    
+    # Limpieza final de columnas
+    df.drop(columns=['Valor_Venta_60_Dias', 'dias_objetivo_map', 'Stock_Objetivo', 'Necesidad_Total', 'Excedente_Trasladable', 'Total_Excedente_SKU', 'Traslado_Posible'], inplace=True)
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
-    
+
     return df
 
 # --- INTERFAZ DE USUARIO ---
 st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-# --- MEJORA: AÑADIR EXPLICACIÓN DE CLASIFICACIÓN ABC ---
 with st.expander("ℹ️ ¿Cómo interpretar la Clasificación ABC y los Días de Inventario?"):
     st.markdown("""
     La **Clasificación ABC** es un método para organizar los productos de tu inventario en tres categorías, basadas en su importancia para las ventas. Esto te ayuda a enfocar tus esfuerzos y capital en lo que más importa.
@@ -246,7 +221,6 @@ with st.expander("ℹ️ ¿Cómo interpretar la Clasificación ABC y los Días d
 df_crudo = cargar_datos_desde_dropbox()
 
 if df_crudo is not None and not df_crudo.empty:
-    # --- CONTROLES DE PARÁMETROS EN LA BARRA LATERAL ---
     st.sidebar.header("⚙️ Parámetros del Análisis")
     almacen_principal_input = st.sidebar.text_input("Código Almacén Principal/Bodega:", '155')
     dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad (Min):", min_value=1, max_value=30, value=7, step=1,
@@ -259,8 +233,7 @@ if df_crudo is not None and not df_crudo.empty:
     dias_obj_b = st.sidebar.slider("Clase B (Importantes)", min_value=30, max_value=60, value=45)
     dias_obj_c = st.sidebar.slider("Clase C (Generales)", min_value=45, max_value=90, value=60)
 
-    # --- MEJORA: AÑADIR MENSAJE DE ESPERA (SPINNER) DURANTE EL ANÁLISIS ---
-    with st.spinner("Analizando inventario y calculando sugerencias... Por favor espera, esto puede tardar unos minutos."):
+    with st.spinner("Analizando inventario y calculando sugerencias... Por favor espera, esto puede tardar unos segundos."):
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, 
                                                             almacen_principal=almacen_principal_input, 
@@ -289,7 +262,6 @@ if df_crudo is not None and not df_crudo.empty:
         if not selected_marcas: df_filtered = pd.DataFrame(columns=df_vista.columns)
         else: df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
 
-        # --- VISUALIZACIÓN DE MÉTRICAS Y CONSEJOS ---
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         df_excedente_kpi = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]
