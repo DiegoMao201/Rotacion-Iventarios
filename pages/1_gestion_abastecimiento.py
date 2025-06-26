@@ -30,19 +30,30 @@ if 'df_analisis' in st.session_state:
         df_traslados = df_tienda[df_tienda['Unidades_Traslado_Sugeridas'] > 0].copy()
         
         if not df_traslados.empty:
-            # *** NUEVA LÓGICA DE SELECCIÓN MÚLTIPLE ***
             select_all_traslados = st.checkbox("Seleccionar Todos los Traslados", value=False, key="select_all_traslados")
             df_traslados['Ejecutar ✅'] = select_all_traslados
             
-            columnas_traslado = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Segmento_ABC']
+            # --- MEJORA: Añadir peso a la tabla ---
+            columnas_traslado = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Unidades_Traslado_Sugeridas', 'Peso_Traslado_Sugerido', 'Sugerencia_Traslado', 'Segmento_ABC']
+            
             st.info("Marca los traslados que deseas ejecutar. El plan se actualizará dinámicamente.", icon="✍️")
-            df_editado_traslados = st.data_editor(df_traslados[columnas_traslado], hide_index=True, use_container_width=True, key="editor_traslados")
+            df_editado_traslados = st.data_editor(
+                df_traslados[columnas_traslado], 
+                column_config={"Peso_Traslado_Sugerido": st.column_config.NumberColumn("Peso Total (kg)", format="%.2f kg")},
+                hide_index=True, use_container_width=True, key="editor_traslados"
+            )
             
             df_plan_traslado = df_editado_traslados[df_editado_traslados['Ejecutar ✅'] == True]
             if not df_plan_traslado.empty:
                 st.subheader("Resumen del Plan de Traslado Seleccionado")
                 total_unidades = df_plan_traslado['Unidades_Traslado_Sugeridas'].sum()
-                st.metric(label="Total Unidades a Mover", value=f"{total_unidades}")
+                # --- MEJORA: Calcular y mostrar peso total ---
+                total_peso = df_plan_traslado['Peso_Traslado_Sugerido'].sum()
+                
+                col1, col2 = st.columns(2)
+                col1.metric(label="Total Unidades a Mover", value=f"{total_unidades}")
+                col2.metric(label="⚖️ Peso Total Estimado", value=f"{total_peso:,.2f} kg")
+
                 excel_traslados = to_excel(df_plan_traslado.drop(columns=['Ejecutar ✅']))
                 st.download_button(label="📥 Descargar Plan de Traslado", data=excel_traslados, file_name=f"plan_traslado_{selected_almacen}.xlsx")
         else:
@@ -52,22 +63,32 @@ if 'df_analisis' in st.session_state:
         st.header("🛒 Plan de Compras a Proveedor", divider='blue')
         df_compras = df_tienda[df_tienda['Sugerencia_Compra'] > 0].copy()
         if not df_compras.empty:
-            # *** NUEVA LÓGICA DE SELECCIÓN MÚLTIPLE ***
             select_all_compras = st.checkbox("Seleccionar Todas las Compras", value=False, key="select_all_compras")
             df_compras['Ejecutar ✅'] = select_all_compras
 
-            columnas_compra = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Sugerencia_Compra', 'Segmento_ABC']
+            # --- MEJORA: Añadir peso a la tabla ---
+            columnas_compra = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Sugerencia_Compra', 'Peso_Compra_Sugerida', 'Segmento_ABC']
+            
             st.info("Marca los SKUs para la próxima orden de compra.", icon="✍️")
-            df_editado_compras = st.data_editor(df_compras[columnas_compra], hide_index=True, use_container_width=True, key="editor_compras")
+            df_editado_compras = st.data_editor(
+                df_compras[columnas_compra],
+                column_config={"Peso_Compra_Sugerida": st.column_config.NumberColumn("Peso Total (kg)", format="%.2f kg")},
+                hide_index=True, use_container_width=True, key="editor_compras"
+            )
             
             df_plan_compra = df_editado_compras[df_editado_compras['Ejecutar ✅'] == True]
             if not df_plan_compra.empty:
                 st.subheader("Resumen del Plan de Compra Seleccionado")
                 total_unidades_compra = df_plan_compra['Sugerencia_Compra'].sum()
                 valor_compra = (df_plan_compra['Sugerencia_Compra'] * df_plan_compra['Costo_Promedio_UND']).sum()
-                col1, col2 = st.columns(2)
+                # --- MEJORA: Calcular y mostrar peso total ---
+                total_peso_compra = df_plan_compra['Peso_Compra_Sugerida'].sum()
+                
+                col1, col2, col3 = st.columns(3)
                 col1.metric(label="Total Unidades a Comprar", value=f"{total_unidades_compra}")
                 col2.metric(label="Valor Estimado de la Compra", value=f"${valor_compra:,.0f}")
+                col3.metric(label="⚖️ Peso Total Estimado", value=f"{total_peso_compra:,.2f} kg")
+                
                 excel_compras = to_excel(df_plan_compra.drop(columns=['Ejecutar ✅']))
                 st.download_button(label="📥 Descargar Plan de Compra", data=excel_compras, file_name=f"plan_compra_{selected_almacen}.xlsx")
         else:
