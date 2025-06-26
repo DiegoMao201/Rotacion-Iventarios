@@ -59,20 +59,37 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     }
     df.rename(columns=column_mapping, inplace=True)
     
-    # --- MEJORA: Renombrar Marcas según tu imagen ---
-    # Convertimos la columna marca a string para un mapeo seguro
-    df['Marca'] = df['Marca'].astype(str)
-
+    # --- *** CORRECCIÓN CLAVE: Mapeo robusto de Marcas *** ---
+    
+    # 1. Diccionario corregido según tu imagen.
     marca_map = {
-        '41': 'TERINSA', '50': 'P8-ASC-MEGA', '54': 'MPY-International',
-        '55': 'DPP-AN COLORANTS LATAM', '56': 'DPP-Pintuco Profesional',
-        '57': 'ASC-Mega', '58': 'DPP-Pintuco', '59': 'DPP-Madetec',
-        '60': 'POW-Interpon', '61': 'various', '62': 'DPP-ICO',
-        '63': 'DPP-Terinsa', '64': 'MPY-Pintuco', '65': 'non-AN Third Party',
-        '66': 'ICO-AN Packaging', '67': 'ASC-Automotive OEM', '68': 'POW-Resicoat'
+        '41': 'TERINSA',
+        '50': 'P8-ASC-MEGA',
+        '54': 'MPY-International',
+        '55': 'DPP-AN COLORANTS LATAM',
+        '56': 'DPP-Pintuco Profesional',
+        '57': 'ASC-Mega',
+        '58': 'DPP-Pintuco',
+        '59': 'DPP-Madetec',
+        '60': 'POW-Interpon',
+        '61': 'various',
+        '62': 'DPP-ICO',
+        '63': 'DPP-Terinsa',
+        '64': 'MPY-Pintuco',
+        '65': 'non-AN Third Party',
+        '66': 'ICO-AN Packaging',
+        '67': 'ASC-Automotive OEM',
+        '68': 'POW-Resicoat'
     }
-    # Creamos una nueva columna 'Marca_Nombre' con los nombres legibles
-    df['Marca_Nombre'] = df['Marca'].map(marca_map).fillna('Complementarios')
+    
+    # 2. Limpieza y conversión segura del tipo de dato antes de mapear.
+    # Esto convierte números como 58.0 o 58 a texto "58" para que coincida con el diccionario.
+    if 'Marca' in df.columns:
+        df['Marca_str'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str)
+        df['Marca_Nombre'] = df['Marca_str'].map(marca_map).fillna('Complementarios')
+    else:
+        df['Marca_Nombre'] = 'No especificada'
+
 
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo']
     for col in numeric_cols:
@@ -153,6 +170,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     return df
 
 # --- INTERFAZ DE USUARIO ---
+# El resto de la UI es idéntico al anterior, pero ahora recibirá los datos con las marcas corregidas.
 st.title("🚀 Plan de Acción de Inventario por Marca")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
@@ -171,7 +189,6 @@ if df_crudo is not None and not df_crudo.empty:
         
         df_tienda = df_analisis_completo[df_analisis_completo['Almacen'] == selected_almacen]
 
-        # --- MEJORA: Filtro por Marca ---
         lista_marcas = sorted(df_tienda['Marca_Nombre'].unique())
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas)
         
@@ -197,7 +214,6 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown("---")
         
-        # --- MEJORA: Panel de Consejos Automáticos ---
         st.markdown('<p class="section-header">💡 Consejos Automáticos</p>', unsafe_allow_html=True)
         with st.container(border=True):
             if skus_quiebre > 0:
@@ -207,7 +223,7 @@ if df_crudo is not None and not df_crudo.empty:
                 else:
                     st.warning(f"**Atención:** Tienes **{skus_quiebre} SKUs en quiebre de stock**. Abastécelos pronto para no afectar el servicio al cliente.")
 
-            if (valor_excedente / valor_total_inv > 0.25) and valor_total_inv > 0:
+            if valor_total_inv > 0 and (valor_excedente / valor_total_inv > 0.25):
                 st.error(f"**Alerta de Capital Inmovilizado:** Más del 25% de tu inventario (${valor_excedente:,.0f}) está en excedente. Es vital que vayas a la página de 'Análisis de Excedentes' y crees un plan de liquidación.")
             
             st.info("**Recordatorio de Rotación:** Revisa el gráfico de 'Rotación Promedio por Marca'. Las marcas con baja rotación podrían necesitar un impulso promocional, mientras que las de alta rotación deben tener su stock de seguridad bien vigilado.")
@@ -232,7 +248,6 @@ if df_crudo is not None and not df_crudo.empty:
         col_viz1, col_viz2 = st.columns(2)
 
         with col_viz1:
-            # --- MEJORA: Gráfico por Marca ---
             df_rotacion_marca = df_filtered[df_filtered['Stock'] > 0].groupby('Marca_Nombre')['Rotacion_60_Dias'].mean().nlargest(15).sort_values()
             fig = px.bar(df_rotacion_marca, x='Rotacion_60_Dias', y=df_rotacion_marca.index, orientation='h',
                          title='Top 15 Marcas por Rotación Promedio', text_auto='.2f',
@@ -243,7 +258,7 @@ if df_crudo is not None and not df_crudo.empty:
             fig2 = px.pie(df_valor_marca, values='Valor_Inventario', names='Marca_Nombre', 
                           title='Distribución del Valor por Marca (Top 15)', hole=0.4)
             fig2.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
             
     else:
         st.warning("El análisis no produjo resultados. Revisa el archivo de origen.")
