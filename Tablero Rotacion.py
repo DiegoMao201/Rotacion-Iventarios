@@ -161,12 +161,13 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     def definir_estado_y_accion(row):
         if row['Stock'] <= 0 and row['Demanda_Diaria_Promedio'] > 0: return 'Quiebre de Stock', 'ABASTECIMIENTO URGENTE'
         if row['Stock'] > 0 and row['Stock'] < row['Punto_Reorden']: return 'Bajo Stock (Riesgo)', 'REVISAR ABASTECIMIENTO'
+        # Corregir potencial división por cero si demanda diaria es cero
         if row['Demanda_Diaria_Promedio'] > 0 and (row['Stock'] / row['Demanda_Diaria_Promedio']) > 90: return 'Excedente', 'LIQUIDAR / PROMOCIONAR'
         if row['Stock'] > 0 and row['Demanda_Diaria_Promedio'] <= 0: return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
 
-    # --- LÓGICA DE SUGERENCIAS DE ABASTECIMIENTO (COMPLETAMENTE CORREGIDA) ---
+    # --- LÓGICA DE SUGERENCIAS DE ABASTECIMIENTO ---
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
@@ -190,11 +191,8 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
             if not almacenes_con_excedente.empty:
                 origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen_Nombre'] != almacen_necesitado_nombre]
             
-            # --- MEJORA CLAVE: ESTRATEGIA DE REPOSICIÓN MIN-MAX ---
-            # El stock objetivo (Max) se basa en los "Días de Inventario Objetivo" configurables.
-            # El "Punto de Reorden" actúa como el "Min".
             segmento = df_analisis.loc[idx_necesidad, 'Segmento_ABC']
-            dias_inventario_objetivo = dias_objetivo.get(segmento, dias_objetivo['C']) # Default al valor de C
+            dias_inventario_objetivo = dias_objetivo.get(segmento, dias_objetivo['C']) 
             
             stock_objetivo = df_analisis.loc[idx_necesidad, 'Demanda_Diaria_Promedio'] * dias_inventario_objetivo
             cantidad_necesaria_total = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
@@ -226,6 +224,25 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
 st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
+# --- MEJORA: AÑADIR EXPLICACIÓN DE CLASIFICACIÓN ABC ---
+with st.expander("ℹ️ ¿Cómo interpretar la Clasificación ABC y los Días de Inventario?"):
+    st.markdown("""
+    La **Clasificación ABC** es un método para organizar los productos de tu inventario en tres categorías, basadas en su importancia para las ventas. Esto te ayuda a enfocar tus esfuerzos y capital en lo que más importa.
+
+    - **👑 Productos Clase A:** Son tus productos **VIP**. Son pocos (generalmente el 20% de tus artículos) pero representan la mayor parte de tus ingresos (aprox. el 80%).
+      - **Estrategia:** Debes monitorearlos de cerca. Evita los quiebres de stock a toda costa, pero también el exceso de inventario, ya que inmovilizan mucho capital. Por eso, se les asigna un **objetivo de días de inventario más bajo**.
+
+    - **👍 Productos Clase B:** Son importantes, pero no tan críticos como los A. Representan el siguiente 30% de tus artículos y un 15% de las ventas.
+      - **Estrategia:** Tienen una política de control más moderada. Se les asigna un nivel de inventario intermedio.
+
+    - **📦 Productos Clase C:** Es la gran mayoría de tus productos (el 50% restante), pero individualmente aportan muy poco a las ventas (el 5% del total).
+      - **Estrategia:** El control puede ser más relajado. Un stock de seguridad más alto es aceptable, ya que el costo financiero es bajo.
+
+    ---
+    
+    Los **"Días de Inventario Objetivo"** que configuras en la barra lateral le dicen al sistema cuál es el **nivel máximo de stock** que deseas tener para cada clase de producto, medido en días de venta. El sistema sugerirá compras o traslados para alcanzar ese nivel objetivo.
+    """)
+
 df_crudo = cargar_datos_desde_dropbox()
 
 if df_crudo is not None and not df_crudo.empty:
@@ -238,16 +255,17 @@ if df_crudo is not None and not df_crudo.empty:
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Días de Inventario Objetivo (Max)**")
     st.sidebar.info("Define el nivel máximo de stock al que se debe reabastecer cada producto.", icon="🎯")
-    dias_obj_a = st.sidebar.slider("Clase A", min_value=15, max_value=45, value=30)
-    dias_obj_b = st.sidebar.slider("Clase B", min_value=30, max_value=60, value=45)
-    dias_obj_c = st.sidebar.slider("Clase C", min_value=45, max_value=90, value=60)
+    dias_obj_a = st.sidebar.slider("Clase A (VIPs)", min_value=15, max_value=45, value=30)
+    dias_obj_b = st.sidebar.slider("Clase B (Importantes)", min_value=30, max_value=60, value=45)
+    dias_obj_c = st.sidebar.slider("Clase C (Generales)", min_value=45, max_value=90, value=60)
 
-    # Ejecutar análisis con los nuevos parámetros
-    dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
-    df_analisis_completo = analizar_inventario_completo(df_crudo, 
-                                                        almacen_principal=almacen_principal_input, 
-                                                        dias_seguridad=dias_seguridad_input,
-                                                        dias_objetivo=dias_objetivo_dict)
+    # --- MEJORA: AÑADIR MENSAJE DE ESPERA (SPINNER) DURANTE EL ANÁLISIS ---
+    with st.spinner("Analizando inventario y calculando sugerencias... Por favor espera, esto puede tardar unos minutos."):
+        dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
+        df_analisis_completo = analizar_inventario_completo(df_crudo, 
+                                                            almacen_principal=almacen_principal_input, 
+                                                            dias_seguridad=dias_seguridad_input,
+                                                            dias_objetivo=dias_objetivo_dict)
     
     st.session_state['df_analisis'] = df_analisis_completo
 
@@ -308,7 +326,7 @@ if df_crudo is not None and not df_crudo.empty:
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
-            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="�")
+            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
         with col_nav4:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
