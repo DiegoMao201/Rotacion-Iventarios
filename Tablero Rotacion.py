@@ -27,9 +27,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. LÓGICA DE CARGA Y ANÁLISIS (Se mantiene igual) ---
+# --- 2. LÓGICA DE CARGA Y ANÁLISIS ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
+    """
+    Se conecta a Dropbox y descarga el archivo de inventario.
+    """
     info_message = st.empty()
     info_message.info("Conectando a Dropbox para obtener los datos más recientes...", icon="☁️")
     try:
@@ -46,42 +49,55 @@ def cargar_datos_desde_dropbox():
 
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_dias=10, dias_seguridad=7):
+    """
+    Aplica toda la lógica de negocio al DataFrame de inventario.
+    """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
+    
     df = _df_crudo.copy()
     df.columns = df.columns.str.strip().str.upper()
+    
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
         'REFERENCIA': 'SKU', 'MARCA': 'Marca'
     }
     df.rename(columns=column_mapping, inplace=True)
+    
     essential_cols = ['Almacen', 'SKU', 'Stock', 'Ventas_60_Dias']
     if not all(col in df.columns for col in essential_cols):
         st.error("Faltan columnas esenciales en el archivo de origen.", icon="🚨")
         return pd.DataFrame()
+
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
+    
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     df['Almacen'] = df['Almacen'].astype(str)
     df['Demanda_Diaria_Promedio'] = df['Ventas_60_Dias'] / 60
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
+    
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
+
     df_ventas_total = df.copy()
     df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
     ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
     total_ventas_valor = ventas_sku.sum()
+    
     if total_ventas_valor > 0:
         sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas_valor
     else:
         sku_to_percent = pd.Series(0, index=ventas_sku.index)
+    
     def segmentar_abc(p):
         if p <= 0.8: return 'A'
         if p <= 0.95: return 'B'
         return 'C'
     df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc).fillna('C')
+
     def definir_estado_y_accion(row):
         if row['Stock'] <= 0 and row['Demanda_Diaria_Promedio'] > 0:
             return 'Quiebre de Stock', 'ABASTECIMIENTO URGENTE'
@@ -93,9 +109,11 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
             return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
+
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
+    
     df_analisis = df.copy()
     skus_necesitados = df_analisis[df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])]['SKU'].unique()
     for sku in skus_necesitados:
