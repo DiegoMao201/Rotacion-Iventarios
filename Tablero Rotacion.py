@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 import warnings
 
 # --- 0. CONFIGURACIÓN INICIAL Y ADVERTENCIAS ---
-warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning) 
+# CORRECCIÓN: La advertencia es estándar, no de numpy.
+warnings.filterwarnings("ignore", category=VisibleDeprecationWarning) 
 st.set_page_config(
     page_title="Resumen Ejecutivo de Inventario",
     page_icon="🚀",
@@ -238,10 +239,26 @@ if df_crudo is not None and not df_crudo.empty:
         
         # El resto de la UI se mantiene igual
         st.markdown('<p class="section-header">💡 Consejos Automáticos</p>', unsafe_allow_html=True)
-        # ...
+        with st.container(border=True):
+            if not df_filtered.empty:
+                productos_tendencia_fuerte = df_filtered[df_filtered['Demanda_Diaria_Promedio'] > 0.5] # Asumiendo tendencia por demanda
+                if not productos_tendencia_fuerte.empty:
+                    st.info(f"**Oportunidad de Crecimiento:** Productos como **{productos_tendencia_fuerte.iloc[0]['SKU']}** están acelerando sus ventas. Asegúrate de tener suficiente stock de seguridad para ellos.")
+                if skus_quiebre > 5:
+                    st.warning(f"**Prioridad Alta:** Tienes **{skus_quiebre} SKUs en quiebre de stock**. Visita 'Gestión de Abastecimiento' para evitar pérdidas de venta.")
+                if valor_total_inv > 0 and (valor_excedente / valor_total_inv > 0.25):
+                    st.error(f"**Alerta de Capital:** Más del 25% de tu inventario es excedente. Visita 'Análisis de Excedentes' para crear un plan de liquidación.")
 
         st.markdown("---")
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
-        # ...
+        col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
+        with col_nav1:
+            st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="🚚")
+        with col_nav2:
+            st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
+        with col_nav3:
+            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="�")
+        with col_nav4:
+            st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
