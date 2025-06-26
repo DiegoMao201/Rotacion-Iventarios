@@ -44,8 +44,17 @@ def cargar_datos_desde_dropbox():
             metadata, res = dbx.files_download(path=dbx_creds["file_path"])
             
             with io.BytesIO(res.content) as stream:
-                # Se añade sep=',' y engine='python' para manejar errores de tokenización.
-                df_crudo = pd.read_csv(stream, encoding='latin1', sep=',', engine='python')
+                # *** CORRECCIÓN FINAL Y MÁS ROBUSTA ***
+                # Se añaden los parámetros quotechar y quoting para manejar correctamente
+                # las comas dentro de los campos de texto (ej. en las descripciones).
+                df_crudo = pd.read_csv(
+                    stream, 
+                    encoding='latin1', 
+                    sep=',', 
+                    engine='python',
+                    quotechar='"', # Define el caracter para encerrar texto.
+                    quoting=1      # QUOTE_MINIMAL: respeta las comillas en el archivo.
+                )
             
             # Limpiamos el mensaje de "cargando" y mostramos éxito
             info_message.empty()
@@ -77,35 +86,38 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
         
     df = _df_crudo.copy()
 
-    # Limpieza y renombrado de columnas (tu lógica original)
-    df.columns = df.columns.str.strip()
+    # Limpieza y renombrado de columnas para que coincidan con la consulta SQL
+    df.columns = df.columns.str.strip().str.upper() # Convertir a mayúsculas para consistencia
+    
+    # El mapeo ahora usa los nombres de columna EXACTOS de tu consulta SQL.
     column_mapping = {
-        'Código almacén': 'Almacen', 'DEPARTAMENMTO': 'Departamento',
-        'Descripción': 'Descripcion', 'UNIDADES_VENDIDAS': 'Ventas_60_Dias',
-        'STOCK': 'Stock', 'PRECIO DE PROMOCION': 'Precio_Promocion',
-        'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND', 'Referencia': 'SKU',
-        'PESO ARTICULO': 'PESO_ARTICULO', 'Peso_Articulo': 'PESO_ARTICULO',
-        'Peso articulo': 'PESO_ARTICULO', 'PesoArticulo': 'PESO_ARTICULO',
-        'peso_articulo': 'PESO_ARTICULO', 'peso articulo': 'PESO_ARTICULO'
+        'CODALMACEN': 'Almacen',
+        'DEPARTAMENTO': 'Departamento',
+        'DESCRIPCION': 'Descripcion',
+        'UNIDADES_VENDIDAS': 'Ventas_60_Dias',
+        'STOCK': 'Stock',
+        'PRECIO_PROMOCION': 'Precio_Promocion', # Asumiendo que esta columna existe
+        'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
+        'REFERENCIA': 'SKU',
+        'PESO_ARTICULO': 'PESO_ARTICULO'
     }
-    df.rename(columns=column_mapping, inplace=True, errors='ignore')
+    df.rename(columns=column_mapping, inplace=True)
 
-    # *** MEJORA CLAVE: Validación de Columnas Esenciales ***
-    # Se verifica que las columnas clave existan después del renombrado para evitar KeyErrors.
+    # Validación de Columnas Esenciales
     essential_cols_map = {
-        'Almacen': "'Código almacén'",
-        'SKU': "'Referencia'",
+        'Almacen': "'CODALMACEN'",
+        'SKU': "'REFERENCIA'",
         'Stock': "'STOCK'",
         'Ventas_60_Dias': "'UNIDADES_VENDIDAS'"
     }
     missing_cols = [original_name for col, original_name in essential_cols_map.items() if col not in df.columns]
 
     if missing_cols:
-        st.error(f"**Error Crítico de Datos:**\n\nNo se encontraron las siguientes columnas esenciales en tu archivo `Rotacion.csv`:\n\n* **{', '.join(missing_cols)}**\n\nPor favor, asegúrate de que tu archivo CSV contenga estas columnas para que el análisis pueda continuar.")
+        st.error(f"**Error Crítico de Datos:**\n\nNo se encontraron las siguientes columnas esenciales en tu archivo `Rotacion.csv`:\n\n* **{', '.join(missing_cols)}**\n\nPor favor, asegúrate de que tu consulta SQL genere estas columnas para que el análisis pueda continuar.")
         return pd.DataFrame() # Devuelve un DF vacío para detener el proceso de forma segura.
 
 
-    # Preprocesamiento y conversión de tipos (tu lógica original)
+    # Preprocesamiento y conversión de tipos
     for col in ['Ventas_60_Dias', 'Precio_Promocion', 'Costo_Promedio_UND']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
@@ -121,19 +133,22 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
 
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     df['Almacen'] = df['Almacen'].astype(str)
-    df['Departamento'] = df['Departamento'].astype(str)
+    
+    if 'Departamento' not in df.columns:
+        df['Departamento'] = 'No especificado'
+    else:
+        df['Departamento'] = df['Departamento'].astype(str).fillna('No especificado')
 
-    # El resto de esta función es TU LÓGICA DE ANÁLISIS, sin cambios.
-    # --- Cálculo de Métricas Clave ---
+
+    # Cálculo de Métricas Clave
     df['Demanda_Diaria_Promedio'] = df['Ventas_60_Dias'] / 60
     df['Rotacion_60_Dias'] = df.apply(lambda r: r['Ventas_60_Dias'] / r['Stock'] if r['Stock'] > 0 else 0, axis=1)
     df['Dias_Inventario'] = df.apply(lambda r: (r['Stock'] / r['Demanda_Diaria_Promedio']) if r['Demanda_Diaria_Promedio'] > 0 else np.inf, axis=1)
     
-    # --- Segmentación ABC ---
+    # Segmentación ABC
     ventas_sku = df.groupby('SKU')['Ventas_60_Dias'].sum()
     total_ventas = ventas_sku.sum()
     
-    # Creamos un mapeo de SKU a su porcentaje acumulado
     if total_ventas > 0:
         sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas
     else:
@@ -146,7 +161,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
 
     df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(segmentar_abc).fillna('C')
 
-    # --- Segmentación por Estado de Inventario Local ---
+    # Segmentación por Estado de Inventario Local
     def segmentar_estado(row):
         if row['Stock'] <= 0 and row['Demanda_Diaria_Promedio'] > 0: return 'Quiebre de Stock'
         if row['Stock'] > 0 and row['Demanda_Diaria_Promedio'] <= 0: return 'Baja Rotación / Obsoleto'
@@ -155,11 +170,10 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
         return 'Normal'
     df['Estado_Inventario_Local'] = df.apply(segmentar_estado, axis=1)
 
-    # --- Lógica de Reparto de Inventario ---
+    # Lógica de Reparto de Inventario
     df['Sugerencia_Traslado'] = 'No aplica traslado.'
     df['Unidades_Traslado_Sugeridas'] = 0
     
-    # Trabajamos sobre una copia para no afectar el df original durante la iteración
     df_reparto = df.copy()
 
     for sku in df_reparto['SKU'].unique():
@@ -167,7 +181,6 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
         if not necesidad_mask.any():
             continue
 
-        # Almacenes con excedente real para este SKU
         excedente_df = df_reparto[(df_reparto['SKU'] == sku) & (df_reparto['Stock'] > 0) & (df_reparto['Almacen'] != almacen_principal)].copy()
         
         for idx_necesidad in df_reparto[necesidad_mask].index:
@@ -182,26 +195,21 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155'):
             origenes_sugeridos = []
             unidades_acumuladas = 0
 
-            # Iterar sobre los almacenes con excedente para este SKU
             for idx_excedente, row_excedente in excedente_df.iterrows():
                 if row_excedente['Stock'] > 0:
                     cantidad_a_mover = min(cantidad_necesaria, row_excedente['Stock'])
                     origenes_sugeridos.append(f"Almacén {row_excedente['Almacen']} ({int(cantidad_a_mover)} u.)")
-                    
-                    # Actualizar el stock disponible en la copia temporal para que no se ofrezca dos veces
                     excedente_df.loc[idx_excedente, 'Stock'] -= cantidad_a_mover
-                    
                     cantidad_necesaria -= cantidad_a_mover
                     unidades_acumuladas += cantidad_a_mover
                     if cantidad_necesaria <= 0:
                         break
             
             if origenes_sugeridos:
-                # Asignar los resultados al DataFrame original
                 df.loc[idx_necesidad, 'Sugerencia_Traslado'] = f"Desde: {', '.join(origenes_sugeridos)}"
                 df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(unidades_acumuladas)
     
-    # --- Recomendaciones finales y limpieza ---
+    # Recomendaciones finales
     df['Recomendacion'] = 'Mantener monitoreo.'
     df.loc[df['Estado_Inventario_Local'] == 'Quiebre de Stock', 'Recomendacion'] = '¡Prioridad máxima! Reabastecer inmediatamente.'
     df.loc[df['Estado_Inventario_Local'] == 'Baja Rotación / Obsoleto', 'Recomendacion'] = 'Considerar liquidación o descontinuación.'
@@ -236,7 +244,6 @@ st.markdown("Análisis automatizado a partir de los datos más recientes en Drop
 df_crudo = cargar_datos_desde_dropbox()
 
 # --- ESTRUCTURA PRINCIPAL DE LA APLICACIÓN ---
-# Se verifica si los datos se cargaron correctamente antes de intentar mostrar el tablero.
 if df_crudo is not None and not df_crudo.empty:
 
     # --- BARRA LATERAL CON FILTROS Y OPCIONES ---
@@ -251,13 +258,12 @@ if df_crudo is not None and not df_crudo.empty:
     # Ejecutar el análisis completo con el DataFrame cargado
     df_analisis = analizar_inventario_completo(df_crudo, almacen_principal_input)
 
-    # --- Continuar solo si el análisis fue exitoso (no devolvió un DF vacío) ---
+    # --- Continuar solo si el análisis fue exitoso ---
     if not df_analisis.empty:
         # Filtros basados en el DataFrame analizado
         st.sidebar.markdown("---")
         st.sidebar.subheader("Filtros del Tablero")
 
-        # Obtener listas de opciones únicas y ordenadas para los filtros
         opciones_almacen = sorted(df_analisis['Almacen'].unique())
         opciones_departamento = sorted(df_analisis['Departamento'].unique())
         opciones_estado = sorted(df_analisis['Estado_Inventario_Local'].unique())
@@ -279,8 +285,6 @@ if df_crudo is not None and not df_crudo.empty:
             df_filtered = df_filtered[df_filtered['Estado_Inventario_Local'].isin(selected_estados)]
 
         # --- CUERPO PRINCIPAL DEL TABLERO ---
-        
-        # Se muestra el tablero completo SOLO SI hay datos después de filtrar.
         if not df_filtered.empty:
             # KPIs
             st.header("📊 Métricas Clave (Inventario Filtrado)")
@@ -358,7 +362,6 @@ if df_crudo is not None and not df_crudo.empty:
             # Mensaje que se muestra si los filtros no arrojan resultados.
             st.warning("No se encontraron datos con los filtros seleccionados. Por favor, ajusta tus filtros en la barra lateral.")
 
-# Mensaje final si la carga inicial de datos falla.
-# El script termina de forma natural, mostrando el mensaje de error de la función cargar_datos_desde_dropbox().
 else:
+    # Mensaje final si la carga inicial de datos falla.
     st.warning("La carga de datos inicial ha fallado o el archivo está vacío. Por favor, revisa los mensajes de error de arriba.")
