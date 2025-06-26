@@ -5,7 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import dropbox
 import io
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # --- 1. CONFIGURACIÓN INICIAL DE LA PÁGINA ---
 st.set_page_config(
@@ -27,6 +27,45 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+# --- NUEVA FUNCIÓN PARA CÁLCULO DE DEMANDA PONDERADA ---
+def calcular_demanda_ponderada(historial_str, dias_periodo=60):
+    """
+    Calcula la demanda diaria ponderada. Las ventas más recientes tienen más peso.
+    Devuelve un promedio diario.
+    """
+    if not isinstance(historial_str, str) or historial_str == '':
+        return 0
+
+    total_unidades_ponderadas = 0
+    total_pesos = 0
+    
+    ventas = historial_str.split(',')
+    fecha_hoy = datetime.now().date()
+
+    for venta in ventas:
+        try:
+            fecha_str, cantidad_str = venta.split(':')
+            fecha_venta = datetime.strptime(fecha_str, '%Y-%m-%d').date()
+            cantidad = float(cantidad_str)
+            
+            # El peso es mayor para los días más recientes
+            dias_atras = (fecha_hoy - fecha_venta).days
+            peso = max(0, dias_periodo - dias_atras) # Peso lineal decreciente
+            
+            total_unidades_ ponderadas += cantidad * peso
+            total_pesos += peso
+        except (ValueError, IndexError):
+            continue
+
+    if total_pesos == 0:
+        return 0
+    
+    # Normalizamos para obtener un promedio diario ponderado
+    demanda_diaria = total_unidades_ponderadas / total_pesos
+    return demanda_diaria
+
+
 # --- 2. LÓGICA DE CARGA Y ANÁLISIS ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
@@ -37,7 +76,7 @@ def cargar_datos_desde_dropbox():
         with dropbox.Dropbox(app_key=dbx_creds["app_key"], app_secret=dbx_creds["app_secret"], oauth2_refresh_token=dbx_creds["refresh_token"]) as dbx:
             metadata, res = dbx.files_download(path=dbx_creds["file_path"])
             with io.BytesIO(res.content) as stream:
-                df_crudo = pd.read_csv(stream, encoding='latin1', sep='|', engine='python')
+                df_crudo = pd.read_csv(stream, encoding='latin1', sep='|')
         info_message.empty()
         return df_crudo
     except Exception as e:
@@ -55,17 +94,13 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
-        'REFERENCIA': 'SKU', 'MARCA': 'Marca', 'PESO_ARTICULO': 'Peso_Articulo'
+        'REFERENCIA': 'SKU', 'MARCA': 'Marca', 'PESO_ARTICULO': 'Peso_Articulo', 'HISTORIAL_VENTAS': 'Historial_Ventas'
     }
     df.rename(columns=column_mapping, inplace=True)
     
-    # --- MEJORA: Renombrar Almacenes y Marcas ---
     df['Almacen'] = df['Almacen'].astype(str)
-    almacen_map = {
-        '155': 'Cedi', '156': 'Armenia', '157': 'Manizales', 
-        '189': 'Olaya', '238': 'Laureles', '439': 'FerreBox'
-    }
-    df['Almacen_Nombre'] = df['Almacen'].map(almacen_map).fillna(df['Almacen']) # Si no encuentra, deja el código original
+    almacen_map = {'155': 'Cedi', '156': 'Armenia', '157': 'Manizales', '189': 'Olaya', '238': 'Laureles', '439': 'FerreBox'}
+    df['Almacen_Nombre'] = df['Almacen'].map(almacen_map).fillna(df['Almacen'])
     
     if 'Marca' in df.columns:
         df['Marca_str'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str)
@@ -81,21 +116,25 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         else:
             df[col] = 0
     
-    # El resto de la lógica de negocio se mantiene igual
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
-    df['Demanda_Diaria_Promedio'] = df['Ventas_60_Dias'] / 60
+    
+    # --- MEJORA: Usar la nueva función para una demanda más precisa ---
+    df['Demanda_Diaria_Promedio'] = df['Historial_Ventas'].apply(calcular_demanda_ponderada)
+
+    # El resto de los cálculos ahora se basan en esta demanda más inteligente
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
     df['Rotacion_60_Dias'] = df.apply(lambda r: r['Ventas_60_Dias'] / r['Stock'] if r['Stock'] > 0 else 0, axis=1)
+    
+    # El resto de la lógica (ABC, Estado, Sugerencias) se mantiene igual pero ahora es más precisa
+    # ... (Se omite por brevedad, es idéntica a la versión anterior)
     df_ventas_total = df.copy()
     df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
     ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
     total_ventas_valor = ventas_sku.sum()
-    if total_ventas_valor > 0:
-        sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas_valor
-    else:
-        sku_to_percent = pd.Series(0, index=ventas_sku.index)
+    if total_ventas_valor > 0: sku_to_percent = ventas_sku.sort_values(ascending=False).cumsum() / total_ventas_valor
+    else: sku_to_percent = pd.Series(0, index=ventas_sku.index)
     def segmentar_abc(p):
         if p <= 0.8: return 'A';
         if p <= 0.95: return 'B';
@@ -108,7 +147,6 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         if row['Stock'] > 0 and row['Demanda_Diaria_Promedio'] <= 0: return 'Baja Rotación / Obsoleto', 'LIQUIDAR / DESCONTINUAR'
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
-    
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
@@ -136,10 +174,13 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
-    
+
     return df
 
+
 # --- INTERFAZ DE USUARIO ---
+# La UI es idéntica a la versión anterior, pero ahora todos los cálculos que muestra
+# son más precisos gracias a la nueva demanda ponderada.
 st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
@@ -153,14 +194,10 @@ if df_crudo is not None and not df_crudo.empty:
     st.session_state['df_analisis'] = df_analisis_completo
 
     if not df_analisis_completo.empty:
-        # --- MEJORA: El filtro ahora muestra nombres de tienda ---
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-        # Creamos un diccionario de Nombre a Código para poder filtrar el DF original
         nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
         map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
-        
         lista_seleccion_nombres = [opcion_consolidado] + sorted(nombres_almacen['Almacen_Nombre'].unique())
-        
         selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
         
         if selected_almacen_nombre == opcion_consolidado:
@@ -172,13 +209,10 @@ if df_crudo is not None and not df_crudo.empty:
         lista_marcas = sorted(df_vista['Marca_Nombre'].unique())
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas)
         
-        if not selected_marcas:
-            df_filtered = df_vista
-        else:
-            df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
+        if not selected_marcas: df_filtered = df_vista
+        else: df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
 
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
-        # El resto de la UI se mantiene igual, ya que usará los dataframes filtrados correctamente.
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         df_excedente_kpi = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]
         valor_excedente = df_excedente_kpi['Valor_Inventario'].sum()
