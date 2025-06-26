@@ -28,7 +28,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- NUEVA FUNCIÓN PARA CÁLCULO DE DEMANDA PONDERADA ---
+# --- NUEVA FUNCIÓN PARA CÁLCULO DE DEMANDA PONDERADA (CORREGIDA) ---
 def calcular_demanda_ponderada(historial_str, dias_periodo=60):
     """
     Calcula la demanda diaria ponderada. Las ventas más recientes tienen más peso.
@@ -49,11 +49,11 @@ def calcular_demanda_ponderada(historial_str, dias_periodo=60):
             fecha_venta = datetime.strptime(fecha_str, '%Y-%m-%d').date()
             cantidad = float(cantidad_str)
             
-            # El peso es mayor para los días más recientes
             dias_atras = (fecha_hoy - fecha_venta).days
-            peso = max(0, dias_periodo - dias_atras) # Peso lineal decreciente
+            peso = max(0, dias_periodo - dias_atras)
             
-            total_unidades_ ponderadas += cantidad * peso
+            # *** CORRECCIÓN: Se eliminó el espacio en el nombre de la variable ***
+            total_unidades_ponderadas += cantidad * peso
             total_pesos += peso
         except (ValueError, IndexError):
             continue
@@ -61,7 +61,6 @@ def calcular_demanda_ponderada(historial_str, dias_periodo=60):
     if total_pesos == 0:
         return 0
     
-    # Normalizamos para obtener un promedio diario ponderado
     demanda_diaria = total_unidades_ponderadas / total_pesos
     return demanda_diaria
 
@@ -118,17 +117,13 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     
-    # --- MEJORA: Usar la nueva función para una demanda más precisa ---
     df['Demanda_Diaria_Promedio'] = df['Historial_Ventas'].apply(calcular_demanda_ponderada)
 
-    # El resto de los cálculos ahora se basan en esta demanda más inteligente
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
     df['Rotacion_60_Dias'] = df.apply(lambda r: r['Ventas_60_Dias'] / r['Stock'] if r['Stock'] > 0 else 0, axis=1)
     
-    # El resto de la lógica (ABC, Estado, Sugerencias) se mantiene igual pero ahora es más precisa
-    # ... (Se omite por brevedad, es idéntica a la versión anterior)
     df_ventas_total = df.copy()
     df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
     ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
@@ -179,8 +174,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
 
 
 # --- INTERFAZ DE USUARIO ---
-# La UI es idéntica a la versión anterior, pero ahora todos los cálculos que muestra
-# son más precisos gracias a la nueva demanda ponderada.
+# (Sin cambios en esta sección)
 st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
