@@ -55,7 +55,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
-        'REFERENCIA': 'SKU', 'MARCA': 'Marca'
+        'REFERENCIA': 'SKU', 'MARCA': 'Marca', 'PESO_ARTICULO': 'Peso_Articulo' # <-- MEJORA: Incluir peso
     }
     df.rename(columns=column_mapping, inplace=True)
     
@@ -64,9 +64,12 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         st.error("Faltan columnas esenciales en el archivo de origen.", icon="🚨")
         return pd.DataFrame()
 
-    numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock']
+    numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo'] # <-- MEJORA: Incluir peso
     for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
+        else:
+            df[col] = 0 # Si la columna de peso no existe, se crea con ceros
     
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
     df['Almacen'] = df['Almacen'].astype(str)
@@ -103,7 +106,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
 
-    # --- LÓGICA MEJORADA DE SUGERENCIA DE TRASLADO Y COMPRA ---
+    # --- LÓGICA DE SUGERENCIAS Y PESO (CORREGIDA Y MEJORADA) ---
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
@@ -116,38 +119,39 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden'])].copy()
         excedente_df['Stock_Disponible_Traslado'] = excedente_df['Stock'] - excedente_df['Punto_Reorden']
         
-        # Filtramos para que una tienda no se pida a sí misma.
         almacenes_con_excedente = excedente_df[excedente_df['Stock_Disponible_Traslado'] > 0]
         
         for idx_necesidad in df_analisis[necesidad_mask].index:
             almacen_necesitado = df_analisis.loc[idx_necesidad, 'Almacen']
-            
-            # Filtramos los almacenes de origen para que no incluyan el almacén necesitado.
             origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen'] != almacen_necesitado]
             
             if not origenes_disponibles.empty:
-                # *** NUEVA LÓGICA MEJORADA: Construir sugerencia detallada ***
                 sugerencias = []
                 for _, origen in origenes_disponibles.iterrows():
                     unidades_disponibles = int(origen['Stock_Disponible_Traslado'])
                     sugerencias.append(f"Alm. {origen['Almacen']} ({unidades_disponibles} u.)")
                 
+                # *** CORRECCIÓN DEL BUG: Asignar la sugerencia detallada ***
                 df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
                 
                 stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
                 cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
                 df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_necesaria))
             else:
-                # Si no hay OTRAS tiendas con excedente, se sugiere COMPRA
                 stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
                 cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
                 if cantidad_necesaria > 0:
                     df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria))
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
+
+    # *** MEJORA: Cálculo del peso sugerido ***
+    df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
+    df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
+    
     return df
 
 # --- INTERFAZ DE USUARIO ---
-# El resto de la UI principal se mantiene igual, ya que los cambios de lógica ya están hechos.
+# La UI se mantiene igual, ya que los cambios de lógica se reflejarán en los datos.
 st.title("🚀 Plan de Acción de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
@@ -216,6 +220,3 @@ if df_crudo is not None and not df_crudo.empty:
         st.warning("El análisis no produjo resultados. Revisa el archivo de origen.")
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
-
-
-
