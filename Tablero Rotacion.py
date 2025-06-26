@@ -266,7 +266,8 @@ if df_crudo is not None and not df_crudo.empty:
         col1.metric(label="💰 Valor Total Inventario", value=f"${valor_total_inv:,.0f}")
         col2.metric(label="📉 Valor en Excedente", value=f"${valor_excedente:,.0f}")
         col3.metric(label="📦 SKUs en Quiebre", value=f"{skus_quiebre}")
-        col4.metric(label("🔄 Rotación General (60 Días)", value=f"{rotacion_general:.2f}")
+        # CORRECCIÓN DE SINTAXIS: Se arregló el paréntesis y el argumento 'label'.
+        col4.metric(label="🔄 Rotación General (60 Días)", value=f"{rotacion_general:.2f}")
 
         st.markdown("---")
         
@@ -294,5 +295,6 @@ if df_crudo is not None and not df_crudo.empty:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
+
 
 
