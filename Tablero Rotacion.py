@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import warnings
 
 # --- 0. CONFIGURACIÓN INICIAL Y ADVERTENCIAS ---
-# Ignorar advertencias comunes de polyfit que no afectan el resultado
 warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning) 
 st.set_page_config(
     page_title="Resumen Ejecutivo de Inventario",
@@ -49,18 +48,14 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN ULTRA OPTIMIZADA) ---
+# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN FINAL OPTIMIZADA) ---
 @st.cache_data
-def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
+def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=5, dias_objetivo=30):
     """
-    Función de análisis principal, reescrita para un rendimiento óptimo masivo.
-    El cuello de botella de .apply() ha sido eliminado.
+    Función de análisis final, con el motor de cálculo de demanda reescrito para máxima velocidad.
     """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
-    
-    if dias_objetivo is None:
-        dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
 
     df = _df_crudo.copy()
     
@@ -83,38 +78,39 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     df['Stock'] = np.maximum(0, df['Stock'])
-    df.reset_index(inplace=True) # Guardar el índice original para el groupby
 
-    # --- 2. "Explosión" del Historial de Ventas (El Gran Salto de Rendimiento) ---
-    df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
-    df_long = df[['index', 'Historial_Ventas']].copy()
-    df_long['Historial_Ventas'] = df_long['Historial_Ventas'].str.split(',')
-    df_long = df_long.explode('Historial_Ventas').dropna()
-    
-    split_data = df_long['Historial_Ventas'].str.split(':', expand=True)
-    df_long['Fecha'] = pd.to_datetime(split_data[0], errors='coerce')
-    df_long['Unidades'] = pd.to_numeric(split_data[1], errors='coerce')
-    df_long.dropna(subset=['Fecha', 'Unidades'], inplace=True)
+    # --- 2. Cálculo de Demanda (Motor Optimizado) ---
+    fecha_hoy_dt = pd.Timestamp(datetime.now())
 
-    # --- 3. Cálculo de Demanda Vectorizado sobre el DataFrame "Largo" ---
-    fecha_hoy = datetime.now()
-    df_long['dias_atras'] = (fecha_hoy - df_long['Fecha']).dt.days
-    df_long['peso'] = np.maximum(0, 60 - df_long['dias_atras'])
+    def calcular_demanda_rapido(historial_str):
+        if not isinstance(historial_str, str) or ':' not in historial_str:
+            return 0.0
+        try:
+            parts = [item.split(':') for item in historial_str.split(',')]
+            fechas_str = [p[0] for p in parts if len(p) == 2]
+            unidades_str = [p[1] for p in parts if len(p) == 2]
+            
+            if not fechas_str: return 0.0
 
-    # Agrupar por el índice original para calcular las métricas de demanda
-    grouped = df_long.groupby('index')
-    
-    def weighted_avg(g):
-        return np.average(g['Unidades'], weights=g['peso']) if g['peso'].sum() > 0 else 0
-        
-    demanda_diaria = grouped.apply(weighted_avg)
-    demanda_diaria.name = 'Demanda_Diaria_Promedio'
+            fechas = pd.to_datetime(fechas_str, errors='coerce').to_numpy()
+            unidades = pd.to_numeric(unidades_str, errors='coerce').to_numpy()
+            
+            valid_mask = ~pd.isnull(fechas) & ~pd.isnull(unidades)
+            if not np.any(valid_mask): return 0.0
 
-    # Unir resultados al DataFrame original
-    df = df.merge(demanda_diaria, on='index', how='left')
-    df['Demanda_Diaria_Promedio'].fillna(0, inplace=True)
-    
-    # --- 4. Cálculos de Inventario y ABC (Vectorizados) ---
+            fechas, unidades = fechas[valid_mask], unidades[valid_mask].astype(float)
+            
+            dias_atras = (fecha_hoy_dt - fechas).astype('timedelta64[D]').astype(int)
+            pesos = np.maximum(0, 60 - dias_atras)
+            
+            sum_pesos = np.sum(pesos)
+            return np.sum(unidades * pesos) / sum_pesos if sum_pesos > 0 else 0.0
+        except:
+            return 0.0
+
+    df['Demanda_Diaria_Promedio'] = df['Historial_Ventas'].apply(calcular_demanda_rapido)
+
+    # --- 3. Cálculos de Inventario y ABC (Vectorizados) ---
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
@@ -128,7 +124,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     else:
         df['Segmento_ABC'] = 'C'
 
-    # --- 5. Estado de Inventario (Vectorizado) ---
+    # --- 4. Estado de Inventario (Vectorizado) ---
     conditions = [
         (df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0),
         (df['Stock'] > 0) & (df['Stock'] < df['Punto_Reorden']),
@@ -140,18 +136,16 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     df['Accion_Requerida'] = np.select(conditions, choices_accion, default='MONITOREAR')
 
-    # --- 6. Lógica de Sugerencias (Vectorizada) ---
-    df['Sugerencia_Compra'] = 0
-    df['Unidades_Traslado_Sugeridas'] = 0
-    df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
-    df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
+    # --- 5. Lógica de Sugerencias (Vectorizada) ---
+    df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * dias_objetivo
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     
+    df['Sugerencia_Compra'] = 0
     necesidad_mask = df['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])
     df.loc[necesidad_mask, 'Sugerencia_Compra'] = np.ceil(df.loc[necesidad_mask, 'Necesidad_Total'])
 
     df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Punto_Reorden'])
-    excedentes_por_sku = df[df['Excedente_Trasladable'] > 0].groupby('SKU')['Excedente_Trasladable'].sum().rename('Total_Excedente_SKU')
+    excedentes_por_sku = df.groupby('SKU')['Excedente_Trasladable'].sum().rename('Total_Excedente_SKU')
 
     df = df.merge(excedentes_por_sku, on='SKU', how='left').fillna({'Total_Excedente_SKU': 0})
 
@@ -161,13 +155,9 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     
     df.loc[df['Unidades_Traslado_Sugeridas'] > 0, 'Accion_Requerida'] = 'COMPRA Y/O TRASLADO'
     
-    df.set_index('index', inplace=True)
-    df.index.name = None # Limpiar nombre del índice
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
-    # Eliminar columnas temporales
-    df.drop(columns=['dias_objetivo_map', 'Stock_Objetivo', 'Necesidad_Total', 'Excedente_Trasladable', 'Total_Excedente_SKU', 'Traslado_Posible', 'Valor_Venta_60_Dias'], inplace=True, errors='ignore')
-
+    
     return df
 
 # --- INTERFAZ DE USUARIO ---
@@ -179,17 +169,10 @@ with st.expander("ℹ️ ¿Cómo interpretar la Clasificación ABC y los Días d
     La **Clasificación ABC** es un método para organizar los productos de tu inventario en tres categorías, basadas en su importancia para las ventas. Esto te ayuda a enfocar tus esfuerzos y capital en lo que más importa.
 
     - **👑 Productos Clase A:** Son tus productos **VIP**. Son pocos (generalmente el 20% de tus artículos) pero representan la mayor parte de tus ingresos (aprox. el 80%).
-      - **Estrategia:** Debes monitorearlos de cerca. Evita los quiebres de stock a toda costa, pero también el exceso de inventario, ya que inmovilizan mucho capital. Por eso, se les asigna un **objetivo de días de inventario más bajo**.
+    - **👍 Productos Clase B:** Son importantes, pero no tan críticos como los A.
+    - **📦 Productos Clase C:** Es la gran mayoría de tus productos, pero individualmente aportan muy poco a las ventas.
 
-    - **👍 Productos Clase B:** Son importantes, pero no tan críticos como los A. Representan el siguiente 30% de tus artículos y un 15% de las ventas.
-      - **Estrategia:** Tienen una política de control más moderada. Se les asigna un nivel de inventario intermedio.
-
-    - **📦 Productos Clase C:** Es la gran mayoría de tus productos (el 50% restante), pero individualmente aportan muy poco a las ventas (el 5% del total).
-      - **Estrategia:** El control puede ser más relajado. Un stock de seguridad más alto es aceptable, ya que el costo financiero es bajo.
-
-    ---
-    
-    Los **"Días de Inventario Objetivo"** que configuras en la barra lateral le dicen al sistema cuál es el **nivel máximo de stock** que deseas tener para cada clase de producto, medido en días de venta. El sistema sugerirá compras o traslados para alcanzar ese nivel objetivo.
+    Los **"Días de Inventario Objetivo"** que configuras en la barra lateral le dicen al sistema cuál es el **nivel máximo de stock** que deseas tener para cada clase de producto, medido en días de venta.
     """)
 
 df_crudo = cargar_datos_desde_dropbox()
@@ -197,22 +180,19 @@ df_crudo = cargar_datos_desde_dropbox()
 if df_crudo is not None and not df_crudo.empty:
     st.sidebar.header("⚙️ Parámetros del Análisis")
     almacen_principal_input = st.sidebar.text_input("Código Almacén Principal/Bodega:", '155')
-    dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad (Min):", min_value=1, max_value=30, value=7, step=1,
-                                             help="Define el colchón de seguridad sobre el Lead Time para calcular el Punto de Reorden (Mínimo).")
     
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("**Días de Inventario Objetivo (Max)**")
-    st.sidebar.info("Define el nivel máximo de stock al que se debe reabastecer cada producto.", icon="🎯")
-    dias_obj_a = st.sidebar.slider("Clase A (VIPs)", min_value=15, max_value=45, value=30)
-    dias_obj_b = st.sidebar.slider("Clase B (Importantes)", min_value=30, max_value=60, value=45)
-    dias_obj_c = st.sidebar.slider("Clase C (Generales)", min_value=45, max_value=90, value=60)
+    # --- PARÁMETROS SIMPLIFICADOS ---
+    dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad:", min_value=1, max_value=30, value=5, step=1,
+                                             help="Define el colchón de seguridad mínimo para todos los productos.")
+    
+    dias_objetivo_input = st.sidebar.slider("Días de Inventario Objetivo:", min_value=15, max_value=90, value=30, step=5,
+                                             help="Define el nivel máximo de stock (en días de venta) al que se debe reabastecer.")
 
     with st.spinner("Procesando datos... Por favor espera, esto debería ser rápido."):
-        dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, 
                                                             almacen_principal=almacen_principal_input, 
                                                             dias_seguridad=dias_seguridad_input,
-                                                            dias_objetivo=dias_objetivo_dict)
+                                                            dias_objetivo=dias_objetivo_input)
     
     st.session_state['df_analisis'] = df_analisis_completo
 
@@ -237,7 +217,6 @@ if df_crudo is not None and not df_crudo.empty:
         else: df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
 
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
-        # Asegurarse de que el df filtrado no está vacío antes de sumar
         if not df_filtered.empty:
             valor_total_inv = df_filtered['Valor_Inventario'].sum()
             df_excedente_kpi = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]
