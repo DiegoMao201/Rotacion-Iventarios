@@ -30,9 +30,6 @@ st.markdown("""
 # --- 2. LÓGICA DE CARGA Y ANÁLISIS ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
-    """
-    Se conecta a Dropbox y descarga el archivo de inventario.
-    """
     info_message = st.empty()
     info_message.info("Conectando a Dropbox para obtener los datos más recientes...", icon="☁️")
     try:
@@ -49,9 +46,6 @@ def cargar_datos_desde_dropbox():
 
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_dias=10, dias_seguridad=7):
-    """
-    Aplica toda la lógica de negocio al DataFrame de inventario.
-    """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
     
@@ -78,7 +72,6 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
     df['Almacen'] = df['Almacen'].astype(str)
     df['Demanda_Diaria_Promedio'] = df['Ventas_60_Dias'] / 60
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
-    
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * lead_time_dias) + df['Stock_Seguridad']
 
@@ -110,33 +103,51 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         return 'Normal', 'MONITOREAR'
     df[['Estado_Inventario', 'Accion_Requerida']] = df.apply(definir_estado_y_accion, axis=1, result_type='expand')
 
+    # --- LÓGICA MEJORADA DE SUGERENCIA DE TRASLADO Y COMPRA ---
     df['Sugerencia_Traslado'] = ''
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
     
     df_analisis = df.copy()
     skus_necesitados = df_analisis[df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])]['SKU'].unique()
+
     for sku in skus_necesitados:
-        idx_necesidad = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO']))].index
-        excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden']) & (df_analisis['Almacen'] != almacen_principal)].copy()
+        necesidad_mask = (df_analisis['SKU'] == sku) & (df_analisis['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO']))
+        excedente_df = df_analisis[(df_analisis['SKU'] == sku) & (df_analisis['Stock'] > df_analisis['Punto_Reorden'])].copy()
         excedente_df['Stock_Disponible_Traslado'] = excedente_df['Stock'] - excedente_df['Punto_Reorden']
-        if excedente_df['Stock_Disponible_Traslado'].sum() > 0:
-            for idx in idx_necesidad:
-                stock_objetivo = df_analisis.loc[idx, 'Punto_Reorden'] * 1.5
-                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx, 'Stock'])
+        
+        # Filtramos para que una tienda no se pida a sí misma.
+        almacenes_con_excedente = excedente_df[excedente_df['Stock_Disponible_Traslado'] > 0]
+        
+        for idx_necesidad in df_analisis[necesidad_mask].index:
+            almacen_necesitado = df_analisis.loc[idx_necesidad, 'Almacen']
+            
+            # Filtramos los almacenes de origen para que no incluyan el almacén necesitado.
+            origenes_disponibles = almacenes_con_excedente[almacenes_con_excedente['Almacen'] != almacen_necesitado]
+            
+            if not origenes_disponibles.empty:
+                # *** NUEVA LÓGICA MEJORADA: Construir sugerencia detallada ***
+                sugerencias = []
+                for _, origen in origenes_disponibles.iterrows():
+                    unidades_disponibles = int(origen['Stock_Disponible_Traslado'])
+                    sugerencias.append(f"Alm. {origen['Almacen']} ({unidades_disponibles} u.)")
+                
+                df.loc[idx_necesidad, 'Sugerencia_Traslado'] = ", ".join(sugerencias)
+                
+                stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
+                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
+                df.loc[idx_necesidad, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_necesaria))
+            else:
+                # Si no hay OTRAS tiendas con excedente, se sugiere COMPRA
+                stock_objetivo = df_analisis.loc[idx_necesidad, 'Punto_Reorden'] * 1.5
+                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx_necesidad, 'Stock'])
                 if cantidad_necesaria > 0:
-                    df.loc[idx, 'Sugerencia_Traslado'] = f"Buscar en tiendas con excedente."
-                    df.loc[idx, 'Unidades_Traslado_Sugeridas'] = int(np.ceil(cantidad_necesaria))
-        else:
-            for idx in idx_necesidad:
-                stock_objetivo = df_analisis.loc[idx, 'Punto_Reorden'] * 1.5
-                cantidad_necesaria = max(0, stock_objetivo - df_analisis.loc[idx, 'Stock'])
-                if cantidad_necesaria > 0:
-                    df.loc[idx, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria))
-                    df.loc[idx, 'Accion_Requerida'] = 'COMPRA NECESARIA'
+                    df.loc[idx_necesidad, 'Sugerencia_Compra'] = int(np.ceil(cantidad_necesaria))
+                    df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
     return df
 
 # --- INTERFAZ DE USUARIO ---
+# El resto de la UI principal se mantiene igual, ya que los cambios de lógica ya están hechos.
 st.title("🚀 Plan de Acción de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
@@ -146,11 +157,7 @@ if df_crudo is not None and not df_crudo.empty:
     st.sidebar.header("⚙️ Filtros del Análisis")
     almacen_principal_input = st.sidebar.text_input("Código Almacén Principal/Bodega:", '155')
     
-    # Se procesan todos los datos una sola vez
     df_analisis_completo = analizar_inventario_completo(df_crudo, almacen_principal_input)
-
-    # *** PASO CLAVE: GUARDAR DATOS EN LA SESIÓN ***
-    # Esto permite que las otras páginas accedan a los datos sin re-calcularlos.
     st.session_state['df_analisis'] = df_analisis_completo
 
     if not df_analisis_completo.empty:
@@ -159,7 +166,6 @@ if df_crudo is not None and not df_crudo.empty:
         
         df_filtered = df_analisis_completo[df_analisis_completo['Almacen'] == selected_almacen]
 
-        # --- KPIs PRINCIPALES ---
         st.markdown('<p class="section-header">Métricas Clave de tu Tienda</p>', unsafe_allow_html=True)
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         valor_excedente = df_filtered[df_filtered['Estado_Inventario'] == 'Excedente']['Valor_Inventario'].sum()
@@ -177,7 +183,6 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown("---")
         
-        # --- SECCIONES DE ACCIÓN ---
         col_accion1, col_accion2 = st.columns(2)
         with col_accion1:
             st.markdown('<p class="section-header">🚨 Acciones de Abastecimiento</p>', unsafe_allow_html=True)
@@ -194,7 +199,6 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown("---")
         
-        # --- VISUALIZACIONES GENERALES ---
         st.markdown('<p class="section-header">Distribución del Inventario</p>', unsafe_allow_html=True)
         col_viz1, col_viz2 = st.columns(2)
         with col_viz1:
