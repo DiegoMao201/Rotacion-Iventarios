@@ -95,7 +95,7 @@ def cargar_datos_desde_dropbox():
         info_message.success("Datos cargados exitosamente desde Dropbox!", icon="✅")
         return df_crudo
     except Exception as e:
-        info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="�")
+        info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
 @st.cache_data
@@ -299,4 +299,3 @@ if df_crudo is not None and not df_crudo.empty:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
-�
