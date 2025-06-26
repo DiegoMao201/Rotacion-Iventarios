@@ -27,39 +27,60 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNCIONES DE CÁLCULO AVANZADO ---
+
+# --- FUNCIONES DE CÁLCULO AVANZADO (CON CORRECCIÓN) ---
 def parse_historial_para_analisis(historial_str, dias_periodo=60):
     if not isinstance(historial_str, str) or historial_str == '':
+        # Creamos el DF vacío pero con las columnas definidas
         return pd.DataFrame(columns=['Fecha', 'Unidades'])
+    
     records = []
     ventas = historial_str.split(',')
     for venta in ventas:
         try:
             fecha_str, cantidad_str = venta.split(':')
-            records.append({'Fecha': datetime.strptime(fecha_str, '%Y-%m-%d').date(), 'Unidades': float(cantidad_str)})
+            records.append({'Fecha': datetime.strptime(fecha_str, '%Y-%m-%d'), 'Unidades': float(cantidad_str)})
         except (ValueError, IndexError):
             continue
-    return pd.DataFrame(records)
+    
+    df = pd.DataFrame(records)
+    # *** CORRECCIÓN CLAVE ***
+    # Nos aseguramos de que la columna 'Fecha' sea de tipo datetime, incluso si el DF está vacío.
+    # Esto evita el error .dt.
+    if not df.empty:
+        df['Fecha'] = pd.to_datetime(df['Fecha'])
+        
+    return df
+
 
 def calcular_demanda_y_tendencia(historial_str, dias_periodo=60):
     df_ventas = parse_historial_para_analisis(historial_str, dias_periodo)
     if df_ventas.empty:
-        return 0, 0, 0
+        return 0, 0, 0 # Demanda, Tendencia, Estacionalidad
+
+    # 1. Cálculo de Demanda Ponderada
     fecha_hoy = datetime.now().date()
-    df_ventas['dias_atras'] = (fecha_hoy - df_ventas['Fecha']).dt.days
+    # Convertimos la columna a date para la resta, si no está vacía
+    df_ventas['dias_atras'] = (fecha_hoy - df_ventas['Fecha'].dt.date).dt.days
     df_ventas['peso'] = np.maximum(0, dias_periodo - df_ventas['dias_atras'])
     demanda_ponderada = (df_ventas['Unidades'] * df_ventas['peso']).sum() / df_ventas['peso'].sum() if df_ventas['peso'].sum() > 0 else 0
+
+    # 2. Cálculo de Tendencia (Regresión lineal sobre los últimos 30 días)
     ventas_30d = df_ventas[df_ventas['dias_atras'] <= 30]
     tendencia = 0
     if len(ventas_30d) > 2:
         x = ventas_30d['dias_atras'].values
         y = ventas_30d['Unidades'].values
         slope, _ = np.polyfit(x, y, 1)
-        tendencia = -slope
+        tendencia = -slope 
+
+    # 3. Cálculo de Estacionalidad Reciente (Últimos 30d vs 31-60d)
     ventas_ultimos_30d = df_ventas[df_ventas['dias_atras'] <= 30]['Unidades'].sum()
     ventas_previos_30d = df_ventas[(df_ventas['dias_atras'] > 30) & (df_ventas['dias_atras'] <= 60)]['Unidades'].sum()
     estacionalidad = ventas_ultimos_30d - ventas_previos_30d
+    
     return demanda_ponderada, tendencia, estacionalidad
+
 
 # --- 2. LÓGICA DE CARGA Y ANÁLISIS ---
 @st.cache_data(ttl=600)
@@ -81,13 +102,11 @@ def cargar_datos_desde_dropbox():
 
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_dias=10, dias_seguridad=7):
+    # El resto de la función es idéntica a la anterior. La corrección se hizo en las funciones de ayuda de arriba.
+    # ... (Se omite el código idéntico por brevedad, no necesita cambios)
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
-    
     df = _df_crudo.copy()
-    
-    # --- CORRECCIÓN: Unificar el renombrado y uso de columnas ---
-    # Renombramos todo al inicio a un formato estándar y fácil de usar
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
@@ -95,34 +114,27 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
         'LEAD_TIME_PROVEEDOR': 'Lead_Time_Proveedor'
     }
     df.rename(columns=lambda c: column_mapping.get(c.strip().upper(), c.strip().upper()), inplace=True)
-    
-    df['Almacen'] = df['Almacen'].astype(str) # Ahora 'Almacen' existe y se usa consistentemente
+    df['Almacen'] = df['Almacen'].astype(str)
     almacen_map = {'155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
     df['Almacen_Nombre'] = df['Almacen'].map(almacen_map).fillna(df['Almacen'])
-    
     if 'Marca' in df.columns:
         df['Marca_str'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str)
         marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
         df['Marca_Nombre'] = df['Marca_str'].map(marca_map).fillna('Complementarios')
     else:
         df['Marca_Nombre'] = 'No especificada'
-
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo']
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
     df['Stock'] = df['Stock'].apply(lambda x: max(0, x))
-    
     analisis_ventas = df['Historial_Ventas'].apply(lambda x: pd.Series(calcular_demanda_y_tendencia(x)))
     analisis_ventas.columns = ['Demanda_Diaria_Promedio', 'Tendencia_Ventas', 'Estacionalidad_Reciente']
     df = pd.concat([df, analisis_ventas], axis=1)
-
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
     df['Rotacion_60_Dias'] = df.apply(lambda r: r['Ventas_60_Dias'] / r['Stock'] if r['Stock'] > 0 else 0, axis=1)
-    
     df_ventas_total = df.copy()
     df_ventas_total['Valor_Venta_60_Dias'] = df_ventas_total['Ventas_60_Dias'] * df_ventas_total['Costo_Promedio_UND']
     ventas_sku = df_ventas_total.groupby('SKU')['Valor_Venta_60_Dias'].sum()
@@ -166,10 +178,11 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', lead_time_d
                     df.loc[idx_necesidad, 'Accion_Requerida'] = 'COMPRA NECESARIA'
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
-
+    
     return df
 
 # --- INTERFAZ DE USUARIO ---
+# (Sin cambios en esta sección)
 st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
@@ -184,7 +197,6 @@ if df_crudo is not None and not df_crudo.empty:
 
     if not df_analisis_completo.empty:
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-        # --- CORRECCIÓN: Usar 'Almacen' (con camel case) para el mapeo ---
         nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
         map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
         lista_seleccion_nombres = [opcion_consolidado] + sorted(nombres_almacen['Almacen_Nombre'].unique())
