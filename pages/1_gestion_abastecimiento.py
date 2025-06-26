@@ -8,7 +8,6 @@ st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_
 st.title("🚚 Gestión de Traslados y Compras")
 st.markdown("Selecciona, planifica y ejecuta las acciones de abastecimiento para tu tienda.")
 
-# --- Función para convertir a Excel ---
 @st.cache_data
 def to_excel(df):
     output = io.BytesIO()
@@ -17,7 +16,6 @@ def to_excel(df):
     processed_data = output.getvalue()
     return processed_data
 
-# --- LECTURA DE DATOS DESDE SESSION_STATE ---
 if 'df_analisis' in st.session_state:
     df_analisis_completo = st.session_state['df_analisis']
     
@@ -32,16 +30,20 @@ if 'df_analisis' in st.session_state:
         df_traslados = df_tienda[df_tienda['Unidades_Traslado_Sugeridas'] > 0].copy()
         
         if not df_traslados.empty:
-            df_traslados['Ejecutar ✅'] = False
-            columnas_traslado = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Unidades_Traslado_Sugeridas', 'Segmento_ABC']
+            # *** NUEVA LÓGICA DE SELECCIÓN MÚLTIPLE ***
+            select_all_traslados = st.checkbox("Seleccionar Todos los Traslados", value=False, key="select_all_traslados")
+            df_traslados['Ejecutar ✅'] = select_all_traslados
+            
+            columnas_traslado = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Unidades_Traslado_Sugeridas', 'Sugerencia_Traslado', 'Segmento_ABC']
             st.info("Marca los traslados que deseas ejecutar. El plan se actualizará dinámicamente.", icon="✍️")
-            df_editado_traslados = st.data_editor(df_traslados[columnas_traslado], hide_index=True, use_container_width=True, disabled=['SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Unidades_Traslado_Sugeridas', 'Segmento_ABC'])
+            df_editado_traslados = st.data_editor(df_traslados[columnas_traslado], hide_index=True, use_container_width=True, key="editor_traslados")
+            
             df_plan_traslado = df_editado_traslados[df_editado_traslados['Ejecutar ✅'] == True]
             if not df_plan_traslado.empty:
                 st.subheader("Resumen del Plan de Traslado Seleccionado")
                 total_unidades = df_plan_traslado['Unidades_Traslado_Sugeridas'].sum()
                 st.metric(label="Total Unidades a Mover", value=f"{total_unidades}")
-                excel_traslados = to_excel(df_plan_traslado)
+                excel_traslados = to_excel(df_plan_traslado.drop(columns=['Ejecutar ✅']))
                 st.download_button(label="📥 Descargar Plan de Traslado", data=excel_traslados, file_name=f"plan_traslado_{selected_almacen}.xlsx")
         else:
             st.success("¡Buenas noticias! No se sugieren traslados internos para tu tienda.", icon="🎉")
@@ -50,10 +52,14 @@ if 'df_analisis' in st.session_state:
         st.header("🛒 Plan de Compras a Proveedor", divider='blue')
         df_compras = df_tienda[df_tienda['Sugerencia_Compra'] > 0].copy()
         if not df_compras.empty:
-            df_compras['Ejecutar ✅'] = False
-            columnas_compra = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Sugerencia_Compra', 'Segmento_ABC']
+            # *** NUEVA LÓGICA DE SELECCIÓN MÚLTIPLE ***
+            select_all_compras = st.checkbox("Seleccionar Todas las Compras", value=False, key="select_all_compras")
+            df_compras['Ejecutar ✅'] = select_all_compras
+
+            columnas_compra = ['Ejecutar ✅', 'SKU', 'Descripcion', 'Sugerencia_Compra', 'Segmento_ABC']
             st.info("Marca los SKUs para la próxima orden de compra.", icon="✍️")
-            df_editado_compras = st.data_editor(df_compras[columnas_compra], hide_index=True, use_container_width=True, disabled=['SKU', 'Descripcion', 'Stock', 'Punto_Reorden', 'Sugerencia_Compra', 'Segmento_ABC'])
+            df_editado_compras = st.data_editor(df_compras[columnas_compra], hide_index=True, use_container_width=True, key="editor_compras")
+            
             df_plan_compra = df_editado_compras[df_editado_compras['Ejecutar ✅'] == True]
             if not df_plan_compra.empty:
                 st.subheader("Resumen del Plan de Compra Seleccionado")
@@ -62,7 +68,7 @@ if 'df_analisis' in st.session_state:
                 col1, col2 = st.columns(2)
                 col1.metric(label="Total Unidades a Comprar", value=f"{total_unidades_compra}")
                 col2.metric(label="Valor Estimado de la Compra", value=f"${valor_compra:,.0f}")
-                excel_compras = to_excel(df_plan_compra)
+                excel_compras = to_excel(df_plan_compra.drop(columns=['Ejecutar ✅']))
                 st.download_button(label="📥 Descargar Plan de Compra", data=excel_compras, file_name=f"plan_compra_{selected_almacen}.xlsx")
         else:
             st.success("No hay sugerencias de compra externa en este momento.", icon="🎉")
