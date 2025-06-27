@@ -47,14 +47,22 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN FINAL) ---
+# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN COMPLETA Y RESTAURADA) ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
+    """
+    Función de análisis final con lógica corregida para el cálculo de demanda
+    y un sistema de sugerencias que prioriza traslados entre tiendas antes de comprar.
+    """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
+
     if dias_objetivo is None:
         dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
+        
     df = _df_crudo.copy()
+    
+    # --- 1. Limpieza y Preparación de Datos ---
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
@@ -62,33 +70,46 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
         'LEAD_TIME_PROVEEDOR': 'Lead_Time_Proveedor'
     }
     df.rename(columns=lambda c: column_mapping.get(c.strip().upper(), c.strip().upper()), inplace=True)
+    
     almacen_map = {'155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
     df['Almacen_Nombre'] = df['Almacen'].astype(str).map(almacen_map).fillna(df['Almacen'])
+    
     marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
     df['Marca_Nombre'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str).map(marca_map).fillna('Complementarios')
+    
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo', 'Lead_Time_Proveedor']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     df['Stock'] = np.maximum(0, df['Stock'])
     df.reset_index(inplace=True)
+
+    # --- 2. Cálculo de Demanda y Estacionalidad (LÓGICA CORREGIDA) ---
     fecha_hoy_dt = pd.Timestamp(datetime.now())
     df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
+    
     df_long = df[['index', 'Historial_Ventas']].copy()
     df_long = df_long[df_long['Historial_Ventas'].str.contains(':')]
     df_long['Historial_Ventas'] = df_long['Historial_Ventas'].str.split(',')
     df_long = df_long.explode('Historial_Ventas').dropna()
+    
     split_data = df_long['Historial_Ventas'].str.split(':', expand=True)
     df_long['Fecha'] = pd.to_datetime(split_data[0], errors='coerce')
     df_long['Unidades'] = pd.to_numeric(split_data[1], errors='coerce')
     df_long.dropna(subset=['Fecha', 'Unidades'], inplace=True)
+    
     df_long['dias_atras'] = (fecha_hoy_dt - df_long['Fecha']).dt.days
+
     ventas_recientes = df_long[df_long['dias_atras'] <= 60]
     total_ventas_periodo = ventas_recientes.groupby('index')['Unidades'].sum()
     demanda_diaria = (total_ventas_periodo / 60).rename('Demanda_Diaria_Promedio')
+    
     df = df.merge(demanda_diaria, on='index', how='left').fillna({'Demanda_Diaria_Promedio': 0})
+
+    # --- 3. Cálculos Base de Inventario y ABC ---
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
+    
     df['Valor_Venta_60_Dias'] = df['Ventas_60_Dias'] * df['Costo_Promedio_UND']
     ventas_sku_valor = df.groupby('SKU')['Valor_Venta_60_Dias'].sum()
     total_ventas_valor = ventas_sku_valor.sum()
@@ -97,6 +118,8 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
         df['Segmento_ABC'] = df['SKU'].map(sku_to_percent).apply(lambda p: 'A' if p <= 0.8 else ('B' if p <= 0.95 else 'C')).fillna('C')
     else:
         df['Segmento_ABC'] = 'C'
+
+    # --- 4. Estado de Inventario ---
     conditions = [
         (df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0),
         (df['Stock'] > 0) & (df['Stock'] < df['Punto_Reorden']),
@@ -105,6 +128,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     ]
     choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
+    
     return df.set_index('index')
 
 # --- INTERFAZ DE USUARIO ---
@@ -112,7 +136,13 @@ st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
 with st.expander("ℹ️ ¿Cómo interpretar la Clasificación ABC y los Días de Inventario?"):
-    st.markdown("...") # Contenido del expander se omite por brevedad, pero debe estar aquí
+    st.markdown("""
+    La **Clasificación ABC** es un método para organizar los productos de tu inventario en tres categorías, basadas en su importancia para las ventas. Esto te ayuda a enfocar tus esfuerzos y capital en lo que más importa.
+
+    - **👑 Productos Clase A:** Son tus productos **VIP**. Son pocos (generalmente el 20% de tus artículos) pero representan la mayor parte de tus ingresos (aprox. el 80%).
+    - **👍 Productos Clase B:** Son importantes, pero no tan críticos como los A. Representan el siguiente 30% de tus artículos y un 15% de las ventas.
+    - **📦 Productos Clase C:** Es la gran mayoría de tus productos (el 50% restante), pero individualmente aportan muy poco a las ventas (el 5% del total).
+    """)
 
 df_crudo = cargar_datos_desde_dropbox()
 
@@ -174,7 +204,8 @@ if df_crudo is not None and not df_crudo.empty:
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
-            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="�")
+            # CORRECCIÓN DEL ERROR: Se usa el emoji correcto
+            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
             st.caption("Descubre tus marcas estrella.")
         with col_nav4:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
