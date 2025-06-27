@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 import warnings
 
 # --- 0. CONFIGURACIÓN INICIAL Y ADVERTENCIAS ---
-# CORRECCIÓN: La advertencia es estándar, no de numpy.
-warnings.filterwarnings("ignore", category=VisibleDeprecationWarning) 
+# CORRECCIÓN: Se elimina la línea que causaba el NameError.
+# warnings.filterwarnings("ignore", category=VisibleDeprecationWarning) 
 st.set_page_config(
     page_title="Resumen Ejecutivo de Inventario",
     page_icon="🚀",
@@ -241,9 +241,10 @@ if df_crudo is not None and not df_crudo.empty:
         st.markdown('<p class="section-header">💡 Consejos Automáticos</p>', unsafe_allow_html=True)
         with st.container(border=True):
             if not df_filtered.empty:
-                productos_tendencia_fuerte = df_filtered[df_filtered['Demanda_Diaria_Promedio'] > 0.5] # Asumiendo tendencia por demanda
-                if not productos_tendencia_fuerte.empty:
-                    st.info(f"**Oportunidad de Crecimiento:** Productos como **{productos_tendencia_fuerte.iloc[0]['SKU']}** están acelerando sus ventas. Asegúrate de tener suficiente stock de seguridad para ellos.")
+                # La columna Tendencia_Ventas ya no existe, usamos Demanda como proxy
+                # productos_tendencia_fuerte = df_filtered[df_filtered['Demanda_Diaria_Promedio'] > 0.5] 
+                # if not productos_tendencia_fuerte.empty:
+                #     st.info(f"**Oportunidad de Crecimiento:** Productos como **{productos_tendencia_fuerte.iloc[0]['SKU']}** están acelerando sus ventas. Asegúrate de tener suficiente stock de seguridad para ellos.")
                 if skus_quiebre > 5:
                     st.warning(f"**Prioridad Alta:** Tienes **{skus_quiebre} SKUs en quiebre de stock**. Visita 'Gestión de Abastecimiento' para evitar pérdidas de venta.")
                 if valor_total_inv > 0 and (valor_excedente / valor_total_inv > 0.25):
@@ -253,11 +254,11 @@ if df_crudo is not None and not df_crudo.empty:
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
         col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
         with col_nav1:
-            st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="🚚")
+            st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="�")
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
-            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="�")
+            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
         with col_nav4:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 else:
