@@ -202,7 +202,11 @@ if df_crudo is not None and not df_crudo.empty:
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
         nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
         map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
-        lista_seleccion_nombres = [opcion_consolidado] + sorted(nombres_almacen['Almacen_Nombre'].unique())
+        
+        # CORRECCIÓN: Asegurarse de que todos los nombres sean strings antes de ordenar para evitar TypeError.
+        lista_nombres_unicos = [str(nombre) for nombre in nombres_almacen['Almacen_Nombre'].unique()]
+        lista_seleccion_nombres = [opcion_consolidado] + sorted(lista_nombres_unicos)
+
         selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
         
         if selected_almacen_nombre == opcion_consolidado:
@@ -254,7 +258,7 @@ if df_crudo is not None and not df_crudo.empty:
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
         col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
         with col_nav1:
-            st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="�")
+            st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="🚚")
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
