@@ -83,7 +83,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Stock'] = np.maximum(0, df['Stock'])
     df.reset_index(inplace=True)
 
-    # --- 2. Cálculo de Demanda y Estacionalidad (LÓGICA CORREGIDA) ---
+    # --- 2. Cálculo de Demanda y Estacionalidad ---
     fecha_hoy_dt = pd.Timestamp(datetime.now())
     df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
     
@@ -129,6 +129,37 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     
+    # --- 5. LÓGICA DE SUGERENCIAS (PRIORIZA TRASLADOS) ---
+    df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
+    df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
+    df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
+    df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Punto_Reorden'])
+
+    sku_summary = df.groupby('SKU').agg(
+        Total_Necesidad_SKU=('Necesidad_Total', 'sum'),
+        Total_Excedente_SKU=('Excedente_Trasladable', 'sum')
+    ).reset_index()
+
+    sku_summary['Total_Traslados_Posibles_SKU'] = np.minimum(
+        sku_summary['Total_Necesidad_SKU'],
+        sku_summary['Total_Excedente_SKU']
+    )
+    df = df.merge(sku_summary[['SKU', 'Total_Necesidad_SKU', 'Total_Traslados_Posibles_SKU']], on='SKU', how='left')
+    
+    df['Unidades_Traslado_Sugeridas'] = 0
+    df['Sugerencia_Compra'] = 0
+    
+    mask_necesidad = df['Total_Necesidad_SKU'] > 0
+    df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = \
+        (df['Necesidad_Total'] / df['Total_Necesidad_SKU']) * df['Total_Traslados_Posibles_SKU']
+    
+    df['Sugerencia_Compra'] = df['Necesidad_Total'] - df['Unidades_Traslado_Sugeridas']
+
+    df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'])
+    df['Sugerencia_Compra'] = np.ceil(df['Sugerencia_Compra'])
+    
+    df.drop(columns=['Total_Necesidad_SKU', 'Total_Traslados_Posibles_SKU'], inplace=True, errors='ignore')
+
     return df.set_index('index')
 
 # --- INTERFAZ DE USUARIO ---
@@ -204,14 +235,13 @@ if df_crudo is not None and not df_crudo.empty:
         with col_nav2:
             st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
         with col_nav3:
-            # CORRECCIÓN DEL ERROR: Se usa el emoji correcto
             st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
             st.caption("Descubre tus marcas estrella.")
         with col_nav4:
             st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
             st.caption("Anticípate al mercado.")
 
-        # --- NUEVA SECCIÓN: Diagnóstico de la Tienda ---
+        # --- SECCIÓN: Diagnóstico de la Tienda ---
         st.markdown('<p class="section-header">Diagnóstico de la Tienda</p>', unsafe_allow_html=True)
         with st.container(border=True):
             if selected_almacen_nombre != opcion_consolidado and not df_filtered.empty:
@@ -226,9 +256,9 @@ if df_crudo is not None and not df_crudo.empty:
             else:
                 st.info("Selecciona una tienda específica en el filtro de la izquierda para ver su diagnóstico detallado.")
 
-        # --- NUEVA SECCIÓN: Buscador de Inventario Global ---
+        # --- SECCIÓN: Buscador de Inventario Global (CON LÓGICA MEJORADA) ---
         st.markdown("---")
-        st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
         
         search_term = st.text_input(
             "Buscar producto por SKU, Descripción o cualquier palabra clave:",
@@ -236,22 +266,25 @@ if df_crudo is not None and not df_crudo.empty:
         )
 
         if search_term:
-            # Lógica de búsqueda flexible en SKU y Descripción
-            df_search = df_analisis_completo[
+            # 1. Lógica de búsqueda flexible en SKU y Descripción
+            df_search_initial = df_analisis_completo[
                 df_analisis_completo['SKU'].astype(str).str.contains(search_term, case=False, na=False) |
                 df_analisis_completo['Descripcion'].astype(str).str.contains(search_term, case=False, na=False)
             ]
             
-            if df_search.empty:
-                st.warning("No se encontraron productos que coincidan con la búsqueda.")
+            # 2. Filtrar los resultados para incluir solo productos con stock > 0
+            df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
+            
+            if df_search_with_stock.empty:
+                st.warning("No se encontraron productos en stock que coincidan con la búsqueda.")
             else:
-                # Obtener los SKUs únicos de los resultados de búsqueda
-                found_skus = df_search['SKU'].unique()
+                # 3. Obtener los SKUs únicos de los resultados de búsqueda (solo los que tienen stock)
+                found_skus = df_search_with_stock['SKU'].unique()
                 
-                # Filtrar el dataframe COMPLETO para obtener el stock en TODAS las tiendas de esos SKUs
+                # 4. Filtrar el dataframe COMPLETO para obtener el stock en TODAS las tiendas de esos SKUs
                 df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
                 
-                # Crear tabla pivote para visualizar el stock por tienda
+                # 5. Crear tabla pivote para visualizar el stock por tienda
                 pivot_stock = df_stock_completo.pivot_table(
                     index=['SKU', 'Descripcion', 'Marca_Nombre'],
                     columns='Almacen_Nombre',
@@ -259,6 +292,11 @@ if df_crudo is not None and not df_crudo.empty:
                     fill_value=0 # Rellenar con 0 si un producto no existe en una tienda
                 ).reset_index()
 
-                st.dataframe(pivot_stock, use_container_width=True, hide_index=True)
+                # 6. Opcional pero recomendado: Ocultar columnas de tiendas que no tienen stock de los productos buscados
+                store_cols = pivot_stock.columns[3:] # Excluir SKU, Descripcion, Marca
+                cols_to_drop = [col for col in store_cols if pivot_stock[col].sum() == 0]
+                pivot_stock_filtered = pivot_stock.drop(columns=cols_to_drop)
+
+                st.dataframe(pivot_stock_filtered, use_container_width=True, hide_index=True)
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
