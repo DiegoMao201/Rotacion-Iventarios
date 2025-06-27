@@ -41,16 +41,17 @@ else:
     # Lógica para filtrar por la selección del usuario
     if tipo_analisis == 'Por Marca':
         columna_filtro = 'Marca_Nombre'
-        lista_items = sorted(df_analisis_completo[columna_filtro].dropna().unique())
+        lista_items = sorted([str(item) for item in df_analisis_completo[columna_filtro].dropna().unique()])
         selected_item = st.sidebar.selectbox("Selecciona una Marca:", lista_items)
     else: # Por Categoría/Departamento
         columna_filtro = 'Departamento'
-        lista_items = sorted(df_analisis_completo[columna_filtro].dropna().unique())
+        lista_items = sorted([str(item) for item in df_analisis_completo[columna_filtro].dropna().unique()])
         selected_item = st.sidebar.selectbox("Selecciona una Categoría:", lista_items)
 
     # Filtro de Almacén/Tienda
     opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-    lista_almacenes = sorted(df_analisis_completo['Almacen_Nombre'].dropna().unique())
+    # CORRECCIÓN DEL ERROR: Convertir todos los nombres a string antes de ordenar
+    lista_almacenes = sorted([str(nombre) for nombre in df_analisis_completo['Almacen_Nombre'].dropna().unique()])
     lista_seleccion_almacen = [opcion_consolidado] + lista_almacenes
     selected_almacen = st.sidebar.selectbox("Selecciona la Vista de Tienda:", lista_seleccion_almacen)
 
