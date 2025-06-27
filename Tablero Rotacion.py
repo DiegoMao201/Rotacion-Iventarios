@@ -9,8 +9,6 @@ from datetime import datetime, timedelta
 import warnings
 
 # --- 0. CONFIGURACIÓN INICIAL Y ADVERTENCIAS ---
-# CORRECCIÓN: Se elimina la línea que causaba el NameError.
-# warnings.filterwarnings("ignore", category=VisibleDeprecationWarning) 
 st.set_page_config(
     page_title="Resumen Ejecutivo de Inventario",
     page_icon="🚀",
@@ -51,13 +49,16 @@ def cargar_datos_desde_dropbox():
 
 # --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN FINAL OPTIMIZADA) ---
 @st.cache_data
-def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=5, dias_objetivo=30):
+def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
     """
-    Función de análisis final, con el motor de cálculo de demanda reescrito para máxima velocidad.
+    Función de análisis final, con el motor de cálculo de demanda y estacionalidad reescrito para máxima velocidad.
     """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
 
+    if dias_objetivo is None:
+        dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
+        
     df = _df_crudo.copy()
     
     # --- 1. Limpieza y Preparación de Datos ---
@@ -79,37 +80,37 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     df['Stock'] = np.maximum(0, df['Stock'])
+    df.reset_index(inplace=True)
 
-    # --- 2. Cálculo de Demanda (Motor Optimizado) ---
+    # --- 2. Cálculo de Demanda y Estacionalidad (Motor Optimizado) ---
     fecha_hoy_dt = pd.Timestamp(datetime.now())
+    df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
+    
+    df_long = df[['index', 'Historial_Ventas']].copy()
+    df_long = df_long[df_long['Historial_Ventas'].str.contains(':')] 
+    df_long['Historial_Ventas'] = df_long['Historial_Ventas'].str.split(',')
+    df_long = df_long.explode('Historial_Ventas').dropna()
+    
+    split_data = df_long['Historial_Ventas'].str.split(':', expand=True)
+    df_long['Fecha'] = pd.to_datetime(split_data[0], errors='coerce')
+    df_long['Unidades'] = pd.to_numeric(split_data[1], errors='coerce')
+    df_long.dropna(subset=['Fecha', 'Unidades'], inplace=True)
+    
+    df_long['dias_atras'] = (fecha_hoy_dt - df_long['Fecha']).dt.days
+    df_long['peso'] = np.maximum(0, 60 - df_long['dias_atras'])
 
-    def calcular_demanda_rapido(historial_str):
-        if not isinstance(historial_str, str) or ':' not in historial_str:
-            return 0.0
-        try:
-            parts = [item.split(':') for item in historial_str.split(',')]
-            fechas_str = [p[0] for p in parts if len(p) == 2]
-            unidades_str = [p[1] for p in parts if len(p) == 2]
-            
-            if not fechas_str: return 0.0
-
-            fechas = pd.to_datetime(fechas_str, errors='coerce').to_numpy()
-            unidades = pd.to_numeric(unidades_str, errors='coerce').to_numpy()
-            
-            valid_mask = ~pd.isnull(fechas) & ~pd.isnull(unidades)
-            if not np.any(valid_mask): return 0.0
-
-            fechas, unidades = fechas[valid_mask], unidades[valid_mask].astype(float)
-            
-            dias_atras = (fecha_hoy_dt - fechas).astype('timedelta64[D]').astype(int)
-            pesos = np.maximum(0, 60 - dias_atras)
-            
-            sum_pesos = np.sum(pesos)
-            return np.sum(unidades * pesos) / sum_pesos if sum_pesos > 0 else 0.0
-        except:
-            return 0.0
-
-    df['Demanda_Diaria_Promedio'] = df['Historial_Ventas'].apply(calcular_demanda_rapido)
+    grouped = df_long.groupby('index')
+    demanda_diaria = grouped.apply(lambda g: np.average(g['Unidades'], weights=g['peso']) if g['peso'].sum() > 0 else 0)
+    demanda_diaria.name = 'Demanda_Diaria_Promedio'
+    
+    df_long['periodo'] = np.select([(df_long['dias_atras'] <= 30), (df_long['dias_atras'] > 30) & (df_long['dias_atras'] <= 60)], ['ultimos_30', 'previos_30'], default='otro')
+    ventas_periodo = pd.crosstab(index=df_long['index'], columns=df_long['periodo'], values=df_long['Unidades'], aggfunc='sum').fillna(0)
+    if 'ultimos_30' not in ventas_periodo: ventas_periodo['ultimos_30'] = 0
+    if 'previos_30' not in ventas_periodo: ventas_periodo['previos_30'] = 0
+    ventas_periodo['Estacionalidad_Reciente'] = ventas_periodo['ultimos_30'] - ventas_periodo['previos_30']
+    
+    df = df.merge(demanda_diaria, on='index', how='left').fillna({'Demanda_Diaria_Promedio': 0})
+    df = df.merge(ventas_periodo[['Estacionalidad_Reciente']], on='index', how='left').fillna({'Estacionalidad_Reciente': 0})
 
     # --- 3. Cálculos de Inventario y ABC (Vectorizados) ---
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
@@ -138,7 +139,8 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Accion_Requerida'] = np.select(conditions, choices_accion, default='MONITOREAR')
 
     # --- 5. Lógica de Sugerencias (Vectorizada) ---
-    df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * dias_objetivo
+    df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
+    df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     
     df['Sugerencia_Compra'] = 0
@@ -159,7 +161,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
     
-    return df
+    return df.set_index('index')
 
 # --- INTERFAZ DE USUARIO ---
 st.title("🚀 Resumen Ejecutivo de Inventario")
@@ -170,10 +172,17 @@ with st.expander("ℹ️ ¿Cómo interpretar la Clasificación ABC y los Días d
     La **Clasificación ABC** es un método para organizar los productos de tu inventario en tres categorías, basadas en su importancia para las ventas. Esto te ayuda a enfocar tus esfuerzos y capital en lo que más importa.
 
     - **👑 Productos Clase A:** Son tus productos **VIP**. Son pocos (generalmente el 20% de tus artículos) pero representan la mayor parte de tus ingresos (aprox. el 80%).
-    - **👍 Productos Clase B:** Son importantes, pero no tan críticos como los A.
-    - **📦 Productos Clase C:** Es la gran mayoría de tus productos, pero individualmente aportan muy poco a las ventas.
+      - **Estrategia:** Debes monitorearlos de cerca. Evita los quiebres de stock a toda costa, pero también el exceso de inventario, ya que inmovilizan mucho capital. Por eso, se les asigna un **objetivo de días de inventario más bajo**.
 
-    Los **"Días de Inventario Objetivo"** que configuras en la barra lateral le dicen al sistema cuál es el **nivel máximo de stock** que deseas tener para cada clase de producto, medido en días de venta.
+    - **👍 Productos Clase B:** Son importantes, pero no tan críticos como los A. Representan el siguiente 30% de tus artículos y un 15% de las ventas.
+      - **Estrategia:** Tienen una política de control más moderada. Se les asigna un nivel de inventario intermedio.
+
+    - **📦 Productos Clase C:** Es la gran mayoría de tus productos (el 50% restante), pero individualmente aportan muy poco a las ventas (el 5% del total).
+      - **Estrategia:** El control puede ser más relajado. Un stock de seguridad más alto es aceptable, ya que el costo financiero es bajo.
+
+    ---
+    
+    Los **"Días de Inventario Objetivo"** que configuras en la barra lateral le dicen al sistema cuál es el **nivel máximo de stock** que deseas tener para cada clase de producto, medido en días de venta. El sistema sugerirá compras o traslados para alcanzar ese nivel objetivo.
     """)
 
 df_crudo = cargar_datos_desde_dropbox()
@@ -181,19 +190,22 @@ df_crudo = cargar_datos_desde_dropbox()
 if df_crudo is not None and not df_crudo.empty:
     st.sidebar.header("⚙️ Parámetros del Análisis")
     almacen_principal_input = st.sidebar.text_input("Código Almacén Principal/Bodega:", '155')
+    dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad (Min):", min_value=1, max_value=30, value=7, step=1,
+                                             help="Define el colchón de seguridad sobre el Lead Time para calcular el Punto de Reorden (Mínimo).")
     
-    # --- PARÁMETROS SIMPLIFICADOS ---
-    dias_seguridad_input = st.sidebar.slider("Días de Stock de Seguridad:", min_value=1, max_value=30, value=5, step=1,
-                                             help="Define el colchón de seguridad mínimo para todos los productos.")
-    
-    dias_objetivo_input = st.sidebar.slider("Días de Inventario Objetivo:", min_value=15, max_value=90, value=30, step=5,
-                                             help="Define el nivel máximo de stock (en días de venta) al que se debe reabastecer.")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Días de Inventario Objetivo (Max)**")
+    st.sidebar.info("Define el nivel máximo de stock al que se debe reabastecer cada producto.", icon="🎯")
+    dias_obj_a = st.sidebar.slider("Clase A (VIPs)", min_value=15, max_value=45, value=30)
+    dias_obj_b = st.sidebar.slider("Clase B (Importantes)", min_value=30, max_value=60, value=45)
+    dias_obj_c = st.sidebar.slider("Clase C (Generales)", min_value=45, max_value=90, value=60)
 
     with st.spinner("Procesando datos... Por favor espera, esto debería ser rápido."):
+        dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, 
                                                             almacen_principal=almacen_principal_input, 
                                                             dias_seguridad=dias_seguridad_input,
-                                                            dias_objetivo=dias_objetivo_input)
+                                                            dias_objetivo=dias_objetivo_dict)
     
     st.session_state['df_analisis'] = df_analisis_completo
 
@@ -203,8 +215,7 @@ if df_crudo is not None and not df_crudo.empty:
         nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
         map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
         
-        # CORRECCIÓN: Asegurarse de que todos los nombres sean strings antes de ordenar para evitar TypeError.
-        lista_nombres_unicos = [str(nombre) for nombre in nombres_almacen['Almacen_Nombre'].unique()]
+        lista_nombres_unicos = [str(nombre) for nombre in nombres_almacen['Almacen_Nombre'].unique() if pd.notna(nombre)]
         lista_seleccion_nombres = [opcion_consolidado] + sorted(lista_nombres_unicos)
 
         selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
@@ -212,10 +223,11 @@ if df_crudo is not None and not df_crudo.empty:
         if selected_almacen_nombre == opcion_consolidado:
             df_vista = df_analisis_completo
         else:
-            codigo_almacen_seleccionado = map_nombre_a_codigo[selected_almacen_nombre]
-            df_vista = df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado]
+            codigo_almacen_seleccionado = map_nombre_a_codigo.get(selected_almacen_nombre)
+            df_vista = df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado] if codigo_almacen_seleccionado else pd.DataFrame(columns=df_analisis_completo.columns)
 
-        lista_marcas = sorted(df_vista['Marca_Nombre'].unique())
+        lista_marcas_unicas = [str(m) for m in df_vista['Marca_Nombre'].unique() if pd.notna(m)]
+        lista_marcas = sorted(lista_marcas_unicas)
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas)
         
         if not selected_marcas: df_filtered = pd.DataFrame(columns=df_vista.columns)
@@ -241,18 +253,18 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown("---")
         
-        # El resto de la UI se mantiene igual
         st.markdown('<p class="section-header">💡 Consejos Automáticos</p>', unsafe_allow_html=True)
         with st.container(border=True):
             if not df_filtered.empty:
-                # La columna Tendencia_Ventas ya no existe, usamos Demanda como proxy
-                # productos_tendencia_fuerte = df_filtered[df_filtered['Demanda_Diaria_Promedio'] > 0.5] 
-                # if not productos_tendencia_fuerte.empty:
-                #     st.info(f"**Oportunidad de Crecimiento:** Productos como **{productos_tendencia_fuerte.iloc[0]['SKU']}** están acelerando sus ventas. Asegúrate de tener suficiente stock de seguridad para ellos.")
+                productos_en_racha = df_filtered[df_filtered['Estacionalidad_Reciente'] > (df_filtered['Demanda_Diaria_Promedio'] * 7)].nlargest(1, 'Estacionalidad_Reciente')
+                if not productos_en_racha.empty:
+                    sku_racha = productos_en_racha.iloc[0]['SKU']
+                    st.info(f"**¡En racha!** 🔥 El producto **{sku_racha}** ha aumentado sus ventas significativamente. Considera revisar su stock para no perder el impulso.")
+
                 if skus_quiebre > 5:
-                    st.warning(f"**Prioridad Alta:** Tienes **{skus_quiebre} SKUs en quiebre de stock**. Visita 'Gestión de Abastecimiento' para evitar pérdidas de venta.")
+                    st.warning(f"**Prioridad Alta:** 🚨 Tienes **{skus_quiebre} SKUs en quiebre de stock**. Visita 'Gestión de Abastecimiento' para evitar pérdidas de venta.")
                 if valor_total_inv > 0 and (valor_excedente / valor_total_inv > 0.25):
-                    st.error(f"**Alerta de Capital:** Más del 25% de tu inventario es excedente. Visita 'Análisis de Excedentes' para crear un plan de liquidación.")
+                    st.error(f"**Alerta de Capital:** 💸 Más del 25% del valor de tu inventario es excedente. Visita 'Análisis de Excedentes' para crear un plan de liquidación.")
 
         st.markdown("---")
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
