@@ -47,11 +47,12 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN FINAL OPTIMIZADA) ---
+# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN FINAL OPTIMIZADA Y CORREGIDA) ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
     """
-    Función de análisis final, con el motor de cálculo de demanda y estacionalidad reescrito para máxima velocidad.
+    Función de análisis final con lógica corregida para el cálculo de demanda
+    y un sistema de sugerencias que prioriza traslados entre tiendas antes de comprar.
     """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
@@ -82,12 +83,12 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Stock'] = np.maximum(0, df['Stock'])
     df.reset_index(inplace=True)
 
-    # --- 2. Cálculo de Demanda y Estacionalidad (Motor Optimizado) ---
+    # --- 2. Cálculo de Demanda y Estacionalidad (LÓGICA CORREGIDA) ---
     fecha_hoy_dt = pd.Timestamp(datetime.now())
     df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
     
     df_long = df[['index', 'Historial_Ventas']].copy()
-    df_long = df_long[df_long['Historial_Ventas'].str.contains(':')] 
+    df_long = df_long[df_long['Historial_Ventas'].str.contains(':')]
     df_long['Historial_Ventas'] = df_long['Historial_Ventas'].str.split(',')
     df_long = df_long.explode('Historial_Ventas').dropna()
     
@@ -97,12 +98,15 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df_long.dropna(subset=['Fecha', 'Unidades'], inplace=True)
     
     df_long['dias_atras'] = (fecha_hoy_dt - df_long['Fecha']).dt.days
-    df_long['peso'] = np.maximum(0, 60 - df_long['dias_atras'])
 
-    grouped = df_long.groupby('index')
-    demanda_diaria = grouped.apply(lambda g: np.average(g['Unidades'], weights=g['peso']) if g['peso'].sum() > 0 else 0)
-    demanda_diaria.name = 'Demanda_Diaria_Promedio'
+    # >> INICIO DE CORRECCIÓN: CÁLCULO DE DEMANDA DIARIA REAL <<
+    # Se filtran ventas de los últimos 60 días y se promedian entre 60 para obtener una demanda diaria real.
+    ventas_recientes = df_long[df_long['dias_atras'] <= 60]
+    total_ventas_periodo = ventas_recientes.groupby('index')['Unidades'].sum()
+    demanda_diaria = (total_ventas_periodo / 60).rename('Demanda_Diaria_Promedio')
+    # >> FIN DE CORRECCIÓN <<
     
+    # Se unen los cálculos de demanda y estacionalidad al dataframe principal
     df_long['periodo'] = np.select([(df_long['dias_atras'] <= 30), (df_long['dias_atras'] > 30) & (df_long['dias_atras'] <= 60)], ['ultimos_30', 'previos_30'], default='otro')
     ventas_periodo = pd.crosstab(index=df_long['index'], columns=df_long['periodo'], values=df_long['Unidades'], aggfunc='sum').fillna(0)
     if 'ultimos_30' not in ventas_periodo: ventas_periodo['ultimos_30'] = 0
@@ -112,7 +116,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df = df.merge(demanda_diaria, on='index', how='left').fillna({'Demanda_Diaria_Promedio': 0})
     df = df.merge(ventas_periodo[['Estacionalidad_Reciente']], on='index', how='left').fillna({'Estacionalidad_Reciente': 0})
 
-    # --- 3. Cálculos de Inventario y ABC (Vectorizados) ---
+    # --- 3. Cálculos Base de Inventario y ABC ---
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
@@ -126,7 +130,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     else:
         df['Segmento_ABC'] = 'C'
 
-    # --- 4. Estado de Inventario (Vectorizado) ---
+    # --- 4. Estado de Inventario ---
     conditions = [
         (df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0),
         (df['Stock'] > 0) & (df['Stock'] < df['Punto_Reorden']),
@@ -134,32 +138,61 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
         (df['Stock'] > 0) & (df['Demanda_Diaria_Promedio'] <= 0)
     ]
     choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
-    choices_accion = ['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO', 'LIQUIDAR / PROMOCIONAR', 'LIQUIDAR / DESCONTINUAR']
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
-    df['Accion_Requerida'] = np.select(conditions, choices_accion, default='MONITOREAR')
-
-    # --- 5. Lógica de Sugerencias (Vectorizada) ---
+    
+    # --- 5. LÓGICA DE SUGERENCIAS (PRIORIZA TRASLADOS) ---
+    # Se calcula la necesidad y el excedente para cada producto en CADA tienda.
     df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
     df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
-    
-    df['Sugerencia_Compra'] = 0
-    necesidad_mask = df['Accion_Requerida'].isin(['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO'])
-    df.loc[necesidad_mask, 'Sugerencia_Compra'] = np.ceil(df.loc[necesidad_mask, 'Necesidad_Total'])
-
     df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Punto_Reorden'])
-    excedentes_por_sku = df.groupby('SKU')['Excedente_Trasladable'].sum().rename('Total_Excedente_SKU')
 
-    df = df.merge(excedentes_por_sku, on='SKU', how='left').fillna({'Total_Excedente_SKU': 0})
+    # Se consolida la necesidad y el excedente total por SKU en toda la red de tiendas.
+    sku_summary = df.groupby('SKU').agg(
+        Total_Necesidad_SKU=('Necesidad_Total', 'sum'),
+        Total_Excedente_SKU=('Excedente_Trasladable', 'sum')
+    ).reset_index()
 
-    df['Traslado_Posible'] = np.minimum(df['Sugerencia_Compra'], df['Total_Excedente_SKU'])
-    df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Traslado_Posible'])
-    df['Sugerencia_Compra'] -= df['Unidades_Traslado_Sugeridas']
+    # Se determina el máximo de unidades que se pueden mover por traslado para cada SKU.
+    sku_summary['Total_Traslados_Posibles_SKU'] = np.minimum(
+        sku_summary['Total_Necesidad_SKU'],
+        sku_summary['Total_Excedente_SKU']
+    )
+
+    # Se une la información consolidada al dataframe principal.
+    df = df.merge(sku_summary[['SKU', 'Total_Necesidad_SKU', 'Total_Traslados_Posibles_SKU']], on='SKU', how='left')
     
-    df.loc[df['Unidades_Traslado_Sugeridas'] > 0, 'Accion_Requerida'] = 'COMPRA Y/O TRASLADO'
+    # Se inicializan las columnas de sugerencias.
+    df['Unidades_Traslado_Sugeridas'] = 0
+    df['Sugerencia_Compra'] = 0
+    
+    # Se calcula el traslado sugerido para cada tienda de forma proporcional a su necesidad.
+    # Se evita la división por cero si la necesidad total es 0.
+    mask_necesidad = df['Total_Necesidad_SKU'] > 0
+    df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = \
+        (df['Necesidad_Total'] / df['Total_Necesidad_SKU']) * df['Total_Traslados_Posibles_SKU']
+    
+    # La sugerencia de compra es la necesidad que queda DESPUÉS de los traslados.
+    df['Sugerencia_Compra'] = df['Necesidad_Total'] - df['Unidades_Traslado_Sugeridas']
+
+    # Se redondean los valores para obtener unidades enteras.
+    df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'])
+    df['Sugerencia_Compra'] = np.ceil(df['Sugerencia_Compra'])
+    
+    # --- 6. Acciones Finales y Pesos ---
+    choices_accion = ['ABASTECIMIENTO URGENTE', 'REVISAR ABASTECIMIENTO', 'LIQUIDAR / PROMOCIONAR', 'LIQUIDAR / DESCONTINUAR']
+    df['Accion_Requerida'] = np.select(conditions, choices_accion, default='MONITOREAR')
+    
+    # Se ajusta la acción si hay traslados o compras sugeridas.
+    df.loc[df['Unidades_Traslado_Sugeridas'] > 0, 'Accion_Requerida'] = 'TRASLADO SUGERIDO'
+    df.loc[df['Sugerencia_Compra'] > 0, 'Accion_Requerida'] = 'COMPRA SUGERIDA'
+    df.loc[(df['Unidades_Traslado_Sugeridas'] > 0) & (df['Sugerencia_Compra'] > 0), 'Accion_Requerida'] = 'TRASLADO Y COMPRA'
     
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
+    
+    # Se eliminan columnas auxiliares y se retorna el dataframe final.
+    df.drop(columns=['Total_Necesidad_SKU', 'Total_Traslados_Posibles_SKU'], inplace=True)
     
     return df.set_index('index')
 
@@ -203,9 +236,9 @@ if df_crudo is not None and not df_crudo.empty:
     with st.spinner("Procesando datos... Por favor espera, esto debería ser rápido."):
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, 
-                                                            almacen_principal=almacen_principal_input, 
-                                                            dias_seguridad=dias_seguridad_input,
-                                                            dias_objetivo=dias_objetivo_dict)
+                                                              almacen_principal=almacen_principal_input, 
+                                                              dias_seguridad=dias_seguridad_input,
+                                                              dias_objetivo=dias_objetivo_dict)
     
     st.session_state['df_analisis'] = df_analisis_completo
 
