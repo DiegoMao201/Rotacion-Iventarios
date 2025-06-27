@@ -158,6 +158,11 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'])
     df['Sugerencia_Compra'] = np.ceil(df['Sugerencia_Compra'])
     
+    # --- 6. CÁLCULOS FINALES Y CORRECCIÓN DE ERROR ---
+    # Se añaden estas columnas que faltaban y causaban el error en otras páginas.
+    df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
+    df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
+    
     df.drop(columns=['Total_Necesidad_SKU', 'Total_Traslados_Posibles_SKU'], inplace=True, errors='ignore')
 
     return df.set_index('index')
@@ -250,7 +255,7 @@ if df_crudo is not None and not df_crudo.empty:
                 if skus_quiebre > 10: # Umbral configurable
                     st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**. Es urgente revisar el plan de abastecimiento para no perder ventas.", icon="🚨")
                 elif porc_excedente > 30: # Umbral configurable
-                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del valor del inventario es excedente. ¡Libera capital y optimiza tu espacio liquidando estos productos!", icon="💸")
+                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del valor del inventario es excedente. ¡Libera capital y optimiza tu espacio liquidando estos productos!", icon="�")
                 else:
                     st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance entre disponibilidad y excedentes. ¡Sigue así!", icon="✅")
             else:
