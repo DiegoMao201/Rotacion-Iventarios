@@ -47,11 +47,11 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN COMPLETA Y RESTAURADA) ---
+# --- 2. LÓGICA DE ANÁLISIS DE INVENTARIO (VERSIÓN FINAL Y COMPLETA) ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
     """
-    Función de análisis final con lógica corregida para el cálculo de demanda
+    Función de análisis final con lógica corregida para el cálculo de demanda, estacionalidad
     y un sistema de sugerencias que prioriza traslados entre tiendas antes de comprar.
     """
     if _df_crudo is None or _df_crudo.empty:
@@ -103,7 +103,15 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     total_ventas_periodo = ventas_recientes.groupby('index')['Unidades'].sum()
     demanda_diaria = (total_ventas_periodo / 60).rename('Demanda_Diaria_Promedio')
     
+    # --- CORRECCIÓN: Se añade el cálculo de Estacionalidad Reciente ---
+    df_long['periodo'] = np.select([(df_long['dias_atras'] <= 30), (df_long['dias_atras'] > 30) & (df_long['dias_atras'] <= 60)], ['ultimos_30', 'previos_30'], default='otro')
+    ventas_periodo = pd.crosstab(index=df_long['index'], columns=df_long['periodo'], values=df_long['Unidades'], aggfunc='sum').fillna(0)
+    if 'ultimos_30' not in ventas_periodo: ventas_periodo['ultimos_30'] = 0
+    if 'previos_30' not in ventas_periodo: ventas_periodo['previos_30'] = 0
+    ventas_periodo['Estacionalidad_Reciente'] = ventas_periodo['ultimos_30'] - ventas_periodo['previos_30']
+    
     df = df.merge(demanda_diaria, on='index', how='left').fillna({'Demanda_Diaria_Promedio': 0})
+    df = df.merge(ventas_periodo[['Estacionalidad_Reciente']], on='index', how='left').fillna({'Estacionalidad_Reciente': 0})
 
     # --- 3. Cálculos Base de Inventario y ABC ---
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
@@ -158,8 +166,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'])
     df['Sugerencia_Compra'] = np.ceil(df['Sugerencia_Compra'])
     
-    # --- 6. CÁLCULOS FINALES Y CORRECCIÓN DE ERROR ---
-    # Se añaden estas columnas que faltaban y causaban el error en otras páginas.
+    # --- 6. CÁLCULOS FINALES ---
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
     df['Peso_Compra_Sugerida'] = df['Sugerencia_Compra'] * df['Peso_Articulo']
     
@@ -255,13 +262,13 @@ if df_crudo is not None and not df_crudo.empty:
                 if skus_quiebre > 10: # Umbral configurable
                     st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**. Es urgente revisar el plan de abastecimiento para no perder ventas.", icon="🚨")
                 elif porc_excedente > 30: # Umbral configurable
-                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del valor del inventario es excedente. ¡Libera capital y optimiza tu espacio liquidando estos productos!", icon="�")
+                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del valor del inventario es excedente. ¡Libera capital y optimiza tu espacio liquidando estos productos!", icon="💸")
                 else:
                     st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance entre disponibilidad y excedentes. ¡Sigue así!", icon="✅")
             else:
                 st.info("Selecciona una tienda específica en el filtro de la izquierda para ver su diagnóstico detallado.")
 
-        # --- SECCIÓN: Buscador de Inventario Global (CON LÓGICA MEJORADA) ---
+        # --- SECCIÓN: Buscador de Inventario Global ---
         st.markdown("---")
         st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
         
@@ -271,34 +278,28 @@ if df_crudo is not None and not df_crudo.empty:
         )
 
         if search_term:
-            # 1. Lógica de búsqueda flexible en SKU y Descripción
             df_search_initial = df_analisis_completo[
                 df_analisis_completo['SKU'].astype(str).str.contains(search_term, case=False, na=False) |
                 df_analisis_completo['Descripcion'].astype(str).str.contains(search_term, case=False, na=False)
             ]
             
-            # 2. Filtrar los resultados para incluir solo productos con stock > 0
             df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
             
             if df_search_with_stock.empty:
                 st.warning("No se encontraron productos en stock que coincidan con la búsqueda.")
             else:
-                # 3. Obtener los SKUs únicos de los resultados de búsqueda (solo los que tienen stock)
                 found_skus = df_search_with_stock['SKU'].unique()
                 
-                # 4. Filtrar el dataframe COMPLETO para obtener el stock en TODAS las tiendas de esos SKUs
                 df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
                 
-                # 5. Crear tabla pivote para visualizar el stock por tienda
                 pivot_stock = df_stock_completo.pivot_table(
                     index=['SKU', 'Descripcion', 'Marca_Nombre'],
                     columns='Almacen_Nombre',
                     values='Stock',
-                    fill_value=0 # Rellenar con 0 si un producto no existe en una tienda
+                    fill_value=0
                 ).reset_index()
 
-                # 6. Opcional pero recomendado: Ocultar columnas de tiendas que no tienen stock de los productos buscados
-                store_cols = pivot_stock.columns[3:] # Excluir SKU, Descripcion, Marca
+                store_cols = pivot_stock.columns[3:]
                 cols_to_drop = [col for col in store_cols if pivot_stock[col].sum() == 0]
                 pivot_stock_filtered = pivot_stock.drop(columns=cols_to_drop)
 
