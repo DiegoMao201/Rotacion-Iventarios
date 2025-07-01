@@ -86,7 +86,7 @@ if 'df_analisis' in st.session_state:
         
         df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else pd.DataFrame()
 
-        # --- NUEVO FILTRO PARA TIPO DE EXCEDENTE ---
+        # --- FILTRO PARA TIPO DE EXCEDENTE ---
         st.sidebar.markdown("---")
         tipo_excedente = st.sidebar.radio(
             "Selecciona el tipo de producto a analizar:",
@@ -106,7 +106,7 @@ if 'df_analisis' in st.session_state:
 
         df_excedentes = df_filtered[df_filtered['Estado_Inventario'].isin(estados_filtrar)].copy()
         df_excedentes['Dias_Inventario'] = (df_excedentes['Stock'] / df_excedentes['Demanda_Diaria_Promedio']).replace([np.inf, -np.inf], 9999)
-        # --- NUEVO CÁLCULO DE PRECIO DE OFERTA ---
+        # --- CÁLCULO DE PRECIO DE OFERTA ---
         df_excedentes['Precio_Oferta'] = df_excedentes['Costo_Promedio_UND'] * 1.10
 
         # --- MÉTRICAS PRINCIPALES ---
@@ -149,17 +149,32 @@ if 'df_analisis' in st.session_state:
         
         if not df_excedentes.empty:
             st.dataframe(
-                df_excedentes.sort_values('Valor_Inventario', ascending=False), 
+                df_excedentes.sort_values('Valor_Inventario', ascending=False),
                 column_config={
+                    "SKU": "SKU",
+                    "Descripcion": "Descripción",
                     "Valor_Inventario": st.column_config.NumberColumn("Valor Inmovilizado", format="$ %d"),
-                    "Dias_Inventario": st.column_config.ProgressColumn("Días de Inventario", min_value=0, max_value=365),
+                    # --- ✅ COLUMNA DE TRASLADO INTEGRADA ---
+                    "Unidades_Traslado_Sugeridas": st.column_config.NumberColumn(
+                        "Sugerencia Traslado (Uds)",
+                        help="Unidades de este excedente que podrían ser trasladadas a otra tienda con necesidad.",
+                        format="%d"
+                    ),
+                    "Stock": "Stock Actual",
+                    "Dias_Inventario": st.column_config.ProgressColumn("Días de Inventario", min_value=0, max_value=365, help="Estimación de cuántos días cubrirá el stock actual."),
                     "Marca_Nombre": "Marca",
-                    "Precio_Oferta": st.column_config.NumberColumn("Precio de Oferta", help="Costo + 10% de rentabilidad", format="$ %d"),
-                }, 
-                hide_index=True
+                    "Precio_Oferta": st.column_config.NumberColumn("Precio de Oferta", help="Costo + 10% de margen", format="$ %d"),
+                },
+                # Columnas que quieres mostrar y en qué orden
+                column_order=[
+                    "SKU", "Descripcion", "Marca_Nombre", "Stock", 
+                    "Valor_Inventario", "Unidades_Traslado_Sugeridas", "Dias_Inventario", "Precio_Oferta"
+                ],
+                hide_index=True,
+                use_container_width=True
             )
 
-            # --- NUEVO BOTÓN DE DESCARGA ---
+            # --- BOTÓN DE DESCARGA ---
             excel_data = generar_excel_promocional(df_excedentes)
             st.download_button(
                 label="📥 Descargar Excel para Clientes",
@@ -169,5 +184,63 @@ if 'df_analisis' in st.session_state:
             )
         else:
             st.info("No hay productos que mostrar en esta categoría.")
+
+        # --- ANÁLISIS DE OPORTUNIDADES DE TRASLADO ---
+        st.markdown("---")
+        st.header("🚚 Oportunidades de Traslado entre Tiendas")
+
+        if selected_almacen_nombre == opcion_consolidado and not df_filtered.empty:
+            
+            skus_excedente = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]['SKU'].unique()
+            # Asumimos que estados 'Normal' o 'Bajo Stock' indican necesidad
+            skus_necesidad = df_filtered[df_filtered['Estado_Inventario'].isin(['Normal', 'Bajo Stock (Riesgo)', 'Quiebre de Stock'])]['SKU'].unique()
+            
+            skus_traslado = list(set(skus_excedente) & set(skus_necesidad))
+            
+            if skus_traslado:
+                df_traslados_candidatos = df_filtered[df_filtered['SKU'].isin(skus_traslado)].copy()
+                
+                df_origen = df_traslados_candidatos[df_traslados_candidatos['Unidades_Traslado_Sugeridas'] > 0]
+                df_destino = df_traslados_candidatos[df_traslados_candidatos['Necesidad_Total'] > 0]
+                
+                if not df_origen.empty and not df_destino.empty:
+                    df_sugerencia_traslado = pd.merge(
+                        df_origen[['SKU', 'Descripcion', 'Marca_Nombre', 'Almacen_Nombre', 'Unidades_Traslado_Sugeridas']],
+                        df_destino[['SKU', 'Almacen_Nombre', 'Necesidad_Total']],
+                        on='SKU',
+                        suffixes=('_Origen', '_Destino')
+                    ).rename(columns={
+                        'Almacen_Nombre_Origen': 'Tienda Origen (con Excedente)',
+                        'Unidades_Traslado_Sugeridas': 'Unidades a Enviar',
+                        'Almacen_Nombre_Destino': 'Tienda Destino (con Necesidad)',
+                        'Necesidad_Total': 'Unidades Requeridas'
+                    })
+                    
+                    df_sugerencia_traslado = df_sugerencia_traslado[df_sugerencia_traslado['Tienda Origen (con Excedente)'] != df_sugerencia_traslado['Tienda Destino (con Necesidad)']]
+                    df_sugerencia_traslado['Unidades a Enviar'] = df_sugerencia_traslado[['Unidades a Enviar', 'Unidades Requeridas']].min(axis=1).astype(int)
+
+                    if not df_sugerencia_traslado.empty:
+                        st.info("Productos con exceso de stock en una tienda y necesidad en otra. Considera un traslado para balancear el inventario.")
+                        st.dataframe(
+                            df_sugerencia_traslado[[
+                                'SKU', 'Descripcion', 'Marca_Nombre', 
+                                'Tienda Origen (con Excedente)', 'Tienda Destino (con Necesidad)', 'Unidades a Enviar'
+                            ]].sort_values(by=['SKU', 'Tienda Origen (con Excedente)']).drop_duplicates(),
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                    else:
+                         st.success("🎉 ¡No se encontraron oportunidades claras de traslado! El inventario parece estar bien distribuido.")
+                else:
+                    st.success("🎉 ¡No se encontraron oportunidades claras de traslado! El inventario parece estar bien distribuido.")
+            else:
+                st.success("🎉 ¡No se encontraron oportunidades claras de traslado! El inventario parece estar bien distribuido.")
+
+        else:
+            st.warning("Selecciona la vista '-- Consolidado (Todas las Tiendas) --' para ver las oportunidades de traslado entre ellas.")
+
+    else:
+         st.warning("No hay datos cargados para analizar.")
 else:
-    st.error("Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
+    st.error("🔴 Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' y espera a que los datos se procesen.")
+    st.page_link("app.py", label="Ir a la página principal", icon="🏠")
