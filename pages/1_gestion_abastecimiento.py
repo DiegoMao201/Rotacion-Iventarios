@@ -22,7 +22,7 @@ def generar_excel(df, nombre_hoja):
             worksheet = writer.sheets[nombre_hoja]
             worksheet.set_column('A:A', 70)
         else:
-            # ✅ Redondear unidades antes de exportar
+            # Redondear unidades antes de exportar
             if 'Uds a Enviar' in df.columns:
                 df['Uds a Enviar'] = df['Uds a Enviar'].astype(int)
             if 'Uds a Comprar' in df.columns:
@@ -68,7 +68,6 @@ def generar_plan_traslados_inteligente(df_analisis):
                 if tienda_origen == tienda_necesitada: continue
 
                 if excedente_disponible > 0:
-                    # ✅ Redondear unidades a enteros (no se pueden enviar fracciones)
                     unidades_a_enviar = np.floor(min(necesidad_actual, excedente_disponible))
                     if unidades_a_enviar < 1: continue
 
@@ -117,8 +116,9 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
 
     # --- PESTAÑA 1: DIAGNÓSTICO GENERAL ---
     with tab_diagnostico:
-        # (El contenido de esta pestaña no cambia)
         st.subheader("Indicadores Clave de Rendimiento (KPIs)")
+        
+        # --- CÁLCULO DE KPIs ---
         necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
         df_origen_kpi = df_analisis_completo[df_analisis_completo['Excedente_Trasladable'] > 0]
         df_destino_kpi = df_filtered[df_filtered['Necesidad_Total'] > 0]
@@ -129,11 +129,13 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             oportunidad_ahorro = (df_sugerencias_kpi['Uds_a_Mover'] * df_sugerencias_kpi['Costo_Promedio_UND']).sum()
         df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
         venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
+
         kpi1, kpi2, kpi3 = st.columns(3)
-        kpi1.metric(label="💰 Valor Compra Requerida", value=f"${necesidad_compra_total:,.0f}", help="Costo total de los productos que se sugiere comprar a proveedores.")
-        kpi2.metric(label="💸 Ahorro Potencial por Traslados", value=f"${oportunidad_ahorro:,.0f}", help="Valor (a costo) de los productos que puedes conseguir de otras tiendas en lugar de comprar.")
-        kpi3.metric(label="📉 Venta Potencial Perdida (30 días)", value=f"${venta_perdida:,.0f}", help=f"Estimación de ingresos no percibidos por productos en quiebre de stock.")
+        kpi1.metric(label="💰 Valor Compra Requerida", value=f"${necesidad_compra_total:,.0f}")
+        kpi2.metric(label="💸 Ahorro Potencial por Traslados", value=f"${oportunidad_ahorro:,.0f}")
+        kpi3.metric(label="📉 Venta Potencial Perdida (30 días)", value=f"${venta_perdida:,.0f}")
         st.markdown("---")
+
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             st.write("**Necesidad de Compra por Tienda**")
@@ -152,6 +154,26 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
                 fig = px.sunburst(df_compras_chart_data, path=['Segmento_ABC', 'Marca_Nombre'], values='Valor_Compra', title="¿En qué categorías y marcas comprar?")
                 st.plotly_chart(fig, use_container_width=True)
             else: st.success("No hay prioridades de compra.")
+        
+        # --- ✅ NUEVO: ANÁLISIS Y RECOMENDACIONES ---
+        st.markdown("---")
+        st.subheader("📝 Análisis y Recomendaciones Clave")
+        
+        with st.container(border=True):
+            if venta_perdida > 0:
+                st.markdown(f"**🚨 Alerta de Ventas en Riesgo:** Se estima una pérdida de venta de **${venta_perdida:,.0f}** en los próximos 30 días debido a **{len(df_quiebre)}** productos en quiebre. Es **crítico** reabastecerlos para proteger los ingresos y la satisfacción de tus clientes.")
+            
+            if oportunidad_ahorro > 0:
+                st.markdown(f"**💸 Oportunidad de Ahorro:** Puedes ahorrar **${oportunidad_ahorro:,.0f}** en compras solicitando traslados de otras tiendas. Revisa la pestaña **'Plan de Traslados'** como tu **primera opción** antes de comprar.")
+            
+            if necesidad_compra_total > 0:
+                df_compras_prioridad = df_analisis_completo[df_analisis_completo['Sugerencia_Compra'] > 0]
+                df_compras_prioridad['Valor_Compra'] = df_compras_prioridad['Sugerencia_Compra'] * df_compras_prioridad['Costo_Promedio_UND']
+                top_categoria = df_compras_prioridad.groupby('Segmento_ABC')['Valor_Compra'].sum().idxmax()
+                st.markdown(f"**🎯 Enfoque de Compra:** Tu principal necesidad de inversión se concentra en productos de **Clase '{top_categoria}'**. Asegurar la disponibilidad de este segmento es clave para mantener el flujo de ventas principal.")
+            
+            if venta_perdida == 0 and oportunidad_ahorro == 0 and necesidad_compra_total == 0:
+                st.markdown("✅ **¡Inventario Optimizado!** Felicitaciones, con los filtros actuales, no se detectan necesidades urgentes de compra, quiebres de stock ni oportunidades de traslado. Tu inventario está bien balanceado.")
 
     # --- PESTAÑA 2: PLAN DE TRASLADOS ---
     with tab_traslados:
@@ -160,26 +182,24 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         df_plan_maestro = generar_plan_traslados_inteligente(df_analisis_completo)
         df_plan_filtrado = df_plan_maestro.copy()
 
-        # --- ✅ NUEVOS FILTROS DE RUTA ---
         st.sidebar.markdown("---")
         st.sidebar.subheader("Filtros del Plan de Traslados")
         opcion_todas = "Todas"
 
-        lista_origenes = [opcion_todas] + sorted(df_plan_filtrado['Tienda Origen'].unique())
+        # ✅ CORRECCIÓN TypeError: Se eliminan valores nulos antes de ordenar.
+        lista_origenes = [opcion_todas] + sorted([str(x) for x in df_plan_filtrado['Tienda Origen'].unique() if pd.notna(x)])
         filtro_origen = st.sidebar.selectbox("Seleccionar Tienda Origen:", lista_origenes)
         if filtro_origen != opcion_todas:
             df_plan_filtrado = df_plan_filtrado[df_plan_filtrado['Tienda Origen'] == filtro_origen]
 
-        lista_destinos = [opcion_todas] + sorted(df_plan_filtrado['Tienda Destino'].unique())
+        lista_destinos = [opcion_todas] + sorted([str(x) for x in df_plan_filtrado['Tienda Destino'].unique() if pd.notna(x)])
         filtro_destino = st.sidebar.selectbox("Seleccionar Tienda Destino:", lista_destinos)
         if filtro_destino != opcion_todas:
             df_plan_filtrado = df_plan_filtrado[df_plan_filtrado['Tienda Destino'] == filtro_destino]
 
-        # Aplicar filtro de marca al final
         if selected_marcas and not df_plan_filtrado.empty:
              df_plan_filtrado = df_plan_filtrado[df_plan_filtrado['Marca_Nombre'].isin(selected_marcas)]
         
-        # Redondear unidades a enteros en el DataFrame final
         if not df_plan_filtrado.empty:
             df_plan_filtrado['Uds a Enviar'] = df_plan_filtrado['Uds a Enviar'].astype(int)
 
@@ -192,7 +212,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             st.dataframe(df_plan_filtrado, hide_index=True, use_container_width=True, column_config={"Valor del Traslado": st.column_config.NumberColumn(format="$ %d"), "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg")})
             
             st.markdown("---")
-            # --- ✅ NUEVOS INDICADORES DE CARGA TOTAL ---
             total_valor_traslado = df_plan_filtrado['Valor del Traslado'].sum()
             total_peso_traslado = df_plan_filtrado['Peso del Traslado (kg)'].sum()
             st.subheader("Resumen de la Carga Filtrada")
@@ -206,7 +225,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
         df_plan_compras_final = pd.DataFrame()
         if not df_plan_compras.empty:
-            # ✅ Redondear unidades a enteros
             df_plan_compras['Uds a Comprar'] = df_plan_compras['Sugerencia_Compra'].astype(int)
             df_plan_compras['Valor de la Compra'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Costo_Promedio_UND']
             df_plan_compras['Peso de la Compra (kg)'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Peso_Articulo']
