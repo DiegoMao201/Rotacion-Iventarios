@@ -32,13 +32,77 @@ def generar_excel(df, nombre_hoja):
                 worksheet.set_column(i, i, min(width, 50))
     return output.getvalue()
 
+# --- ✅ NUEVA LÓGICA DE ASIGNACIÓN SECUENCIAL DE TRASLADOS ---
+def generar_plan_traslados_inteligente(df_analisis):
+    """
+    Genera un plan de traslados que asigna desde la tienda con más excedente
+    hacia la que tiene más necesidad, de forma secuencial y sin duplicar.
+    """
+    df_origen = df_analisis[df_analisis['Excedente_Trasladable'] > 0].sort_values(by='Excedente_Trasladable', ascending=False).copy()
+    df_destino = df_analisis[df_analisis['Necesidad_Total'] > 0].sort_values(by='Necesidad_Total', ascending=False).copy()
+
+    if df_origen.empty or df_destino.empty:
+        return pd.DataFrame()
+
+    plan_final = []
+    
+    # Agrupamos por SKU para procesar cada producto de forma independiente
+    for sku, grupo_destino in df_destino.groupby('SKU'):
+        grupo_origen_sku = df_origen[df_origen['SKU'] == sku].copy()
+        if grupo_origen_sku.empty:
+            continue
+
+        # Convertimos a diccionario para poder modificar los excedentes
+        excedentes_dict = pd.Series(grupo_origen_sku['Excedente_Trasladable'].values, index=grupo_origen_sku['Almacen_Nombre']).to_dict()
+
+        for idx, necesidad_row in grupo_destino.iterrows():
+            tienda_necesitada = necesidad_row['Almacen_Nombre']
+            necesidad_actual = necesidad_row['Necesidad_Total']
+
+            # Iteramos sobre las tiendas con excedente, ordenadas de mayor a menor
+            for tienda_origen, excedente_disponible in sorted(excedentes_dict.items(), key=lambda item: item[1], reverse=True):
+                if necesidad_actual <= 0:
+                    break # Se cubrió la necesidad de esta tienda
+                
+                if tienda_origen == tienda_necesitada:
+                    continue
+
+                if excedente_disponible > 0:
+                    unidades_a_enviar = min(necesidad_actual, excedente_disponible)
+                    
+                    # Añadimos la sugerencia al plan
+                    info_origen = grupo_origen_sku[grupo_origen_sku['Almacen_Nombre'] == tienda_origen].iloc[0]
+                    plan_final.append({
+                        'SKU': sku,
+                        'Descripcion': necesidad_row['Descripcion'],
+                        'Segmento_ABC': necesidad_row['Segmento_ABC'],
+                        'Tienda Origen': tienda_origen,
+                        'Stock en Origen': info_origen['Stock'],
+                        'Tienda Destino': tienda_necesitada,
+                        'Necesidad en Destino': necesidad_row['Necesidad_Total'],
+                        'Uds a Enviar': unidades_a_enviar,
+                        'Peso del Traslado (kg)': unidades_a_enviar * necesidad_row['Peso_Articulo'],
+                        'Valor del Traslado': unidades_a_enviar * necesidad_row['Costo_Promedio_UND']
+                    })
+
+                    # Actualizamos los valores para el siguiente ciclo
+                    necesidad_actual -= unidades_a_enviar
+                    excedentes_dict[tienda_origen] -= unidades_a_enviar
+    
+    if not plan_final:
+        return pd.DataFrame()
+
+    return pd.DataFrame(plan_final).sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
+
+
 # --- 2. LÓGICA PRINCIPAL DE LA PÁGINA ---
 if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].empty:
     df_analisis_completo = st.session_state['df_analisis']
     
     # --- Añadir precio de venta estimado para KPIs ---
     MARGEN_ESTIMADO = 1.30 
-    df_analisis_completo['Precio_Venta_Estimado'] = df_analisis_completo['Costo_Promedio_UND'] * MARGEN_ESTIMADO
+    if 'Precio_Venta_Estimado' not in df_analisis_completo.columns:
+        df_analisis_completo['Precio_Venta_Estimado'] = df_analisis_completo['Costo_Promedio_UND'] * MARGEN_ESTIMADO
 
     # --- FILTROS EN LA BARRA LATERAL ---
     st.sidebar.header("Filtros de Gestión")
@@ -82,7 +146,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
         venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
 
-        # --- MOSTRAR KPIs ---
         kpi1, kpi2, kpi3 = st.columns(3)
         kpi1.metric(label="💰 Valor Compra Requerida", value=f"${necesidad_compra_total:,.0f}", help="Costo total de los productos que se sugiere comprar a proveedores.")
         kpi2.metric(label="💸 Ahorro Potencial por Traslados", value=f"${oportunidad_ahorro:,.0f}", help="Valor (a costo) de los productos que puedes conseguir de otras tiendas en lugar de comprar.")
@@ -90,14 +153,13 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
 
         st.markdown("---")
 
-        # --- GRÁFICOS INTERACTIVOS ---
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             st.write("**Necesidad de Compra por Tienda**")
-            if necesidad_compra_total > 0:
-                df_compras_chart = df_analisis_completo[df_analisis_completo['Sugerencia_Compra'] > 0]
-                df_compras_chart['Valor_Compra'] = df_compras_chart['Sugerencia_Compra'] * df_compras_chart['Costo_Promedio_UND']
-                data_chart = df_compras_chart.groupby('Almacen_Nombre')['Valor_Compra'].sum().sort_values(ascending=False).reset_index()
+            df_compras_chart_data = df_analisis_completo[df_analisis_completo['Sugerencia_Compra'] > 0]
+            if not df_compras_chart_data.empty:
+                df_compras_chart_data['Valor_Compra'] = df_compras_chart_data['Sugerencia_Compra'] * df_compras_chart_data['Costo_Promedio_UND']
+                data_chart = df_compras_chart_data.groupby('Almacen_Nombre')['Valor_Compra'].sum().sort_values(ascending=False).reset_index()
                 fig = px.bar(data_chart, x='Almacen_Nombre', y='Valor_Compra', text_auto='.2s', title="Inversión Requerida por Tienda")
                 st.plotly_chart(fig, use_container_width=True)
             else:
@@ -105,56 +167,31 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
 
         with col_g2:
             st.write("**Prioridad de Compra por Categoría**")
-            if necesidad_compra_total > 0:
-                df_compras_chart = df_analisis_completo[df_analisis_completo['Sugerencia_Compra'] > 0]
-                df_compras_chart['Valor_Compra'] = df_compras_chart['Sugerencia_Compra'] * df_compras_chart['Costo_Promedio_UND']
-                fig = px.sunburst(df_compras_chart, path=['Segmento_ABC', 'Marca_Nombre'], values='Valor_Compra', title="¿En qué categorías y marcas comprar?")
+            df_compras_chart_data = df_analisis_completo[df_analisis_completo['Sugerencia_Compra'] > 0]
+            if not df_compras_chart_data.empty:
+                df_compras_chart_data['Valor_Compra'] = df_compras_chart_data['Sugerencia_Compra'] * df_compras_chart_data['Costo_Promedio_UND']
+                fig = px.sunburst(df_compras_chart_data, path=['Segmento_ABC', 'Marca_Nombre'], values='Valor_Compra', title="¿En qué categorías y marcas comprar?")
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.success("No hay prioridades de compra.")
 
     # --- PESTAÑA 2: PLAN DE TRASLADOS ---
     with tab_traslados:
-        df_origen = df_analisis_completo[df_analisis_completo['Excedente_Trasladable'] > 0].copy()
-        df_destino = df_analisis_completo[df_analisis_completo['Necesidad_Total'] > 0].copy()
-        df_plan_traslados = pd.DataFrame()
-
-        if not df_origen.empty and not df_destino.empty:
-            # ✅ **CORRECCIÓN DEFINITIVA**: Se unen los dataframes completos. Pandas manejará los sufijos.
-            df_sugerencias = pd.merge(
-                df_origen,
-                df_destino,
-                on='SKU',
-                suffixes=('_Origen', '_Destino')
-            )
-            df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Origen'] != df_sugerencias['Almacen_Nombre_Destino']]
-
-            if selected_almacen_nombre != opcion_consolidado: 
-                df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre]
-            
-            if selected_marcas:
-                # Usamos la columna de marca del origen para el filtro
-                df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre_Origen'].isin(selected_marcas)]
-
-            if not df_sugerencias.empty:
-                # Se usan los nombres con sufijo correctos que Pandas crea automáticamente
-                df_sugerencias['Uds a Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable_Origen'], df_sugerencias['Necesidad_Total_Destino']).astype(int)
-                df_sugerencias['Valor del Traslado'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Costo_Promedio_UND_Origen']
-                df_sugerencias['Peso del Traslado (kg)'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Peso_Articulo_Origen']
-                
-                df_plan_traslados = df_sugerencias.rename(columns={
-                    'Descripcion_Origen': 'Descripcion',
-                    'Segmento_ABC_Origen': 'Segmento_ABC',
-                    'Almacen_Nombre_Origen': 'Tienda Origen', 
-                    'Stock_Origen': 'Stock en Origen',
-                    'Almacen_Nombre_Destino': 'Tienda Destino', 
-                    'Necesidad_Total_Destino': 'Necesidad en Destino'
-                })[[
-                    'SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 
-                    'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado'
-                ]].sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
+        st.info("Prioridad 1: Mover inventario existente para cubrir necesidades sin comprar. Este plan asigna desde la tienda con más excedente.")
         
-        st.info("Prioridad 1: Mover inventario existente para cubrir necesidades sin comprar.")
+        # Se llama a la nueva función inteligente
+        df_plan_traslados = generar_plan_traslados_inteligente(df_analisis_completo)
+        
+        # Aplicar filtros a posteriori
+        if selected_almacen_nombre != opcion_consolidado:
+            df_plan_traslados = df_plan_traslados[df_plan_traslados['Tienda Destino'] == selected_almacen_nombre]
+        if selected_marcas:
+             # Necesitamos la columna Marca_Nombre, que no está por defecto. La añadimos.
+            if not df_plan_traslados.empty:
+                marcas_map = df_analisis_completo[['SKU', 'Marca_Nombre']].drop_duplicates('SKU')
+                df_plan_traslados = pd.merge(df_plan_traslados, marcas_map, on='SKU', how='left')
+                df_plan_traslados = df_plan_traslados[df_plan_traslados['Marca_Nombre'].isin(selected_marcas)]
+
         excel_traslados = generar_excel(df_plan_traslados, "Plan de Traslados")
         st.download_button("📥 Descargar Plan de Traslados", excel_traslados, "Plan_de_Traslados.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         if df_plan_traslados.empty: 
@@ -164,6 +201,7 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
 
     # --- PESTAÑA 3: PLAN DE COMPRAS ---
     with tab_compras:
+        st.info("Prioridad 2: Comprar únicamente lo necesario después de haber agotado los traslados internos.")
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
         df_plan_compras_final = pd.DataFrame()
         if not df_plan_compras.empty:
@@ -171,7 +209,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             df_plan_compras['Peso de la Compra (kg)'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Peso_Articulo']
             df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Comprar para Tienda', 'Sugerencia_Compra': 'Uds a Comprar'})[['Comprar para Tienda', 'SKU', 'Descripcion', 'Segmento_ABC', 'Stock', 'Punto_Reorden', 'Uds a Comprar', 'Peso de la Compra (kg)', 'Valor de la Compra']].sort_values(by=['Valor de la Compra', 'Segmento_ABC'], ascending=[False, True])
 
-        st.info("Prioridad 2: Comprar únicamente lo necesario después de haber agotado los traslados internos.")
         excel_compras = generar_excel(df_plan_compras_final, "Plan de Compras")
         st.download_button("📥 Descargar Plan de Compras", excel_compras, "Plan_de_Compras.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         if df_plan_compras_final.empty: 
