@@ -37,7 +37,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
     df_analisis_completo = st.session_state['df_analisis']
     
     # --- Añadir precio de venta estimado para KPIs ---
-    # Asumimos un margen de ganancia del 30% para este cálculo. AJUSTA SI ES NECESARIO.
     MARGEN_ESTIMADO = 1.30 
     df_analisis_completo['Precio_Venta_Estimado'] = df_analisis_completo['Costo_Promedio_UND'] * MARGEN_ESTIMADO
 
@@ -72,7 +71,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         # --- CÁLCULO DE KPIs ---
         necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
         
-        # Oportunidad de ahorro por traslados
         df_origen_kpi = df_analisis_completo[df_analisis_completo['Excedente_Trasladable'] > 0]
         df_destino_kpi = df_filtered[df_filtered['Necesidad_Total'] > 0]
         oportunidad_ahorro = 0
@@ -81,9 +79,8 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             df_sugerencias_kpi['Uds_a_Mover'] = np.minimum(df_sugerencias_kpi['Excedente_Trasladable'], df_sugerencias_kpi['Necesidad_Total'])
             oportunidad_ahorro = (df_sugerencias_kpi['Uds_a_Mover'] * df_sugerencias_kpi['Costo_Promedio_UND']).sum()
 
-        # Venta potencial perdida
         df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
-        venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum() # Proyección a 30 días
+        venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
 
         # --- MOSTRAR KPIs ---
         kpi1, kpi2, kpi3 = st.columns(3)
@@ -118,31 +115,42 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
 
     # --- PESTAÑA 2: PLAN DE TRASLADOS ---
     with tab_traslados:
-        # La lógica de traslados siempre se calcula sobre el total para encontrar pares
         df_origen = df_analisis_completo[df_analisis_completo['Excedente_Trasladable'] > 0].copy()
         df_destino = df_analisis_completo[df_analisis_completo['Necesidad_Total'] > 0].copy()
         df_plan_traslados = pd.DataFrame()
+
         if not df_origen.empty and not df_destino.empty:
-            df_sugerencias = pd.merge(df_origen, df_destino[['SKU', 'Almacen_Nombre', 'Necesidad_Total']], on='SKU', suffixes=('_Origen', '_Destino'))
+            # ✅ **CORRECCIÓN**: Seleccionamos explícitamente las columnas para evitar conflictos de nombres no deseados.
+            df_sugerencias = pd.merge(
+                df_origen[['SKU', 'Descripcion', 'Marca_Nombre', 'Segmento_ABC', 'Almacen_Nombre', 'Stock', 'Excedente_Trasladable', 'Costo_Promedio_UND', 'Peso_Articulo']],
+                df_destino[['SKU', 'Almacen_Nombre', 'Necesidad_Total']],
+                on='SKU',
+                suffixes=('_Origen', '_Destino')
+            )
             df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Origen'] != df_sugerencias['Almacen_Nombre_Destino']]
+
             if selected_almacen_nombre != opcion_consolidado: 
                 df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre]
             if selected_marcas: 
-                df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre'].isin(selected_marcas)]
+                df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre_Origen'].isin(selected_marcas)]
 
             if not df_sugerencias.empty:
-                # ✅ **CORRECCIÓN**: Usar 'Necesidad_Total_Destino' que fue creado por el merge.
                 df_sugerencias['Uds a Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total_Destino']).astype(int)
                 df_sugerencias['Valor del Traslado'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Costo_Promedio_UND']
                 df_sugerencias['Peso del Traslado (kg)'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Peso_Articulo']
                 
-                # ✅ **CORRECCIÓN**: Usar los nombres con sufijo en el rename y la selección de columnas.
+                # ✅ **CORRECCIÓN**: Usamos los nombres correctos post-merge. 'Stock' no lleva sufijo, los demás sí.
                 df_plan_traslados = df_sugerencias.rename(columns={
+                    'Descripcion_Origen': 'Descripcion',
+                    'Segmento_ABC_Origen': 'Segmento_ABC',
                     'Almacen_Nombre_Origen': 'Tienda Origen', 
-                    'Stock_Origen': 'Stock en Origen', # 'Stock' viene de df_origen, así que es Stock_Origen
+                    'Stock': 'Stock en Origen', # 'Stock' no tiene sufijo porque solo está en df_origen
                     'Almacen_Nombre_Destino': 'Tienda Destino', 
-                    'Necesidad_Total_Destino': 'Necesidad en Destino' # Nombre corregido
-                })[['SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado']].sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
+                    'Necesidad_Total_Destino': 'Necesidad en Destino'
+                })[[
+                    'SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 
+                    'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado'
+                ]].sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
         
         st.info("Prioridad 1: Mover inventario existente para cubrir necesidades sin comprar.")
         excel_traslados = generar_excel(df_plan_traslados, "Plan de Traslados")
