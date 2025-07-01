@@ -68,6 +68,7 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
     with tab_diagnostico:
         st.subheader("Indicadores Clave de Rendimiento (KPIs)")
 
+        # --- CÁLCULO DE KPIs ---
         necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
         
         df_origen_kpi = df_analisis_completo[df_analisis_completo['Excedente_Trasladable'] > 0]
@@ -81,6 +82,7 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
         venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
 
+        # --- MOSTRAR KPIs ---
         kpi1, kpi2, kpi3 = st.columns(3)
         kpi1.metric(label="💰 Valor Compra Requerida", value=f"${necesidad_compra_total:,.0f}", help="Costo total de los productos que se sugiere comprar a proveedores.")
         kpi2.metric(label="💸 Ahorro Potencial por Traslados", value=f"${oportunidad_ahorro:,.0f}", help="Valor (a costo) de los productos que puedes conseguir de otras tiendas en lugar de comprar.")
@@ -88,6 +90,7 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
 
         st.markdown("---")
 
+        # --- GRÁFICOS INTERACTIVOS ---
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             st.write("**Necesidad de Compra por Tienda**")
@@ -117,9 +120,10 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         df_plan_traslados = pd.DataFrame()
 
         if not df_origen.empty and not df_destino.empty:
+            # ✅ **CORRECCIÓN DEFINITIVA**: Se unen los dataframes completos. Pandas manejará los sufijos.
             df_sugerencias = pd.merge(
                 df_origen,
-                df_destino[['SKU', 'Almacen_Nombre', 'Necesidad_Total']],
+                df_destino,
                 on='SKU',
                 suffixes=('_Origen', '_Destino')
             )
@@ -128,21 +132,23 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             if selected_almacen_nombre != opcion_consolidado: 
                 df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre]
             
-            if selected_marcas: 
-                df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre'].isin(selected_marcas)]
+            if selected_marcas:
+                # Usamos la columna de marca del origen para el filtro
+                df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre_Origen'].isin(selected_marcas)]
 
             if not df_sugerencias.empty:
-                # ✅ **CORRECCIÓN**: 'Necesidad_Total' no lleva sufijo porque solo está en df_destino en el merge explícito.
-                df_sugerencias['Uds a Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total']).astype(int)
-                df_sugerencias['Valor del Traslado'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Costo_Promedio_UND']
-                df_sugerencias['Peso del Traslado (kg)'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Peso_Articulo']
+                # Se usan los nombres con sufijo correctos que Pandas crea automáticamente
+                df_sugerencias['Uds a Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable_Origen'], df_sugerencias['Necesidad_Total_Destino']).astype(int)
+                df_sugerencias['Valor del Traslado'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Costo_Promedio_UND_Origen']
+                df_sugerencias['Peso del Traslado (kg)'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Peso_Articulo_Origen']
                 
-                # ✅ **CORRECCIÓN**: Se ajusta el rename para reflejar los nombres correctos post-merge.
                 df_plan_traslados = df_sugerencias.rename(columns={
+                    'Descripcion_Origen': 'Descripcion',
+                    'Segmento_ABC_Origen': 'Segmento_ABC',
                     'Almacen_Nombre_Origen': 'Tienda Origen', 
                     'Stock_Origen': 'Stock en Origen',
                     'Almacen_Nombre_Destino': 'Tienda Destino', 
-                    'Necesidad_Total': 'Necesidad en Destino'
+                    'Necesidad_Total_Destino': 'Necesidad en Destino'
                 })[[
                     'SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 
                     'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado'
