@@ -13,6 +13,7 @@ st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para m
 # --- 1. FUNCIONES PARA GENERAR ARCHIVOS EXCEL ---
 @st.cache_data
 def generar_excel(df, nombre_hoja):
+    """Función genérica para crear un archivo Excel con formato."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         if df.empty:
@@ -124,20 +125,32 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         if not df_origen.empty and not df_destino.empty:
             df_sugerencias = pd.merge(df_origen, df_destino[['SKU', 'Almacen_Nombre', 'Necesidad_Total']], on='SKU', suffixes=('_Origen', '_Destino'))
             df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Origen'] != df_sugerencias['Almacen_Nombre_Destino']]
-            if selected_almacen_nombre != opcion_consolidado: df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre]
-            if selected_marcas: df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre'].isin(selected_marcas)]
+            if selected_almacen_nombre != opcion_consolidado: 
+                df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre]
+            if selected_marcas: 
+                df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre'].isin(selected_marcas)]
 
             if not df_sugerencias.empty:
-                df_sugerencias['Uds a Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total']).astype(int)
+                # ✅ **CORRECCIÓN**: Usar 'Necesidad_Total_Destino' que fue creado por el merge.
+                df_sugerencias['Uds a Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total_Destino']).astype(int)
                 df_sugerencias['Valor del Traslado'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Costo_Promedio_UND']
                 df_sugerencias['Peso del Traslado (kg)'] = df_sugerencias['Uds a Enviar'] * df_sugerencias['Peso_Articulo']
-                df_plan_traslados = df_sugerencias.rename(columns={'Almacen_Nombre_Origen': 'Tienda Origen', 'Stock': 'Stock en Origen', 'Almacen_Nombre_Destino': 'Tienda Destino', 'Necesidad_Total': 'Necesidad en Destino'})[['SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado']].sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
+                
+                # ✅ **CORRECCIÓN**: Usar los nombres con sufijo en el rename y la selección de columnas.
+                df_plan_traslados = df_sugerencias.rename(columns={
+                    'Almacen_Nombre_Origen': 'Tienda Origen', 
+                    'Stock_Origen': 'Stock en Origen', # 'Stock' viene de df_origen, así que es Stock_Origen
+                    'Almacen_Nombre_Destino': 'Tienda Destino', 
+                    'Necesidad_Total_Destino': 'Necesidad en Destino' # Nombre corregido
+                })[['SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado']].sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
         
         st.info("Prioridad 1: Mover inventario existente para cubrir necesidades sin comprar.")
         excel_traslados = generar_excel(df_plan_traslados, "Plan de Traslados")
         st.download_button("📥 Descargar Plan de Traslados", excel_traslados, "Plan_de_Traslados.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        if df_plan_traslados.empty: st.success("¡No se sugieren traslados con los filtros actuales!")
-        else: st.dataframe(df_plan_traslados, hide_index=True, use_container_width=True, column_config={"Valor del Traslado": st.column_config.NumberColumn(format="$ %d"), "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg")})
+        if df_plan_traslados.empty: 
+            st.success("¡No se sugieren traslados con los filtros actuales!")
+        else: 
+            st.dataframe(df_plan_traslados, hide_index=True, use_container_width=True, column_config={"Valor del Traslado": st.column_config.NumberColumn(format="$ %d"), "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg")})
 
     # --- PESTAÑA 3: PLAN DE COMPRAS ---
     with tab_compras:
@@ -151,8 +164,10 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         st.info("Prioridad 2: Comprar únicamente lo necesario después de haber agotado los traslados internos.")
         excel_compras = generar_excel(df_plan_compras_final, "Plan de Compras")
         st.download_button("📥 Descargar Plan de Compras", excel_compras, "Plan_de_Compras.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        if df_plan_compras_final.empty: st.success("¡No se requieren compras con los filtros actuales!")
-        else: st.dataframe(df_plan_compras_final, hide_index=True, use_container_width=True, column_config={"Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), "Peso de la Compra (kg)": st.column_config.NumberColumn(format="%.2f kg")})
+        if df_plan_compras_final.empty: 
+            st.success("¡No se requieren compras con los filtros actuales!")
+        else: 
+            st.dataframe(df_plan_compras_final, hide_index=True, use_container_width=True, column_config={"Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), "Peso de la Compra (kg)": st.column_config.NumberColumn(format="%.2f kg")})
 
 else:
     st.error("🔴 Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
