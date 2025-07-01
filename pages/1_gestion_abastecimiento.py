@@ -16,7 +16,6 @@ def generar_excel(df, nombre_hoja):
     """Función genérica para crear un archivo Excel con formato."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Si el dataframe está vacío, escribe un mensaje de notificación
         if df.empty:
             df_vacio = pd.DataFrame([{'Notificación': f"No se encontraron datos para '{nombre_hoja}' con los filtros actuales."}])
             df_vacio.to_excel(writer, index=False, sheet_name=nombre_hoja)
@@ -31,10 +30,9 @@ def generar_excel(df, nombre_hoja):
             for col_num, value in enumerate(df.columns.values):
                 worksheet.write(0, col_num, value, header_format)
             
-            # Ajustar ancho de columnas automáticamente (aproximado)
             for i, col in enumerate(df.columns):
                 width = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                worksheet.set_column(i, i, min(width, 50)) # Limitar ancho máximo
+                worksheet.set_column(i, i, min(width, 50))
 
     return output.getvalue()
 
@@ -50,34 +48,57 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
     lista_nombres_unicos = sorted([str(nombre) for nombre in nombres_almacen['Almacen_Nombre'].unique() if pd.notna(nombre)])
     lista_seleccion_nombres = [opcion_consolidado] + lista_nombres_unicos
     
-    selected_almacen_nombre = st.sidebar.selectbox("Filtrar por Tienda:", lista_seleccion_nombres, key="sb_almacen_abastecimiento")
+    selected_almacen_nombre = st.sidebar.selectbox("Selecciona una Tienda para gestionar:", lista_seleccion_nombres, key="sb_almacen_abastecimiento")
     
+    # El DataFrame para los filtros de marca se basa en la selección inicial
     if selected_almacen_nombre == opcion_consolidado:
-        df_vista = df_analisis_completo
+        df_vista_filtros = df_analisis_completo
     else:
         codigo_almacen_seleccionado = map_nombre_a_codigo.get(selected_almacen_nombre)
-        df_vista = df_analisis_completo[
-            (df_analisis_completo['Almacen'] == codigo_almacen_seleccionado) |
-            (df_analisis_completo['SKU'].isin(
-                df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado]['SKU']
-            ))
-        ]
+        df_vista_filtros = df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado]
 
-    lista_marcas = sorted(df_vista['Marca_Nombre'].unique())
+    lista_marcas = sorted(df_vista_filtros['Marca_Nombre'].unique())
     selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas, default=lista_marcas, key="filtro_marca_abastecimiento")
     
-    df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else pd.DataFrame()
+    # Aplicar filtro de marca al df de vista
+    df_vista_filtrada = df_vista_filtros[df_vista_filtros['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else pd.DataFrame()
+
+    # --- SECCIÓN DE DIAGNÓSTICO INTELIGENTE ---
+    if selected_almacen_nombre != opcion_consolidado and not df_vista_filtrada.empty:
+        st.subheader(f"Diagnóstico Rápido para: {selected_almacen_nombre}", divider='orange')
+        
+        # Calcular métricas clave para la tienda seleccionada
+        skus_en_quiebre = df_vista_filtrada[df_vista_filtrada['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
+        
+        # Oportunidades de traslado HACIA esta tienda
+        necesidades_tienda = df_vista_filtrada[df_vista_filtrada['Necesidad_Total'] > 0]['SKU'].unique()
+        excedentes_otras_tiendas = df_analisis_completo[
+            (df_analisis_completo['Excedente_Trasladable'] > 0) & 
+            (df_analisis_completo['Almacen_Nombre'] != selected_almacen_nombre)
+        ]['SKU'].unique()
+        
+        traslados_posibles = len(set(necesidades_tienda) & set(excedentes_otras_tiendas))
+
+        # Generar mensajes automáticos
+        if skus_en_quiebre > 0:
+            st.error(f"🚨 **¡ACCIÓN URGENTE!** Tienes **{skus_en_quiebre} producto(s) en quiebre de stock**. Esto significa pérdida de ventas. Revisa inmediatamente el plan de compras y traslados para reponerlos.", icon="🚨")
+        
+        if traslados_posibles > 0:
+            st.warning(f"💸 **OPORTUNIDAD DE AHORRO:** Hemos identificado **{traslados_posibles} producto(s)** que necesitas y que otras tiendas tienen en exceso. ¡Solicita los traslados antes de comprar y ahorra capital!", icon="💸")
+        
+        if skus_en_quiebre == 0 and traslados_posibles == 0:
+            st.success(f"✅ **¡BUEN TRABAJO!** La tienda {selected_almacen_nombre} no presenta quiebres de stock urgentes y sus necesidades están cubiertas. ¡Sigue monitoreando!", icon="✅")
+
 
     # --- SECCIÓN 1: PLAN DE TRASLADOS ---
     st.header("🔄 Plan de Traslados para Optimización", divider='blue')
-    st.info("Prioridad 1: Mover inventario existente entre tiendas para cubrir necesidades sin comprar.")
-
-    # Inicializar el DataFrame final como vacío
+    
+    # La lógica de traslados siempre se calcula sobre el total para encontrar pares
+    df_origen = df_analisis_completo[df_analisis_completo['Excedente_Trasladable'] > 0].copy()
+    df_destino = df_analisis_completo[df_analisis_completo['Necesidad_Total'] > 0].copy()
+    
     df_plan_traslados = pd.DataFrame()
 
-    df_origen = df_filtered[df_filtered['Excedente_Trasladable'] > 0].copy()
-    df_destino = df_filtered[df_filtered['Necesidad_Total'] > 0].copy()
-    
     if not df_origen.empty and not df_destino.empty:
         df_sugerencias = pd.merge(
             df_origen[['SKU', 'Descripcion', 'Marca_Nombre', 'Almacen_Nombre', 'Stock', 'Excedente_Trasladable', 'Costo_Promedio_UND', 'Segmento_ABC', 'Peso_Articulo']],
@@ -87,34 +108,32 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         )
         df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Origen'] != df_sugerencias['Almacen_Nombre_Destino']]
         
+        # ✅ **NUEVA LÓGICA DE FILTRO ENFOCADA EN NECESIDAD**
         if selected_almacen_nombre != opcion_consolidado:
-            df_sugerencias = df_sugerencias[
-                (df_sugerencias['Almacen_Nombre_Origen'] == selected_almacen_nombre) |
-                (df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre)
-            ]
+            st.info(f"Mostrando únicamente los traslados que **{selected_almacen_nombre} necesita recibir**.")
+            df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre]
+        else:
+            st.info("Mostrando todas las oportunidades de traslado entre tiendas (vista consolidada).")
 
-        # ✅ **CORRECCIÓN DEFINITIVA**: Realizar todos los cálculos y la creación del DF final
-        # solo si df_sugerencias tiene filas DESPUÉS de todos los filtros.
+        # Aplicar filtro de marca al resultado final
+        if selected_marcas:
+            df_sugerencias = df_sugerencias[df_sugerencias['Marca_Nombre'].isin(selected_marcas)]
+
         if not df_sugerencias.empty:
             df_sugerencias['Unidades_a_Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total']).astype(int)
             df_sugerencias['Valor_Traslado'] = df_sugerencias['Unidades_a_Enviar'] * df_sugerencias['Costo_Promedio_UND']
             df_sugerencias['Peso_Traslado'] = df_sugerencias['Unidades_a_Enviar'] * df_sugerencias['Peso_Articulo']
             
-            # Ahora sí, creamos el DataFrame final
             df_plan_traslados = df_sugerencias.rename(columns={
-                'Almacen_Nombre_Origen': 'Tienda Origen',
-                'Stock': 'Stock en Origen',
-                'Almacen_Nombre_Destino': 'Tienda Destino',
-                'Necesidad_Total': 'Necesidad en Destino',
-                'Unidades_a_Enviar': 'Uds a Enviar',
-                'Peso_Traslado': 'Peso del Traslado (kg)',
+                'Almacen_Nombre_Origen': 'Tienda Origen', 'Stock': 'Stock en Origen',
+                'Almacen_Nombre_Destino': 'Tienda Destino', 'Necesidad_Total': 'Necesidad en Destino',
+                'Unidades_a_Enviar': 'Uds a Enviar', 'Peso_Traslado': 'Peso del Traslado (kg)',
                 'Valor_Traslado': 'Valor del Traslado'
             })[[
                 'SKU', 'Descripcion', 'Segmento_ABC', 'Tienda Origen', 'Stock en Origen', 
                 'Tienda Destino', 'Necesidad en Destino', 'Uds a Enviar', 'Peso del Traslado (kg)', 'Valor del Traslado'
             ]].sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
-    # El resto del código para mostrar y descargar no cambia
     excel_traslados = generar_excel(df_plan_traslados, "Plan de Traslados")
     st.download_button("📥 Descargar Plan de Traslados", excel_traslados, "Plan_de_Traslados.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -122,27 +141,23 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         st.success("¡No se sugieren traslados con los filtros actuales!")
     else:
         st.dataframe(df_plan_traslados, hide_index=True, use_container_width=True,
-            column_config={
-                "Valor del Traslado": st.column_config.NumberColumn(format="$ %d"),
-                "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg")
-            })
+            column_config={"Valor del Traslado": st.column_config.NumberColumn(format="$ %d"), "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg")})
 
     # --- SECCIÓN 2: PLAN DE COMPRAS ---
     st.header("🛒 Plan de Compras Sugerido", divider='blue')
     st.info("Prioridad 2: Comprar únicamente lo necesario después de haber agotado los traslados internos.")
-
-    df_plan_compras_final = pd.DataFrame()
-    df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
     
+    # El plan de compras se basa en la vista ya filtrada por tienda y marca
+    df_plan_compras = df_vista_filtrada[df_vista_filtrada['Sugerencia_Compra'] > 0].copy()
+    
+    df_plan_compras_final = pd.DataFrame()
     if not df_plan_compras.empty:
         df_plan_compras['Valor_Compra'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Costo_Promedio_UND']
         df_plan_compras['Peso_Compra'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Peso_Articulo']
         
         df_plan_compras_final = df_plan_compras.rename(columns={
-            'Almacen_Nombre': 'Comprar para Tienda',
-            'Sugerencia_Compra': 'Uds a Comprar',
-            'Peso_Compra': 'Peso de la Compra (kg)',
-            'Valor_Compra': 'Valor de la Compra'
+            'Almacen_Nombre': 'Comprar para Tienda', 'Sugerencia_Compra': 'Uds a Comprar',
+            'Peso_Compra': 'Peso de la Compra (kg)', 'Valor_Compra': 'Valor de la Compra'
         })[[
             'Comprar para Tienda', 'SKU', 'Descripcion', 'Segmento_ABC', 'Stock', 'Punto_Reorden', 'Uds a Comprar', 'Peso de la Compra (kg)', 'Valor de la Compra'
         ]].sort_values(by=['Valor de la Compra', 'Segmento_ABC'], ascending=[False, True])
@@ -154,10 +169,7 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         st.success("¡No se requieren compras con los filtros actuales!")
     else:
         st.dataframe(df_plan_compras_final, hide_index=True, use_container_width=True,
-            column_config={
-                "Valor de la Compra": st.column_config.NumberColumn(format="$ %d"),
-                "Peso de la Compra (kg)": st.column_config.NumberColumn(format="%.2f kg")
-            })
+            column_config={"Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), "Peso de la Compra (kg)": st.column_config.NumberColumn(format="%.2f kg")})
 
 else:
     st.error("🔴 Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
