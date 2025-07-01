@@ -16,7 +16,6 @@ def generar_excel(df, nombre_hoja):
     """Función genérica para crear un archivo Excel con formato."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Si el dataframe está vacío, escribe un mensaje de notificación
         if df.empty:
             df_vacio = pd.DataFrame([{'Notificación': f"No se encontraron datos para '{nombre_hoja}' con los filtros actuales."}])
             df_vacio.to_excel(writer, index=False, sheet_name=nombre_hoja)
@@ -31,10 +30,9 @@ def generar_excel(df, nombre_hoja):
             for col_num, value in enumerate(df.columns.values):
                 worksheet.write(0, col_num, value, header_format)
             
-            # Ajustar ancho de columnas automáticamente (aproximado)
             for i, col in enumerate(df.columns):
                 width = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                worksheet.set_column(i, i, min(width, 50)) # Limitar ancho máximo
+                worksheet.set_column(i, i, min(width, 50))
 
     return output.getvalue()
 
@@ -56,7 +54,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
         df_vista = df_analisis_completo
     else:
         codigo_almacen_seleccionado = map_nombre_a_codigo.get(selected_almacen_nombre)
-        # Mostrar acciones que INVOLUCRAN a la tienda seleccionada (origen o destino)
         df_vista = df_analisis_completo[
             (df_analisis_completo['Almacen'] == codigo_almacen_seleccionado) |
             (df_analisis_completo['SKU'].isin(
@@ -73,36 +70,32 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
     st.header("🔄 Plan de Traslados para Optimización", divider='blue')
     st.info("Prioridad 1: Mover inventario existente entre tiendas para cubrir necesidades sin comprar.")
 
-    # Crear el DF de sugerencias de traslado a partir de la vista filtrada
     df_origen = df_filtered[df_filtered['Excedente_Trasladable'] > 0].copy()
     df_destino = df_filtered[df_filtered['Necesidad_Total'] > 0].copy()
     
     df_plan_traslados = pd.DataFrame()
 
     if not df_origen.empty and not df_destino.empty:
-        # Unir origen y destino por SKU
         df_sugerencias = pd.merge(
             df_origen[['SKU', 'Descripcion', 'Marca_Nombre', 'Almacen_Nombre', 'Stock', 'Excedente_Trasladable', 'Costo_Promedio_UND', 'Segmento_ABC', 'Peso_Articulo']],
             df_destino[['SKU', 'Almacen_Nombre', 'Necesidad_Total']],
             on='SKU',
             suffixes=('_Origen', '_Destino')
         )
-        # Eliminar traslados a la misma tienda
         df_sugerencias = df_sugerencias[df_sugerencias['Almacen_Nombre_Origen'] != df_sugerencias['Almacen_Nombre_Destino']]
-        # Calcular unidades reales a mover
-        df_sugerencias['Unidades_a_Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total']).astype(int)
-        df_sugerencias['Valor_Traslado'] = df_sugerencias['Unidades_a_Enviar'] * df_sugerencias['Costo_Promedio_UND']
-        # --- ✅ CÁLCULO DEL PESO ---
-        df_sugerencias['Peso_Traslado'] = df_sugerencias['Unidades_a_Enviar'] * df_sugerencias['Peso_Articulo']
         
-        # Si se filtró por una tienda, mostrar solo las acciones que la involucran
-        if selected_almacen_nombre != opcion_consolidado:
-            df_sugerencias = df_sugerencias[
-                (df_sugerencias['Almacen_Nombre_Origen'] == selected_almacen_nombre) |
-                (df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre)
-            ]
-
+        # ✅ **CORRECCIÓN**: Toda la lógica de creación del DataFrame final va DENTRO del IF.
         if not df_sugerencias.empty:
+            df_sugerencias['Unidades_a_Enviar'] = np.minimum(df_sugerencias['Excedente_Trasladable'], df_sugerencias['Necesidad_Total']).astype(int)
+            df_sugerencias['Valor_Traslado'] = df_sugerencias['Unidades_a_Enviar'] * df_sugerencias['Costo_Promedio_UND']
+            df_sugerencias['Peso_Traslado'] = df_sugerencias['Unidades_a_Enviar'] * df_sugerencias['Peso_Articulo']
+            
+            if selected_almacen_nombre != opcion_consolidado:
+                df_sugerencias = df_sugerencias[
+                    (df_sugerencias['Almacen_Nombre_Origen'] == selected_almacen_nombre) |
+                    (df_sugerencias['Almacen_Nombre_Destino'] == selected_almacen_nombre)
+                ]
+
             df_plan_traslados = df_sugerencias[[
                 'SKU', 'Descripcion', 'Segmento_ABC', 'Almacen_Nombre_Origen', 'Stock', 
                 'Almacen_Nombre_Destino', 'Necesidad_Total', 'Unidades_a_Enviar', 'Peso_Traslado', 'Valor_Traslado'
@@ -116,7 +109,6 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
                 'Valor_Traslado': 'Valor del Traslado'
             }).sort_values(by=['Valor_Traslado', 'Segmento_ABC'], ascending=[False, True])
 
-    # Descarga y visualización del Plan de Traslados
     excel_traslados = generar_excel(df_plan_traslados, "Plan de Traslados")
     st.download_button("📥 Descargar Plan de Traslados", excel_traslados, "Plan_de_Traslados.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -133,22 +125,22 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
     st.header("🛒 Plan de Compras Sugerido", divider='blue')
     st.info("Prioridad 2: Comprar únicamente lo necesario después de haber agotado los traslados internos.")
 
-    # Crear el DF de plan de compras
     df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
-    df_plan_compras['Valor_Compra'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Costo_Promedio_UND']
-    # --- ✅ CÁLCULO DEL PESO ---
-    df_plan_compras['Peso_Compra'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Peso_Articulo']
     
-    df_plan_compras_final = df_plan_compras[[
-        'Almacen_Nombre', 'SKU', 'Descripcion', 'Segmento_ABC', 'Stock', 'Punto_Reorden', 'Sugerencia_Compra', 'Peso_Compra', 'Valor_Compra'
-    ]].rename(columns={
-        'Almacen_Nombre': 'Comprar para Tienda',
-        'Sugerencia_Compra': 'Uds a Comprar',
-        'Peso_Compra': 'Peso de la Compra (kg)',
-        'Valor_Compra': 'Valor de la Compra'
-    }).sort_values(by=['Valor_Compra', 'Segmento_ABC'], ascending=[False, True])
+    df_plan_compras_final = pd.DataFrame()
+    if not df_plan_compras.empty:
+        df_plan_compras['Valor_Compra'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Costo_Promedio_UND']
+        df_plan_compras['Peso_Compra'] = df_plan_compras['Sugerencia_Compra'] * df_plan_compras['Peso_Articulo']
+        
+        df_plan_compras_final = df_plan_compras[[
+            'Almacen_Nombre', 'SKU', 'Descripcion', 'Segmento_ABC', 'Stock', 'Punto_Reorden', 'Sugerencia_Compra', 'Peso_Compra', 'Valor_Compra'
+        ]].rename(columns={
+            'Almacen_Nombre': 'Comprar para Tienda',
+            'Sugerencia_Compra': 'Uds a Comprar',
+            'Peso_Compra': 'Peso de la Compra (kg)',
+            'Valor_Compra': 'Valor de la Compra'
+        }).sort_values(by=['Valor_Compra', 'Segmento_ABC'], ascending=[False, True])
 
-    # Descarga y visualización del Plan de Compras
     excel_compras = generar_excel(df_plan_compras_final, "Plan de Compras")
     st.download_button("📥 Descargar Plan de Compras", excel_compras, "Plan_de_Compras.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
