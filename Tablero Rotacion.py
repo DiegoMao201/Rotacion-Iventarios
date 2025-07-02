@@ -61,8 +61,6 @@ if not st.session_state.get('logged_in', False):
     login()
     st.stop()
 
-# --- INICIO DEL CÓDIGO ORIGINAL (CON MEJORAS INTEGRADAS) ---
-
 # --- ESTILOS VISUALES Y CSS PERSONALIZADO ---
 st.markdown("""
 <style>
@@ -98,9 +96,9 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- LÓGICA DE ANÁLISIS DE INVENTARIO (CON LÓGICA DE EXCEDENTE CORREGIDA) ---
+# --- LÓGICA DE ANÁLISIS DE INVENTARIO ---
 @st.cache_data
-def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
+def analizar_inventario_completo(_df_crudo, dias_seguridad=7, dias_objetivo=None):
     """
     Función de análisis final con lógica corregida para el cálculo de demanda, estacionalidad
     y un sistema de sugerencias que prioriza traslados entre tiendas antes de comprar.
@@ -110,9 +108,9 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
 
     if dias_objetivo is None:
         dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
-        
+
     df = _df_crudo.copy()
-    
+
     # --- 1. Limpieza y Preparación de Datos ---
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
@@ -121,13 +119,13 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
         'LEAD_TIME_PROVEEDOR': 'Lead_Time_Proveedor'
     }
     df.rename(columns=lambda c: column_mapping.get(c.strip().upper(), c.strip().upper()), inplace=True)
-    
+
     almacen_map = {'158':'Opalo', '155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
     df['Almacen_Nombre'] = df['Almacen'].astype(str).map(almacen_map).fillna(df['Almacen'])
-    
+
     marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
     df['Marca_Nombre'] = pd.to_numeric(df['Marca'], errors='coerce').fillna(0).astype(int).astype(str).map(marca_map).fillna('Complementarios')
-    
+
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo', 'Lead_Time_Proveedor']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -137,28 +135,28 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     # --- 2. Cálculo de Demanda y Estacionalidad ---
     fecha_hoy_dt = pd.Timestamp(datetime.now())
     df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
-    
+
     df_long = df[['index', 'Historial_Ventas']].copy()
     df_long = df_long[df_long['Historial_Ventas'].str.contains(':')]
     df_long['Historial_Ventas'] = df_long['Historial_Ventas'].str.split(',')
     df_long = df_long.explode('Historial_Ventas').dropna()
-    
+
     split_data = df_long['Historial_Ventas'].str.split(':', expand=True)
     df_long['Fecha'] = pd.to_datetime(split_data[0], errors='coerce')
     df_long['Unidades'] = pd.to_numeric(split_data[1], errors='coerce')
     df_long.dropna(subset=['Fecha', 'Unidades'], inplace=True)
-    
+
     df_long['dias_atras'] = (fecha_hoy_dt - df_long['Fecha']).dt.days
     ventas_recientes = df_long[df_long['dias_atras'] <= 60]
     total_ventas_periodo = ventas_recientes.groupby('index')['Unidades'].sum()
     demanda_diaria = (total_ventas_periodo / 60).rename('Demanda_Diaria_Promedio')
-    
+
     df_long['periodo'] = np.select([(df_long['dias_atras'] <= 30), (df_long['dias_atras'] > 30) & (df_long['dias_atras'] <= 60)], ['ultimos_30', 'previos_30'], default='otro')
     ventas_periodo = pd.crosstab(index=df_long['index'], columns=df_long['periodo'], values=df_long['Unidades'], aggfunc='sum').fillna(0)
     if 'ultimos_30' not in ventas_periodo: ventas_periodo['ultimos_30'] = 0
     if 'previos_30' not in ventas_periodo: ventas_periodo['previos_30'] = 0
     ventas_periodo['Estacionalidad_Reciente'] = ventas_periodo['ultimos_30'] - ventas_periodo['previos_30']
-    
+
     df = df.merge(demanda_diaria, on='index', how='left').fillna({'Demanda_Diaria_Promedio': 0})
     df = df.merge(ventas_periodo[['Estacionalidad_Reciente']], on='index', how='left').fillna({'Estacionalidad_Reciente': 0})
 
@@ -166,7 +164,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
-    
+
     df['Valor_Venta_60_Dias'] = df['Ventas_60_Dias'] * df['Costo_Promedio_UND']
     ventas_sku_valor = df.groupby('SKU')['Valor_Venta_60_Dias'].sum()
     total_ventas_valor = ventas_sku_valor.sum()
@@ -176,7 +174,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     else:
         df['Segmento_ABC'] = 'C'
 
-    # --- 4. Estado de Inventario ---
+    # --- 4. Estado de Inventario y Necesidades ---
     df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
     df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
     conditions = [
@@ -188,10 +186,10 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     
-    # --- 5. LÓGICA DE SUGERENCIAS (CON LÓGICA DE EXCEDENTE CORREGIDA) ---
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Stock_Objetivo'])
 
+    # --- 5. LÓGICA DE SUGERENCIAS (Traslado vs Compra) ---
     sku_summary = df.groupby('SKU').agg(
         Total_Necesidad_SKU=('Necesidad_Total', 'sum'),
         Total_Excedente_SKU=('Excedente_Trasladable', 'sum')
@@ -201,11 +199,15 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
-    mask_necesidad = df['Total_Necesidad_SKU'] > 0
-    df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = (df['Necesidad_Total'] / df['Total_Necesidad_SKU']) * df['Total_Traslados_Posibles_SKU']
+    
+    # Asegurar que no se divida por cero
+    mask_necesidad = (df['Total_Necesidad_SKU'] > 0) & (df['Necesidad_Total'] > 0)
+    df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = \
+        (df['Necesidad_Total'] / df['Total_Necesidad_SKU']) * df['Total_Traslados_Posibles_SKU']
+    
     df['Sugerencia_Compra'] = df['Necesidad_Total'] - df['Unidades_Traslado_Sugeridas']
-    df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'])
-    df['Sugerencia_Compra'] = np.ceil(df['Sugerencia_Compra'])
+    df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'].fillna(0))
+    df['Sugerencia_Compra'] = np.ceil(df['Sugerencia_Compra'].fillna(0))
     
     # --- 6. CÁLCULOS FINALES ---
     df['Peso_Traslado_Sugerido'] = df['Unidades_Traslado_Sugeridas'] * df['Peso_Articulo']
@@ -242,13 +244,16 @@ if df_crudo is not None and not df_crudo.empty:
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, dias_seguridad=dias_seguridad_input, dias_objetivo=dias_objetivo_dict).reset_index()
     
-    # --- FILTRADO GLOBAL DE DATOS ---
+    # --- 🎯 LÓGICA CORREGIDA: GUARDAR DATOS EN SESSION STATE ---
+    # Guardamos el DataFrame COMPLETO para cálculos globales en otras páginas.
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
+    
+    # Guardamos una vista específica para el usuario actual, que se usará para los FILTROS por defecto.
     if st.session_state.user_role == 'tienda':
         df_vista_usuario = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
         st.session_state['df_analisis'] = df_vista_usuario
-    else:
-        st.session_state['df_analisis'] = df_analisis_completo
+    else: # Si es gerente, su vista por defecto son todos los datos
+        st.session_state['df_analisis'] = df_analisis_completo.copy()
 
     df_a_mostrar = st.session_state['df_analisis']
 
@@ -257,7 +262,7 @@ if df_crudo is not None and not df_crudo.empty:
         
         if st.session_state.user_role == 'gerente':
             opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-            nombres_almacen = sorted([str(nombre) for nombre in df_a_mostrar['Almacen_Nombre'].unique() if pd.notna(nombre)])
+            nombres_almacen = sorted([str(nombre) for nombre in df_analisis_completo['Almacen_Nombre'].unique() if pd.notna(nombre)])
             lista_seleccion_nombres = [opcion_consolidado] + nombres_almacen
             selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
         else:
@@ -265,10 +270,10 @@ if df_crudo is not None and not df_crudo.empty:
             st.sidebar.markdown(f"**Vista actual:** `{selected_almacen_nombre}`")
             opcion_consolidado = "" 
 
-        if selected_almacen_nombre == opcion_consolidado:
-            df_vista = df_a_mostrar
+        if st.session_state.user_role == 'gerente' and selected_almacen_nombre == opcion_consolidado:
+            df_vista = df_analisis_completo
         else:
-            df_vista = df_a_mostrar[df_a_mostrar['Almacen_Nombre'] == selected_almacen_nombre]
+            df_vista = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == selected_almacen_nombre]
 
         lista_marcas_unicas = sorted([str(m) for m in df_vista['Marca_Nombre'].unique() if pd.notna(m)])
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas_unicas, default=lista_marcas_unicas)
@@ -299,22 +304,23 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown('<p class="section-header">Diagnóstico de la Tienda</p>', unsafe_allow_html=True)
         with st.container(border=True):
-            # La lógica de diagnóstico funciona con 'df_filtered' que ya está acotado a la vista correcta
             if not df_filtered.empty:
                 porc_excedente = (valor_excedente / valor_total_inv) * 100 if valor_total_inv > 0 else 0
                 if skus_quiebre > 10: st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**.", icon="🚨")
                 elif porc_excedente > 30: st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente.", icon="💸")
                 else: st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
-            elif st.session_state.user_role == 'gerente':
-                st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
+            elif st.session_state.user_role == 'gerente' and selected_almacen_nombre == opcion_consolidado:
+                 st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
+            elif not df_a_mostrar.empty:
+                st.info("No hay datos para los filtros seleccionados.")
 
         st.markdown("---")
         st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
         
         search_term = st.text_input("Buscar producto por SKU, Descripción o cualquier palabra clave:", placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'")
         if search_term:
-            # Para la búsqueda global, el gerente siempre ve todo. El usuario de tienda ve dentro de su stock.
-            df_para_buscar = df_analisis_completo if st.session_state.user_role == 'gerente' else df_a_mostrar
+            # Para la búsqueda global, el gerente siempre ve todo el inventario de todas las tiendas.
+            df_para_buscar = df_analisis_completo
             df_search_initial = df_para_buscar[(df_para_buscar['SKU'].astype(str).str.contains(search_term, case=False, na=False)) | (df_para_buscar['Descripcion'].astype(str).str.contains(search_term, case=False, na=False))]
             df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
             if df_search_with_stock.empty:
