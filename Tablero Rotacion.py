@@ -53,12 +53,15 @@ def logout():
     st.session_state.logged_in = False
     st.session_state.user_role = None
     st.session_state.almacen_nombre = None
+    st.session_state.clear() # Limpia todo el session state
     st.rerun()
 
 # --- GATEKEEPER PRINCIPAL ---
 if not st.session_state.get('logged_in', False):
     login()
     st.stop()
+
+# --- INICIO DEL CÓDIGO ORIGINAL (CON MEJORAS INTEGRADAS) ---
 
 # --- ESTILOS VISUALES Y CSS PERSONALIZADO ---
 st.markdown("""
@@ -79,6 +82,7 @@ st.markdown("""
 # --- LÓGICA DE CARGA DE DATOS ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
+    """Carga el archivo de datos crudos desde Dropbox."""
     info_message = st.empty()
     info_message.info("Conectando a Dropbox para obtener los datos más recientes...", icon="☁️")
     column_names = ['DEPARTAMENTO','REFERENCIA','DESCRIPCION','MARCA','PESO_ARTICULO','UNIDADES_VENDIDAS','STOCK','COSTO_PROMEDIO_UND','CODALMACEN','LEAD_TIME_PROVEEDOR','HISTORIAL_VENTAS']
@@ -94,9 +98,13 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Ocurrió un error al cargar los datos: {e}", icon="🔥")
         return None
 
-# --- ✅ FUNCIÓN DE ANÁLISIS DE INVENTARIO (CÓDIGO COMPLETO) ---
+# --- LÓGICA DE ANÁLISIS DE INVENTARIO (CON LÓGICA DE EXCEDENTE CORREGIDA) ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguridad=7, dias_objetivo=None):
+    """
+    Función de análisis final con lógica corregida para el cálculo de demanda, estacionalidad
+    y un sistema de sugerencias que prioriza traslados entre tiendas antes de comprar.
+    """
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
 
@@ -180,7 +188,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     
-    # --- 5. LÓGICA DE SUGERENCIAS (PRIORIZA TRASLADOS) ---
+    # --- 5. LÓGICA DE SUGERENCIAS (CON LÓGICA DE EXCEDENTE CORREGIDA) ---
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Stock_Objetivo'])
 
@@ -207,8 +215,7 @@ def analizar_inventario_completo(_df_crudo, almacen_principal='155', dias_seguri
     return df.set_index('index')
 
 
-# --- INICIO DE LA INTERFAZ DE USUARIO (SOLO PARA USUARIOS LOGUEADOS) ---
-
+# --- INICIO DE LA INTERFAZ DE USUARIO ---
 st.sidebar.title(f"Usuario: {st.session_state.almacen_nombre}")
 st.sidebar.button("Cerrar Sesión", on_click=logout)
 st.sidebar.markdown("---")
@@ -235,26 +242,36 @@ if df_crudo is not None and not df_crudo.empty:
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, dias_seguridad=dias_seguridad_input, dias_objetivo=dias_objetivo_dict).reset_index()
     
-    st.session_state['df_analisis'] = df_analisis_completo
+    # --- FILTRADO GLOBAL DE DATOS ---
+    st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
+    if st.session_state.user_role == 'tienda':
+        df_vista_usuario = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
+        st.session_state['df_analisis'] = df_vista_usuario
+    else:
+        st.session_state['df_analisis'] = df_analisis_completo
 
-    if not df_analisis_completo.empty:
+    df_a_mostrar = st.session_state['df_analisis']
+
+    if not df_a_mostrar.empty:
         st.sidebar.header("Filtros de Vista")
-        opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-        nombres_almacen = df_analisis_completo[['Almacen_Nombre', 'Almacen']].drop_duplicates()
-        map_nombre_a_codigo = pd.Series(nombres_almacen.Almacen.values, index=nombres_almacen.Almacen_Nombre).to_dict()
-        lista_nombres_unicos = sorted([str(nombre) for nombre in nombres_almacen['Almacen_Nombre'].unique() if pd.notna(nombre)])
-        lista_seleccion_nombres = [opcion_consolidado] + lista_nombres_unicos
-        selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
         
-        if selected_almacen_nombre == opcion_consolidado:
-            df_vista = df_analisis_completo
+        if st.session_state.user_role == 'gerente':
+            opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
+            nombres_almacen = sorted([str(nombre) for nombre in df_a_mostrar['Almacen_Nombre'].unique() if pd.notna(nombre)])
+            lista_seleccion_nombres = [opcion_consolidado] + nombres_almacen
+            selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", lista_seleccion_nombres)
         else:
-            codigo_almacen_seleccionado = map_nombre_a_codigo.get(selected_almacen_nombre)
-            df_vista = df_analisis_completo[df_analisis_completo['Almacen'] == codigo_almacen_seleccionado]
+            selected_almacen_nombre = st.session_state.almacen_nombre
+            st.sidebar.markdown(f"**Vista actual:** `{selected_almacen_nombre}`")
+            opcion_consolidado = "" 
+
+        if selected_almacen_nombre == opcion_consolidado:
+            df_vista = df_a_mostrar
+        else:
+            df_vista = df_a_mostrar[df_a_mostrar['Almacen_Nombre'] == selected_almacen_nombre]
 
         lista_marcas_unicas = sorted([str(m) for m in df_vista['Marca_Nombre'].unique() if pd.notna(m)])
         selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", lista_marcas_unicas, default=lista_marcas_unicas)
-        
         df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else pd.DataFrame()
 
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
@@ -275,63 +292,41 @@ if df_crudo is not None and not df_crudo.empty:
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
         
         col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
-        with col_nav1:
-            st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="🚚")
-        with col_nav2:
-            st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
-        with col_nav3:
-            st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
-            st.caption("Descubre tus marcas estrella.")
-        with col_nav4:
-            st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
-            st.caption("Anticípate al mercado.")
+        with col_nav1: st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="🚚")
+        with col_nav2: st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
+        with col_nav3: st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊"); st.caption("Descubre tus marcas estrella.")
+        with col_nav4: st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈"); st.caption("Anticípate al mercado.")
 
         st.markdown('<p class="section-header">Diagnóstico de la Tienda</p>', unsafe_allow_html=True)
         with st.container(border=True):
-            if selected_almacen_nombre != opcion_consolidado and not df_filtered.empty:
+            # La lógica de diagnóstico funciona con 'df_filtered' que ya está acotado a la vista correcta
+            if not df_filtered.empty:
                 porc_excedente = (valor_excedente / valor_total_inv) * 100 if valor_total_inv > 0 else 0
-                
-                if skus_quiebre > 10:
-                    st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**. Es urgente revisar el plan de abastecimiento para no perder ventas.", icon="🚨")
-                elif porc_excedente > 30:
-                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del valor del inventario es excedente. ¡Libera capital y optimiza tu espacio liquidando estos productos!", icon="💸")
-                else:
-                    st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance entre disponibilidad y excedentes. ¡Sigue así!", icon="✅")
-            else:
-                st.info("Selecciona una tienda específica en el filtro de la izquierda para ver su diagnóstico detallado.")
+                if skus_quiebre > 10: st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**.", icon="🚨")
+                elif porc_excedente > 30: st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente.", icon="💸")
+                else: st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
+            elif st.session_state.user_role == 'gerente':
+                st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
 
         st.markdown("---")
         st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
         
-        search_term = st.text_input(
-            "Buscar producto por SKU, Descripción o cualquier palabra clave:",
-            placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'"
-        )
+        search_term = st.text_input("Buscar producto por SKU, Descripción o cualquier palabra clave:", placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'")
         if search_term:
-            df_search_initial = df_analisis_completo[
-                (df_analisis_completo['SKU'].astype(str).str.contains(search_term, case=False, na=False)) |
-                (df_analisis_completo['Descripcion'].astype(str).str.contains(search_term, case=False, na=False))
-            ]
+            # Para la búsqueda global, el gerente siempre ve todo. El usuario de tienda ve dentro de su stock.
+            df_para_buscar = df_analisis_completo if st.session_state.user_role == 'gerente' else df_a_mostrar
+            df_search_initial = df_para_buscar[(df_para_buscar['SKU'].astype(str).str.contains(search_term, case=False, na=False)) | (df_para_buscar['Descripcion'].astype(str).str.contains(search_term, case=False, na=False))]
             df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
-            
             if df_search_with_stock.empty:
                 st.warning("No se encontraron productos en stock que coincidan con la búsqueda.")
             else:
                 found_skus = df_search_with_stock['SKU'].unique()
                 df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
-                pivot_stock = df_stock_completo.pivot_table(
-                    index=['SKU', 'Descripcion', 'Marca_Nombre'],
-                    columns='Almacen_Nombre',
-                    values='Stock',
-                    fill_value=0
-                ).reset_index()
-
+                pivot_stock = df_stock_completo.pivot_table(index=['SKU', 'Descripcion', 'Marca_Nombre'], columns='Almacen_Nombre', values='Stock', fill_value=0).reset_index()
                 store_cols = pivot_stock.columns[3:]
                 cols_to_drop = [col for col in store_cols if pivot_stock[col].sum() == 0]
                 pivot_stock_filtered = pivot_stock.drop(columns=cols_to_drop)
-
                 st.dataframe(pivot_stock_filtered, use_container_width=True, hide_index=True)
 
-# ✅ ESTE ES EL 'ELSE' ALINEADO CORRECTAMENTE CON EL 'IF' PRINCIPAL
 else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
