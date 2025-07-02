@@ -7,6 +7,30 @@ import plotly.express as px
 # --- 0. CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_icon="💡")
 
+# --- ✅ 1. GATEKEEPER DE ACCESO Y LOGOUT ---
+# Esta sección debe ir al principio de CADA página en la carpeta /pages
+if 'logged_in' not in st.session_state or not st.session_state.logged_in:
+    st.error("🔴 Por favor, inicia sesión para acceder a esta página.")
+    st.page_link("app.py", label="Ir a la página de inicio de sesión", icon="🏠")
+    st.stop() # Detiene la ejecución si no se ha iniciado sesión
+
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.user_role = None
+    st.session_state.almacen_nombre = None
+    st.rerun()
+
+# --- TÍTULO Y BARRA LATERAL ESTÁNDAR ---
+st.title("💡 Tablero de Control de Abastecimiento")
+st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para maximizar la rentabilidad.")
+
+st.sidebar.title(f"Usuario: {st.session_state.almacen_nombre}")
+st.sidebar.button("Cerrar Sesión", key="logout_gestion", on_click=logout)
+st.sidebar.markdown("---")
+
+# --- 0. CONFIGURACIÓN DE LA PÁGINA ---
+st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_icon="💡")
+
 st.title("💡 Tablero de Control de Abastecimiento")
 st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para maximizar la rentabilidad.")
 
