@@ -177,8 +177,10 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
                 st.success("No hay prioridades de compra.")
 
     # --- PESTAÑA 2: PLAN DE TRASLADOS ---
-    with tab_traslados:
-        df_plan_maestro = generar_plan_traslados_inteligente(df_analisis_completo)
+# --- PESTAÑA 2: PLAN DE TRASLADOS ---
+with tab_traslados:
+    # ✅ Se usa la copia maestra con TODOS los datos para encontrar los pares de traslado
+    df_plan_maestro = generar_plan_traslados_inteligente(st.session_state['df_analisis_maestro'])
         
         # ✅ LÓGICA CORREGIDA: Mostrar todos los traslados que INVOLUCRAN a la tienda seleccionada
         if not df_plan_maestro.empty:
