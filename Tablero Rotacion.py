@@ -329,5 +329,5 @@ else:
                 cols_to_drop = [col for col in store_cols if pivot_stock[col].sum() == 0]
                 pivot_stock_filtered = pivot_stock.drop(columns=cols_to_drop)
                 st.dataframe(pivot_stock_filtered, use_container_width=True, hide_index=True)
-else:
+            else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
