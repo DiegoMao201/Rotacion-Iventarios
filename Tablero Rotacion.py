@@ -312,40 +312,40 @@ else:
             else:
                 st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
 
-       # --- SECCIÓN: Buscador de Inventario Global ---
-    st.markdown("---")
-    st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
-    
-    search_term = st.text_input(
-        "Buscar producto por SKU, Descripción o cualquier palabra clave:",
-        placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'"
-    )
-
-    if search_term:
-        df_search_initial = df_analisis_completo[
-            (df_analisis_completo['SKU'].astype(str).str.contains(search_term, case=False, na=False)) |
-            (df_analisis_completo['Descripcion'].astype(str).str.contains(search_term, case=False, na=False))
-        ]
-        df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
+      # --- SECCIÓN: Buscador de Inventario Global ---
+        st.markdown("---")
+        st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
         
-        if df_search_with_stock.empty:
-            st.warning("No se encontraron productos en stock que coincidan con la búsqueda.")
-        else:
-            found_skus = df_search_with_stock['SKU'].unique()
-            df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
-            pivot_stock = df_stock_completo.pivot_table(
-                index=['SKU', 'Descripcion', 'Marca_Nombre'],
-                columns='Almacen_Nombre',
-                values='Stock',
-                fill_value=0
-            ).reset_index()
+        search_term = st.text_input(
+            "Buscar producto por SKU, Descripción o cualquier palabra clave:",
+            placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'"
+        )
 
-            store_cols = pivot_stock.columns[3:]
-            cols_to_drop = [col for col in store_cols if pivot_stock[col].sum() == 0]
-            pivot_stock_filtered = pivot_stock.drop(columns=cols_to_drop)
+        if search_term:
+            df_search_initial = df_analisis_completo[
+                (df_analisis_completo['SKU'].astype(str).str.contains(search_term, case=False, na=False)) |
+                (df_analisis_completo['Descripcion'].astype(str).str.contains(search_term, case=False, na=False))
+            ]
+            df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
+            
+            if df_search_with_stock.empty:
+                st.warning("No se encontraron productos en stock que coincidan con la búsqueda.")
+            else:
+                found_skus = df_search_with_stock['SKU'].unique()
+                df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
+                pivot_stock = df_stock_completo.pivot_table(
+                    index=['SKU', 'Descripcion', 'Marca_Nombre'],
+                    columns='Almacen_Nombre',
+                    values='Stock',
+                    fill_value=0
+                ).reset_index()
 
-            st.dataframe(pivot_stock_filtered, use_container_width=True, hide_index=True)
+                store_cols = pivot_stock.columns[3:]
+                cols_to_drop = [col for col in store_cols if pivot_stock[col].sum() == 0]
+                pivot_stock_filtered = pivot_stock.drop(columns=cols_to_drop)
 
-# ✅ El 'else' ahora está fuera y alineado con el 'if' principal de la página.
-         else:
+                st.dataframe(pivot_stock_filtered, use_container_width=True, hide_index=True)
+
+# ✅ El 'else' está completamente a la izquierda, alineado con el 'if' principal.
+else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
