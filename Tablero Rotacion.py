@@ -347,5 +347,5 @@ else:
             st.dataframe(pivot_stock_filtered, use_container_width=True, hide_index=True)
 
 # ✅ El 'else' ahora está fuera y alineado con el 'if' principal de la página.
-else:
+         else:
     st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
