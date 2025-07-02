@@ -177,17 +177,34 @@ def analizar_inventario_completo(_df_crudo, dias_seguridad=7, dias_objetivo=None
     # --- 4. Estado de Inventario y Necesidades ---
     df['dias_objetivo_map'] = df['Segmento_ABC'].map(dias_objetivo)
     df['Stock_Objetivo'] = df['Demanda_Diaria_Promedio'] * df['dias_objetivo_map']
+    
+    ### 🎯 CORRECCIÓN CRÍTICA: ORDEN DE LAS CONDICIONES DE INVENTARIO ###
+    # Se corrige el orden para que los casos más específicos se evalúen primero.
     conditions = [
+        # 1. Sin stock pero con demanda (más crítico)
         (df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0),
+        # 2. Con stock pero SIN demanda (stock muerto, muy específico, debe ir antes que Excedente)
+        (df['Stock'] > 0) & (df['Demanda_Diaria_Promedio'] <= 0),
+        # 3. Con stock y demanda, pero por debajo del punto de reorden
         (df['Stock'] > 0) & (df['Stock'] < df['Punto_Reorden']),
+        # 4. Con stock y demanda, pero por encima del objetivo
         (df['Stock'] > df['Stock_Objetivo']),
-        (df['Stock'] > 0) & (df['Demanda_Diaria_Promedio'] <= 0)
     ]
-    choices_estado = ['Quiebre de Stock', 'Bajo Stock (Riesgo)', 'Excedente', 'Baja Rotación / Obsoleto']
+    choices_estado = [
+        'Quiebre de Stock',
+        'Baja Rotación / Obsoleto',
+        'Bajo Stock (Riesgo)',
+        'Excedente'
+    ]
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
-    df['Excedente_Trasladable'] = np.maximum(0, df['Stock'] - df['Stock_Objetivo'])
+    # El excedente trasladable solo debe considerar productos que SÍ tienen rotación.
+    df['Excedente_Trasladable'] = np.where(
+        df['Estado_Inventario'] == 'Excedente',
+        np.maximum(0, df['Stock'] - df['Stock_Objetivo']),
+        0
+    )
 
     # --- 5. LÓGICA DE SUGERENCIAS (Traslado vs Compra) ---
     sku_summary = df.groupby('SKU').agg(
@@ -200,7 +217,6 @@ def analizar_inventario_completo(_df_crudo, dias_seguridad=7, dias_objetivo=None
     df['Unidades_Traslado_Sugeridas'] = 0
     df['Sugerencia_Compra'] = 0
     
-    # Asegurar que no se divida por cero
     mask_necesidad = (df['Total_Necesidad_SKU'] > 0) & (df['Necesidad_Total'] > 0)
     df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = \
         (df['Necesidad_Total'] / df['Total_Necesidad_SKU']) * df['Total_Traslados_Posibles_SKU']
@@ -244,14 +260,12 @@ if df_crudo is not None and not df_crudo.empty:
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, dias_seguridad=dias_seguridad_input, dias_objetivo=dias_objetivo_dict).reset_index()
     
-    # Guardamos el DataFrame COMPLETO para cálculos globales en otras páginas.
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
     
-    # Guardamos una vista específica para el usuario actual, que se usará para los FILTROS por defecto.
     if st.session_state.user_role == 'tienda':
         df_vista_usuario = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
         st.session_state['df_analisis'] = df_vista_usuario
-    else: # Si es gerente, su vista por defecto son todos los datos
+    else:
         st.session_state['df_analisis'] = df_analisis_completo.copy()
 
     df_a_mostrar = st.session_state['df_analisis']
@@ -280,23 +294,18 @@ if df_crudo is not None and not df_crudo.empty:
 
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
         
-        ### 🎯 MEJORA CLAVE: CÁLCULO DE KPIS DE EXCEDENTE SEPARADOS ###
         if not df_filtered.empty:
             valor_total_inv = df_filtered['Valor_Inventario'].sum()
             skus_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
 
-            # KPI 1: Excedente por sobre-stock (vende pero hay demasiado)
             df_sobrestock = df_filtered[df_filtered['Estado_Inventario'] == 'Excedente']
             valor_sobrestock = df_sobrestock['Valor_Inventario'].sum()
 
-            # KPI 2: Excedente por baja rotación (no vende nada, es "stock muerto")
             df_baja_rotacion = df_filtered[df_filtered['Estado_Inventario'] == 'Baja Rotación / Obsoleto']
             valor_baja_rotacion = df_baja_rotacion['Valor_Inventario'].sum()
-
         else:
             valor_total_inv, skus_quiebre, valor_sobrestock, valor_baja_rotacion = 0, 0, 0, 0
         
-        ### 🎯 MEJORA CLAVE: VISUALIZACIÓN DE 4 KPIS SEPARADOS ###
         col1, col2, col3, col4 = st.columns(4)
         col1.metric(label="💰 Valor Total Inventario", value=f"${valor_total_inv:,.0f}")
         col2.metric(
@@ -310,7 +319,6 @@ if df_crudo is not None and not df_crudo.empty:
             help="Valor de productos sin ventas registradas en los últimos 60 días (stock muerto)."
         )
         col4.metric(label="📦 SKUs en Quiebre", value=f"{skus_quiebre}")
-
 
         st.markdown("---")
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
@@ -326,14 +334,17 @@ if df_crudo is not None and not df_crudo.empty:
             if not df_filtered.empty:
                 valor_excedente_total = valor_sobrestock + valor_baja_rotacion
                 porc_excedente = (valor_excedente_total / valor_total_inv) * 100 if valor_total_inv > 0 else 0
+                
                 if skus_quiebre > 10: 
                     st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**.", icon="🚨")
                 elif porc_excedente > 30: 
-                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente. Revisa el detalle en los KPIs de arriba.", icon="💸")
+                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente. El problema principal está en: {'Baja Rotación' if valor_baja_rotacion > valor_sobrestock else 'Sobre-stock'}.", icon="💸")
                 else: 
                     st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
+            
             elif st.session_state.user_role == 'gerente' and selected_almacen_nombre == opcion_consolidado:
                  st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
+            
             elif not df_a_mostrar.empty:
                 st.info("No hay datos para los filtros seleccionados.")
 
