@@ -10,7 +10,7 @@ st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_
 st.title("💡 Tablero de Control de Abastecimiento")
 st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para maximizar la rentabilidad.")
 
-# --- 1. FUNCIÓN DE EXCEL PROFESIONAL Y DINÁMICA (CORREGIDA) ---
+# --- 1. FUNCIÓN DE EXCEL PROFESIONAL Y DINÁMICA ---
 @st.cache_data
 def generar_excel_dinamico(df, nombre_hoja):
     """
@@ -43,24 +43,17 @@ def generar_excel_dinamico(df, nombre_hoja):
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
 
-        # ✅ LÓGICA PARA REESCRIBIR COLUMNAS CON FÓRMULAS
-        # Esto evita la corrupción del archivo.
         if nombre_hoja == "Plan de Traslados" and all(c in df.columns for c in ['Uds a Enviar', 'Peso Individual (kg)', 'Valor Individual']):
-            # Obtener el índice de las columnas para las fórmulas
             idx_uds = df.columns.get_loc('Uds a Enviar')
             idx_peso_ind = df.columns.get_loc('Peso Individual (kg)')
             idx_valor_ind = df.columns.get_loc('Valor Individual')
             idx_peso_total = df.columns.get_loc('Peso del Traslado (kg)')
             idx_valor_total = df.columns.get_loc('Valor del Traslado')
 
-            # Escribir las fórmulas fila por fila (empezando desde la fila 1 de datos)
             for row_num in range(1, len(df) + 1):
-                # Fórmula para Peso del Traslado
                 worksheet.write_formula(row_num, idx_peso_total, f'={chr(ord("A")+idx_uds)}{row_num+1}*{chr(ord("A")+idx_peso_ind)}{row_num+1}', weight_format)
-                # Fórmula para Valor del Traslado
                 worksheet.write_formula(row_num, idx_valor_total, f'={chr(ord("A")+idx_uds)}{row_num+1}*{chr(ord("A")+idx_valor_ind)}{row_num+1}', money_format)
         
-        # Ajustar anchos de columna
         for i, col in enumerate(df.columns):
             width = max(df[col].astype(str).map(len).max(), len(col)) + 4
             worksheet.set_column(i, i, min(width, 45))
@@ -174,19 +167,27 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             else: st.success("No hay prioridades de compra.")
 
     with tab_traslados:
-        st.info("Prioridad 1: Mover inventario para cubrir necesidades sin comprar. Este plan asigna desde la tienda con más excedente.")
+        st.info("Prioridad 1: Mover inventario existente para cubrir necesidades sin comprar. Este plan asigna desde la tienda con más excedente.")
         df_plan_maestro = generar_plan_traslados_inteligente(df_analisis_completo)
         df_plan_filtrado = df_plan_maestro.copy()
         st.sidebar.markdown("---"); st.sidebar.subheader("Filtros del Plan de Traslados"); opcion_todas = "Todas"
+        
+        # ✅ CORRECCIÓN TypeError: Se asegura de que la lista de tiendas no contenga valores nulos.
         lista_origenes = [opcion_todas] + sorted([str(x) for x in df_plan_filtrado['Tienda Origen'].unique() if pd.notna(x)])
         filtro_origen = st.sidebar.selectbox("Filtrar Tienda Origen:", lista_origenes)
         if filtro_origen != opcion_todas: df_plan_filtrado = df_plan_filtrado[df_plan_filtrado['Tienda Origen'] == filtro_origen]
+        
         lista_destinos = [opcion_todas] + sorted([str(x) for x in df_plan_filtrado['Tienda Destino'].unique() if pd.notna(x)])
         filtro_destino = st.sidebar.selectbox("Filtrar Tienda Destino:", lista_destinos)
         if filtro_destino != opcion_todas: df_plan_filtrado = df_plan_filtrado[df_plan_filtrado['Tienda Destino'] == filtro_destino]
+        
         if selected_marcas and not df_plan_filtrado.empty: df_plan_filtrado = df_plan_filtrado[df_plan_filtrado['Marca_Nombre'].isin(selected_marcas)]
+        
         df_plan_display, df_plan_exportar = (df_plan_filtrado, df_plan_filtrado) if df_plan_filtrado.empty else (df_plan_filtrado.drop(columns=['Valor Individual', 'Peso Individual (kg)']), df_plan_filtrado)
-        excel_traslados = generar_excel_dinamico(df_plan_exportar, "Plan de Traslados"); st.download_button("📥 Descargar Plan de Traslados Dinámico", excel_traslados, "Plan_de_Traslados_Dinamico.xlsx")
+        
+        excel_traslados = generar_excel_dinamico(df_plan_exportar, "Plan de Traslados")
+        st.download_button("📥 Descargar Plan de Traslados Dinámico", excel_traslados, "Plan_de_Traslados_Dinamico.xlsx")
+        
         if df_plan_display.empty: st.success("¡No se sugieren traslados con los filtros actuales!")
         else: 
             st.dataframe(df_plan_display, hide_index=True, use_container_width=True, column_config={"Valor del Traslado": st.column_config.NumberColumn(format="$ %d"), "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg")})
@@ -203,8 +204,12 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             df_plan_compras['Valor de la Compra'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Costo_Promedio_UND']
             df_plan_compras['Peso de la Compra (kg)'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Peso_Articulo']
             df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Comprar para Tienda'})[['Comprar para Tienda', 'SKU', 'Descripcion', 'Segmento_ABC', 'Stock', 'Punto_Reorden', 'Uds a Comprar', 'Peso de la Compra (kg)', 'Valor de la Compra']].sort_values(by=['Valor de la Compra', 'Segmento_ABC'], ascending=[False, True])
-        excel_compras = generar_excel_dinamico(df_plan_compras_final, "Plan de Compras"); st.download_button("📥 Descargar Plan de Compras", excel_compras, "Plan_de_Compras.xlsx")
+        
+        excel_compras = generar_excel_dinamico(df_plan_compras_final, "Plan de Compras")
+        st.download_button("📥 Descargar Plan de Compras", excel_compras, "Plan_de_Compras.xlsx")
+        
         if df_plan_compras_final.empty: st.success("¡No se requieren compras con los filtros actuales!")
         else: st.dataframe(df_plan_compras_final, hide_index=True, use_container_width=True, column_config={"Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), "Peso de la Compra (kg)": st.column_config.NumberColumn(format="%.2f kg")})
+
 else:
     st.error("🔴 Los datos no se han cargado."); st.page_link("app.py", label="Ir a la página principal", icon="🏠")
