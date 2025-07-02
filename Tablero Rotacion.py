@@ -235,10 +235,16 @@ if df_crudo is not None and not df_crudo.empty:
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, dias_seguridad=dias_seguridad_input, dias_objetivo=dias_objetivo_dict).reset_index()
     
-    # --- FILTRADO GLOBAL DE DATOS SEGÚN EL ROL ---
-    if st.session_state.user_role == 'tienda':
-        df_analisis_completo = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
-    
+    # --- ✅ LÓGICA DE DATOS CORREGIDA ---
+# 1. Guardamos una copia maestra con TODOS los datos para la lógica de traslados.
+st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
+
+# 2. Filtramos los datos para la vista normal del usuario.
+if st.session_state.user_role == 'tienda':
+    df_vista_usuario = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
+    st.session_state['df_analisis'] = df_vista_usuario
+else:
+    # El gerente trabaja con la vista completa por defecto.
     st.session_state['df_analisis'] = df_analisis_completo
 
     if not df_analisis_completo.empty:
