@@ -244,7 +244,6 @@ if df_crudo is not None and not df_crudo.empty:
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(df_crudo, dias_seguridad=dias_seguridad_input, dias_objetivo=dias_objetivo_dict).reset_index()
     
-    # --- 🎯 LÓGICA CORREGIDA: GUARDAR DATOS EN SESSION STATE ---
     # Guardamos el DataFrame COMPLETO para cálculos globales en otras páginas.
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
     
@@ -280,18 +279,38 @@ if df_crudo is not None and not df_crudo.empty:
         df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else pd.DataFrame()
 
         st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
+        
+        ### 🎯 MEJORA CLAVE: CÁLCULO DE KPIS DE EXCEDENTE SEPARADOS ###
         if not df_filtered.empty:
             valor_total_inv = df_filtered['Valor_Inventario'].sum()
-            df_excedente_kpi = df_filtered[df_filtered['Estado_Inventario'].isin(['Excedente', 'Baja Rotación / Obsoleto'])]
-            valor_excedente = df_excedente_kpi['Valor_Inventario'].sum()
             skus_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
+
+            # KPI 1: Excedente por sobre-stock (vende pero hay demasiado)
+            df_sobrestock = df_filtered[df_filtered['Estado_Inventario'] == 'Excedente']
+            valor_sobrestock = df_sobrestock['Valor_Inventario'].sum()
+
+            # KPI 2: Excedente por baja rotación (no vende nada, es "stock muerto")
+            df_baja_rotacion = df_filtered[df_filtered['Estado_Inventario'] == 'Baja Rotación / Obsoleto']
+            valor_baja_rotacion = df_baja_rotacion['Valor_Inventario'].sum()
+
         else:
-            valor_total_inv, valor_excedente, skus_quiebre = 0, 0, 0
+            valor_total_inv, skus_quiebre, valor_sobrestock, valor_baja_rotacion = 0, 0, 0, 0
         
-        col1, col2, col3 = st.columns(3)
+        ### 🎯 MEJORA CLAVE: VISUALIZACIÓN DE 4 KPIS SEPARADOS ###
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric(label="💰 Valor Total Inventario", value=f"${valor_total_inv:,.0f}")
-        col2.metric(label="📉 Valor en Excedente", value=f"${valor_excedente:,.0f}")
-        col3.metric(label="📦 SKUs en Quiebre", value=f"{skus_quiebre}")
+        col2.metric(
+            label="📉 Excedente (Sobre-stock)", 
+            value=f"${valor_sobrestock:,.0f}",
+            help="Valor de productos que rotan, pero cuyo stock supera los días de inventario objetivo."
+        )
+        col3.metric(
+            label="💀 Excedente (Baja Rotación)", 
+            value=f"${valor_baja_rotacion:,.0f}",
+            help="Valor de productos sin ventas registradas en los últimos 60 días (stock muerto)."
+        )
+        col4.metric(label="📦 SKUs en Quiebre", value=f"{skus_quiebre}")
+
 
         st.markdown("---")
         st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
@@ -305,10 +324,14 @@ if df_crudo is not None and not df_crudo.empty:
         st.markdown('<p class="section-header">Diagnóstico de la Tienda</p>', unsafe_allow_html=True)
         with st.container(border=True):
             if not df_filtered.empty:
-                porc_excedente = (valor_excedente / valor_total_inv) * 100 if valor_total_inv > 0 else 0
-                if skus_quiebre > 10: st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**.", icon="🚨")
-                elif porc_excedente > 30: st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente.", icon="💸")
-                else: st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
+                valor_excedente_total = valor_sobrestock + valor_baja_rotacion
+                porc_excedente = (valor_excedente_total / valor_total_inv) * 100 if valor_total_inv > 0 else 0
+                if skus_quiebre > 10: 
+                    st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**.", icon="🚨")
+                elif porc_excedente > 30: 
+                    st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente. Revisa el detalle en los KPIs de arriba.", icon="💸")
+                else: 
+                    st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
             elif st.session_state.user_role == 'gerente' and selected_almacen_nombre == opcion_consolidado:
                  st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
             elif not df_a_mostrar.empty:
@@ -319,7 +342,6 @@ if df_crudo is not None and not df_crudo.empty:
         
         search_term = st.text_input("Buscar producto por SKU, Descripción o cualquier palabra clave:", placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'")
         if search_term:
-            # Para la búsqueda global, el gerente siempre ve todo el inventario de todas las tiendas.
             df_para_buscar = df_analisis_completo
             df_search_initial = df_para_buscar[(df_para_buscar['SKU'].astype(str).str.contains(search_term, case=False, na=False)) | (df_para_buscar['Descripcion'].astype(str).str.contains(search_term, case=False, na=False))]
             df_search_with_stock = df_search_initial[df_search_initial['Stock'] > 0]
