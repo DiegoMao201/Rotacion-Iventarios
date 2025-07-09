@@ -53,71 +53,106 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
-    """Clase PDF que carga las fuentes desde una carpeta local 'fonts'."""
+    """Clase PDF rediseñada para un look profesional y con logo."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.empresa_nombre = "Nombre de Tu Empresa"
-        self.empresa_nit = "NIT 123.456.789-0"
-        self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
+        # ✅ MEJORA: Datos de la empresa actualizados
+        self.empresa_nombre = "Ferreinox SAS BIC"
+        self.empresa_nit = "NIT 901.349.073-1" # Se asume un NIT, puedes cambiarlo
+        self.empresa_tel = "Tel: 312 7574279"
         
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
             self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
             self.add_font('DejaVu', 'I', 'fonts/DejaVuSans-Oblique.ttf')
             self.add_font('DejaVu', 'BI', 'fonts/DejaVuSans-BoldOblique.ttf')
-        except RuntimeError as e:
-            st.error(f"Error al cargar la fuente: {e}. Asegúrate de que los archivos .ttf están en la carpeta 'fonts' de tu repositorio.")
+        except RuntimeError:
+            st.error("Error al cargar la fuente. Asegúrate de que los archivos .ttf están en la carpeta 'fonts'.")
 
     def header(self):
-        self.set_font('DejaVu', 'B', 24)
-        self.set_text_color(79, 129, 189)
-        self.cell(0, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
-        self.set_font('DejaVu', 'I', 10)
-        self.set_text_color(128, 128, 128)
-        self.cell(0, 6, f"{self.empresa_nombre} - {self.empresa_nit}", 0, 1, 'R')
-        self.ln(15)
+        # ✅ MEJORA: Encabezado con logo y datos de la empresa bien distribuidos.
+        try:
+            # Asegúrate de que 'LOGO FERREINOX SAS BIC 2024.png' esté en la misma carpeta
+            self.image('LOGO FERREINOX SAS BIC 2024.png', 10, 8, 50)
+        except RuntimeError:
+            self.set_font('DejaVu', 'B', 12)
+            self.cell(50, 20, '[LOGO]', 1, 0, 'C')
+
+        self.set_font('DejaVu', 'B', 22)
+        self.set_text_color(40, 40, 40)
+        self.cell(130, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
+
+        self.set_font('DejaVu', '', 10)
+        self.set_text_color(100, 100, 100)
+        self.cell(130, 7, self.empresa_nombre, 0, 1, 'R')
+        self.cell(130, 7, f"{self.empresa_nit} - {self.empresa_tel}", 0, 1, 'R')
+        self.ln(10) # Espacio después del cabecero
 
     def footer(self):
-        self.set_y(-20)
+        self.set_y(-15)
         self.set_font('DejaVu', 'I', 8)
         self.set_text_color(128, 128, 128)
-        self.multi_cell(0, 5, f"Esta orden de compra es un documento oficial de {self.empresa_nombre}. Para cualquier duda, contactar a: {self.empresa_contacto}", 0, 'C')
-        self.cell(0, 5, f'Página {self.page_no()}', 0, 0, 'C')
+        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
-    """Genera un PDF de Orden de Compra con un diseño mejorado y soporte Unicode."""
+    """Genera un PDF de Orden de Compra rediseñado y con datos dinámicos."""
     if df_seleccion.empty: return None
     
-    direccion_entrega = f"Bodega {tienda_nombre}, Zona Industrial, Ciudad"
+    # ✅ MEJORA: Diccionarios para gestionar la información dinámica.
+    DIRECCIONES_TIENDAS = {
+        'Armenia': 'Carrera 19 #11-05',
+        'Olaya': 'Carrera 13 #19-26',
+        'Manizales': 'Calle 16 #21-32',
+        'FerreBox': 'Calle 20 #12-32',
+    }
+    CONTACTOS_PROVEEDOR = {
+        'ABRACOL': 'Jhon Jairo Duque',
+        'SAINT GOBAIN': 'Sara Corrales',
+        'GOYA': 'Julian Nañes',
+        'YALE': 'Juan Carlos Gutierrez',
+    }
+
+    direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_nombre, "Dirección no especificada")
+    contacto_proveedor = CONTACTOS_PROVEEDOR.get(proveedor_nombre, "")
 
     pdf = PDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=25)
     
-    pdf.set_font("DejaVu", 'B', 11)
-    pdf.cell(95, 8, "PROVEEDOR:", 0, 0, 'L')
-    pdf.cell(95, 8, "ENVIAR A:", 0, 1, 'L')
+    # --- BLOQUES DE INFORMACIÓN: PROVEEDOR, ENVÍO Y DATOS DE ORDEN ---
+    pdf.set_font("DejaVu", 'B', 10)
+    pdf.set_fill_color(240, 240, 240)
     
-    pdf.set_font("DejaVu", '', 10)
-    line_height = 6
+    # Títulos
+    pdf.cell(95, 7, "PROVEEDOR", 1, 0, 'C', 1)
+    pdf.cell(95, 7, "ENVIAR A", 1, 1, 'C', 1)
+
+    # Contenido
+    pdf.set_font("DejaVu", '', 9)
     y_start = pdf.get_y()
-    pdf.multi_cell(95, line_height, f"{proveedor_nombre}\n[NIT/ID del Proveedor]\n[Dirección del Proveedor]\n[Contacto del Proveedor]", border=1, ln=3)
+    proveedor_info = f"Razón Social: {proveedor_nombre}\nContacto: {contacto_proveedor}"
+    pdf.multi_cell(95, 7, proveedor_info, 1, 'L')
+    
     pdf.set_y(y_start)
     pdf.set_x(105)
-    pdf.multi_cell(95, line_height, f"{pdf.empresa_nombre} - Sede {tienda_nombre}\n{direccion_entrega}\nRecibe: [Nombre de contacto en tienda]\nTel: [Teléfono de la tienda]", border=1, ln=3)
+    
+    envio_info = f"{pdf.empresa_nombre} - Sede {tienda_nombre}\nDirección: {direccion_entrega}\nRecibe: Leivyn Gabriel Garcia"
+    pdf.multi_cell(95, 7, envio_info, 1, 'L')
     pdf.ln(5)
 
+    # --- METADATOS DE LA ORDEN ---
     pdf.set_font("DejaVu", 'B', 10)
-    pdf.cell(60, 8, f"N° ORDEN: {datetime.now().strftime('%Y%m%d-%H%M')}", 0, 0)
-    pdf.cell(60, 8, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 0, 0)
-    pdf.cell(70, 8, "CONDICIONES: NETO 30 DÍAS", 0, 1, 'R')
+    pdf.cell(63, 7, f"ORDEN N°: {datetime.now().strftime('%Y%m%d-%H%M')}", 1, 0, 'C', 1)
+    pdf.cell(64, 7, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 1, 0, 'C', 1)
+    pdf.cell(63, 7, "CONDICIONES: NETO 30 DÍAS", 1, 1, 'C', 1)
     pdf.ln(10)
 
+    # --- TABLA DE ARTÍCULOS ---
     pdf.set_fill_color(79, 129, 189)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("DejaVu", 'B', 9)
-    pdf.cell(30, 8, 'Cód. Interno', 1, 0, 'C', 1)
-    pdf.cell(25, 8, 'Cód. Prov.', 1, 0, 'C', 1)
+    pdf.cell(25, 8, 'Cód. Interno', 1, 0, 'C', 1)
+    pdf.cell(30, 8, 'Cód. Prov.', 1, 0, 'C', 1)
     pdf.cell(70, 8, 'Descripción del Producto', 1, 0, 'C', 1)
     pdf.cell(15, 8, 'Cant.', 1, 0, 'C', 1)
     pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1)
@@ -131,19 +166,16 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
         subtotal += costo_total_item
         
         x_start, y_start = pdf.get_x(), pdf.get_y()
-        pdf.multi_cell(30, 8, str(row['SKU']), 1, 'L')
-        pdf.set_xy(x_start + 30, y_start)
-        pdf.multi_cell(25, 8, str(row['SKU_Proveedor']), 1, 'L')
-        pdf.set_xy(x_start + 55, y_start)
+        pdf.multi_cell(25, 8, str(row['SKU']), 1, 'L'); pdf.set_xy(x_start + 25, y_start)
+        pdf.multi_cell(30, 8, str(row['SKU_Proveedor']), 1, 'L'); pdf.set_xy(x_start + 55, y_start)
         pdf.multi_cell(70, 8, row['Descripcion'], 1, 'L')
+        
         y_end_desc = pdf.get_y()
         row_height = y_end_desc - y_start
-        pdf.set_xy(x_start + 125, y_start)
-        pdf.multi_cell(15, row_height, str(row['Uds a Comprar']), 1, 'C')
-        pdf.set_xy(x_start + 140, y_start)
-        pdf.multi_cell(25, row_height, f"${row['Costo_Promedio_UND']:,.2f}", 1, 'R')
-        pdf.set_xy(x_start + 165, y_start)
-        pdf.multi_cell(25, row_height, f"${costo_total_item:,.2f}", 1, 'R')
+        
+        pdf.set_xy(x_start + 125, y_start); pdf.multi_cell(15, row_height, str(row['Uds a Comprar']), 1, 'C')
+        pdf.set_xy(x_start + 140, y_start); pdf.multi_cell(25, row_height, f"${row['Costo_Promedio_UND']:,.2f}", 1, 'R')
+        pdf.set_xy(x_start + 165, y_start); pdf.multi_cell(25, row_height, f"${costo_total_item:,.2f}", 1, 'R')
         pdf.set_y(y_end_desc)
     
     iva_porcentaje, iva_valor = 0.19, subtotal * 0.19
@@ -158,7 +190,6 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     
-    # ✅ CORRECCIÓN FINAL: Convertir el `bytearray` a `bytes`.
     return bytes(pdf.output())
 
 @st.cache_data
@@ -285,28 +316,47 @@ with tab3:
         
     df_plan_compras_final = pd.DataFrame()
     if not df_plan_compras.empty:
+        # Se mueven los cálculos para después del editor
         df_plan_compras['Uds a Comprar'] = df_plan_compras['Sugerencia_Compra'].astype(int)
-        df_plan_compras['Valor de la Compra'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Costo_Promedio_UND']
         df_plan_compras['Seleccionar'] = False 
-        df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Tienda'})[
-            ['Seleccionar', 'Tienda', 'Proveedor', 'SKU_Proveedor', 'SKU', 'Descripcion', 'Segmento_ABC', 'Uds a Comprar', 'Valor de la Compra', 'Costo_Promedio_UND']
-        ].sort_values(by=['Tienda', 'Valor de la Compra'], ascending=[True, False])
+        
+        columnas_ordenadas = [
+            'Seleccionar', 'Tienda', 'Proveedor', 'SKU_Proveedor', 'SKU', 
+            'Descripcion', 'Segmento_ABC', 'Uds a Comprar', 'Costo_Promedio_UND'
+        ]
+        df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Tienda'})[columnas_ordenadas]
     
     c1, c2 = st.columns(2)
     with c1:
+        # Se genera un excel base, sin el valor total que puede cambiar.
         excel_compras = generar_excel_dinamico(df_plan_compras_final.drop(columns=['Seleccionar', 'Costo_Promedio_UND'], errors='ignore'), "Plan de Compras")
         st.download_button("📥 Descargar Plan de Compras (Excel)", excel_compras, "Plan_Compras.xlsx")
 
     if df_plan_compras_final.empty:
         st.success("✅ ¡No se requieren compras con los filtros actuales!")
     else:
-        st.markdown("Marque los artículos que desea incluir en la orden de compra:")
+        st.markdown("Marque los artículos y **ajuste las cantidades** que desea incluir en la orden de compra:")
+        
+        # ✅ MEJORA: Habilitar la edición de 'Uds a Comprar'
         edited_df = st.data_editor(
-            df_plan_compras_final, hide_index=True, use_container_width=True,
-            column_config={"Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), "Seleccionar": st.column_config.CheckboxColumn(required=True), "SKU_Proveedor": st.column_config.TextColumn("Cód. Proveedor"), "SKU": st.column_config.TextColumn("Cód. Interno")},
-            disabled=[col for col in df_plan_compras_final.columns if col != 'Seleccionar'], key="data_editor_compras")
+            df_plan_compras_final, 
+            hide_index=True, 
+            use_container_width=True,
+            column_config={
+                "Uds a Comprar": st.column_config.NumberColumn(label="Cant. a Comprar", min_value=0, step=1),
+                "Seleccionar": st.column_config.CheckboxColumn(required=True), 
+                "SKU_Proveedor": st.column_config.TextColumn("Cód. Proveedor"), 
+                "SKU": st.column_config.TextColumn("Cód. Interno")
+            },
+            disabled=[col for col in df_plan_compras_final.columns if col not in ['Seleccionar', 'Uds a Comprar']], 
+            key="data_editor_compras"
+        )
         
         df_seleccionados = edited_df[edited_df['Seleccionar']]
+        
+        # ✅ MEJORA: Recalcular el valor total DESPUÉS de la edición
+        if not df_seleccionados.empty:
+            df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
         
         pdf_bytes = None
         if not df_seleccionados.empty and selected_proveedor != 'Todos':
@@ -328,4 +378,5 @@ with tab3:
             st.warning("Por favor, seleccione un proveedor específico para generar la orden de compra.")
         
         if not df_seleccionados.empty:
+            # ✅ MEJORA: El total mostrado al usuario también se recalcula.
             st.info(f"**Total de la selección actual:** ${df_seleccionados['Valor de la Compra'].sum():,.0f}")
