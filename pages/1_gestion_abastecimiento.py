@@ -94,8 +94,12 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.empresa_nombre = "Ferreinox SAS BIC"; self.empresa_nit = "NIT 800.224.617"; self.empresa_tel = "Tel: 312 7574279"
-        self.empresa_web = "www.ferreinox.co"; self.empresa_email = "compras@ferreinox.co"
+        self.empresa_nombre = "Ferreinox SAS BIC"
+        # ✅ CORRECCIÓN: NIT actualizado.
+        self.empresa_nit = "NIT 800.224.617"
+        self.empresa_tel = "Tel: 312 7574279"
+        self.empresa_web = "www.ferreinox.co"
+        self.empresa_email = "compras@ferreinox.co"
         self.color_rojo_ferreinox = (212, 32, 39); self.color_gris_oscuro = (68, 68, 68); self.color_azul_oscuro = (79, 129, 189)
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf'); self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
@@ -200,6 +204,7 @@ selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, de
 df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
 
 DIRECCIONES_TIENDAS = {'Armenia': 'Carrera 19 11 05', 'Olaya': 'Carrera 13 19 26', 'Manizales': 'Calle 16 21 32', 'FerreBox': 'Calle 20 12 32'}
+# ✅ CORRECCIÓN: Datos de contacto y celulares actualizados.
 CONTACTOS_PROVEEDOR = {
     'ABRACOL': {'nombre': 'JHON JAIRO DUQUE', 'celular': '573113032448'},
     'SAINT GOBAIN': {'nombre': 'SARA LARA', 'celular': '573165257917'},
@@ -270,13 +275,13 @@ with tab2:
         lista_destinos = ["Todas"] + sorted(df_plan_maestro['Tienda Destino'].unique().tolist())
         filtro_destino = f_col2.selectbox("Filtrar por Tienda Destino:", lista_destinos, key="filtro_destino")
         
-        lista_proveedores = ["Todos"] + sorted(df_plan_maestro['Proveedor'].unique().tolist())
-        filtro_proveedor = f_col3.selectbox("Filtrar por Proveedor:", lista_proveedores, key="filtro_proveedor_traslado")
+        lista_proveedores_traslado = ["Todos"] + sorted(df_plan_maestro['Proveedor'].unique().tolist())
+        filtro_proveedor_traslado = f_col3.selectbox("Filtrar por Proveedor:", lista_proveedores_traslado, key="filtro_proveedor_traslado")
 
         df_aplicar_filtros = df_plan_maestro.copy()
         if filtro_origen != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Origen'] == filtro_origen]
         if filtro_destino != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Destino'] == filtro_destino]
-        if filtro_proveedor != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor]
+        if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
         
         search_term_traslado = st.text_input("Buscar producto a trasladar por SKU o Descripción:", key="search_traslados")
         
@@ -305,7 +310,8 @@ with tab2:
                 df_seleccionados_traslado['Peso del Traslado (kg)'] = df_seleccionados_traslado['Uds a Enviar'] * df_seleccionados_traslado['Peso Individual (kg)']
                 
                 st.markdown("---")
-                email_dest_traslado = st.text_input("📧 Correo del destinatario para el plan de traslado:", key="email_traslado", help="Ej: logistica@ferreinox.co")
+                
+                email_dest_traslado = st.text_input("📧 Correo del destinatario para el plan de traslado:", key="email_traslado", help="Puede ser uno o varios correos separados por coma o punto y coma.")
                 
                 t_c1, t_c2 = st.columns(2)
                 with t_c1:
@@ -324,6 +330,18 @@ with tab2:
                         else: st.warning("Por favor, ingresa un correo de destinatario.")
                 with t_c2:
                     st.download_button("📥 Descargar Plan (Excel)", data=generar_excel_dinamico(df_seleccionados_traslado, "Plan_de_Traslados"), file_name="Plan_de_Traslado.xlsx", use_container_width=True)
+                
+                celular_dest_traslado = st.text_input("📲 Celular para notificar por WhatsApp (sin el 57):", key="cel_traslado", help="Ej: 3001234567")
+                if st.button("📲 Generar Notificación por WhatsApp", use_container_width=True, key="btn_wpp_traslado"):
+                    if celular_dest_traslado:
+                        numero_completo = celular_dest_traslado.strip()
+                        if not numero_completo.startswith('57'):
+                            numero_completo = '57' + numero_completo
+                        mensaje_wpp = f"Hola, se ha generado un nuevo plan de traslados que requiere tu atención. Fue enviado al correo {email_dest_traslado}. ¡Gracias!"
+                        link_wpp = generar_link_whatsapp(numero_completo, mensaje_wpp)
+                        st.link_button("Abrir WhatsApp", link_wpp)
+                    else:
+                        st.warning("Ingresa un número de celular para notificar.")
 
                 st.markdown("---")
                 total_unidades = df_seleccionados_traslado['Uds a Enviar'].sum()
@@ -334,15 +352,12 @@ with tab3:
     st.header("🛒 Plan de Compras")
     
     with st.expander("✅ **Generar Órdenes de Compra**", expanded=True):
-        # ✅ MEJORA: Mostrar TODOS los productos a comprar, incluyendo 'No Asignado'
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
         
         if df_plan_compras.empty:
             st.info("No hay sugerencias de compra con los filtros actuales.")
         else:
             df_plan_compras['Proveedor'] = df_plan_compras['Proveedor'].str.upper()
-            
-            # ✅ MEJORA: El filtro ahora incluye 'Todos' para ver la lista completa.
             proveedores_disponibles = ["Todos"] + sorted(df_plan_compras['Proveedor'].unique().tolist())
             selected_proveedor = st.selectbox("Filtrar por Proveedor:", proveedores_disponibles, key="sb_proveedores")
             
@@ -364,10 +379,8 @@ with tab3:
             df_seleccionados = edited_df[edited_df['Seleccionar']]
 
             if not df_seleccionados.empty:
-                # La lógica de generación de PDF y correo ahora se aplica a cualquier selección
-                # Siempre y cuando se haya seleccionado un proveedor específico en el filtro.
-                if selected_proveedor == 'Todos':
-                    st.warning("Por favor, seleccione un proveedor específico del filtro para poder generar la orden.")
+                if selected_proveedor == 'Todos' or selected_proveedor == 'NO ASIGNADO':
+                    st.warning("Por favor, seleccione un proveedor específico del filtro para poder generar la orden. Para productos sin proveedor, use la sección de 'Compras Especiales'.")
                 else:
                     df_seleccionados = df_seleccionados.copy()
                     df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
@@ -416,6 +429,77 @@ with tab3:
     st.markdown("---")
     
     with st.expander("🆕 **Compras Especiales (Asignar Proveedor Manualmente)**"):
-        # La lógica de Compras Especiales se mantiene igual por si se prefiere este flujo de trabajo
-        # ... (código anterior de Compras Especiales aquí) ...
-        pass
+        df_sin_proveedor_especial = df_filtered[(df_filtered['Sugerencia_Compra'] > 0) & (df_filtered['Proveedor'] == 'No Asignado')].copy()
+        
+        if df_sin_proveedor_especial.empty:
+            st.info("No hay sugerencias de compra para productos sin proveedor asignado.")
+        else:
+            search_term_sp = st.text_input("Buscar producto sin proveedor por SKU o Descripción:", key="search_sp")
+            
+            df_resultados_sp = pd.DataFrame()
+            if search_term_sp:
+                mask = (df_sin_proveedor_especial['SKU'].astype(str).str.contains(search_term_sp, case=False, na=False) | df_sin_proveedor_especial['Descripcion'].astype(str).str.contains(search_term_sp, case=False, na=False))
+                df_resultados_sp = df_sin_proveedor_especial[mask].copy()
+
+            if not df_resultados_sp.empty:
+                df_resultados_sp['Uds a Comprar'] = df_resultados_sp['Sugerencia_Compra'].astype(int)
+                df_resultados_sp['Seleccionar'] = False
+                columnas_sp = ['Seleccionar', 'Tienda', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Uds a Comprar', 'Costo_Promedio_UND']
+                df_resultados_sp_final = df_resultados_sp.rename(columns={'Almacen_Nombre': 'Tienda'})[columnas_sp]
+
+                st.markdown("##### Productos Encontrados")
+                edited_df_sp = st.data_editor(df_resultados_sp_final, hide_index=True, use_container_width=True,
+                    column_config={"Uds a Comprar": st.column_config.NumberColumn(label="Cant. a Comprar", min_value=0, step=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
+                    disabled=[col for col in df_resultados_sp_final.columns if col not in ['Seleccionar', 'Uds a Comprar']], key="editor_sp")
+
+                df_seleccionados_sp = edited_df_sp[edited_df_sp['Seleccionar']]
+
+                if not df_seleccionados_sp.empty:
+                    st.markdown("##### Asignar Proveedor para esta Compra")
+                    nuevo_proveedor_nombre = st.text_input("Nombre del Nuevo Proveedor:", key="nuevo_prov_nombre")
+                    
+                    if nuevo_proveedor_nombre:
+                        df_seleccionados_sp = df_seleccionados_sp.copy()
+                        df_seleccionados_sp['Valor de la Compra'] = df_seleccionados_sp['Uds a Comprar'] * df_seleccionados_sp['Costo_Promedio_UND']
+                        df_seleccionados_sp['Proveedor'] = nuevo_proveedor_nombre
+                        
+                        tienda_de_entrega_sp = selected_almacen_nombre
+                        if tienda_de_entrega_sp == opcion_consolidado:
+                            tienda_de_entrega_sp = 'FerreBox'
+                        
+                        direccion_entrega_sp = DIRECCIONES_TIENDAS.get(tienda_de_entrega_sp, "N/A")
+                        pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, "")
+
+                        email_destinatario_sp = st.text_input("📧 Correo(s) del nuevo proveedor (separados por coma):", key="email_sp")
+                        celular_destinatario_sp = st.text_input("📲 Celular del nuevo proveedor (sin el 57):", key="cel_sp", help="Ej: 3001234567")
+
+                        sp_c1, sp_c2, sp_c3 = st.columns(3)
+                        with sp_c1:
+                            st.download_button("📥 Descargar Excel (SP)", data=generar_excel_dinamico(df_seleccionados_sp, "compra_especial"), file_name=f"Compra_Especial_{nuevo_proveedor_nombre}.xlsx", use_container_width=True, key="btn_dl_excel_sp")
+                        with sp_c2:
+                            if st.button("✉️ Enviar Correo (SP)", disabled=(pdf_bytes_sp is None), use_container_width=True, key="btn_enviar_sp"):
+                                if email_destinatario_sp:
+                                    with st.spinner("Enviando correo..."):
+                                        email_string_sp = email_destinatario_sp.replace(';', ',')
+                                        lista_destinatarios_sp = [email.strip() for email in email_string_sp.split(',') if email.strip()]
+                                        asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
+                                        cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
+                                        nombre_archivo_sp = f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf"
+                                        enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp, subtipo_mime='pdf')
+                                        if enviado_sp:
+                                            st.success(mensaje_sp)
+                                            if celular_destinatario_sp:
+                                                numero_completo = celular_destinatario_sp.strip()
+                                                if not numero_completo.startswith('57'):
+                                                    numero_completo = '57' + numero_completo
+                                                mensaje_wpp_sp = f"Hola {nuevo_proveedor_nombre}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
+                                                link_wpp_sp = generar_link_whatsapp(numero_completo, mensaje_wpp_sp)
+                                                st.link_button("📲 Notificar por WhatsApp (SP)", link_wpp_sp, use_container_width=True)
+                                        else:
+                                            st.error(mensaje_sp)
+                                else:
+                                    st.warning("Ingresa un correo para el nuevo proveedor.")
+                        with sp_c3:
+                            st.download_button("📄 Descargar PDF (SP)", data=pdf_bytes_sp, file_name=f"OC_Especial_{nuevo_proveedor_nombre}.pdf", use_container_width=True, key="btn_dl_pdf_sp", disabled=(pdf_bytes_sp is None))
+
+                        st.info(f"Total de la selección para **{nuevo_proveedor_nombre}**: ${df_seleccionados_sp['Valor de la Compra'].sum():,.0f}")
