@@ -53,21 +53,24 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
-    """Clase PDF mejorada con la fuente Unicode cargada en el constructor."""
+    """Clase PDF que define todos los estilos de fuente necesarios en el constructor."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.empresa_nombre = "Nombre de Tu Empresa"
         self.empresa_nit = "NIT 123.456.789-0"
         self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
-        # ✅ CORRECCIÓN: La fuente se añade al crear el objeto PDF.
-        # Esto asegura que esté disponible para el header, footer y cuerpo.
+        
+        # ✅ CORRECCIÓN PRINCIPAL: Definir todos los estilos de la fuente (Regular, Bold, Italic).
+        # También se elimina el parámetro obsoleto `uni=True`.
         try:
-            self.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+            self.add_font('DejaVu', '', 'DejaVuSans.ttf')
+            self.add_font('DejaVu', 'B', 'DejaVuSans-Bold.ttf')
+            self.add_font('DejaVu', 'I', 'DejaVuSans-Oblique.ttf')
+            self.add_font('DejaVu', 'BI', 'DejaVuSans-BoldOblique.ttf')
         except RuntimeError:
-            st.error("No se pudo cargar la fuente para el PDF. Algunos caracteres podrían no mostrarse.")
+            st.error("No se pudo cargar la fuente para el PDF. Asegúrate de que el archivo 'packages.txt' existe y la app se ha reiniciado.")
 
     def header(self):
-        # Ahora esta llamada es segura porque la fuente ya fue añadida.
         self.set_font('DejaVu', 'B', 24)
         self.set_text_color(79, 129, 189)
         self.cell(0, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
@@ -89,12 +92,10 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     
     direccion_entrega = f"Bodega {tienda_nombre}, Zona Industrial, Ciudad"
 
-    # Se crea el objeto PDF, que ahora carga la fuente automáticamente.
     pdf = PDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=25)
     
-    # --- BLOQUES DE INFORMACIÓN: PROVEEDOR Y ENTREGA ---
     pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(95, 8, "PROVEEDOR:", 0, 0, 'L')
     pdf.cell(95, 8, "ENVIAR A:", 0, 1, 'L')
@@ -108,14 +109,12 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.multi_cell(95, line_height, f"{pdf.empresa_nombre} - Sede {tienda_nombre}\n{direccion_entrega}\nRecibe: [Nombre de contacto en tienda]\nTel: [Teléfono de la tienda]", border=1, ln=3)
     pdf.ln(5)
 
-    # --- METADATOS DE LA ORDEN ---
     pdf.set_font("DejaVu", 'B', 10)
     pdf.cell(60, 8, f"N° ORDEN: {datetime.now().strftime('%Y%m%d-%H%M')}", 0, 0)
     pdf.cell(60, 8, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 0, 0)
     pdf.cell(70, 8, "CONDICIONES: NETO 30 DÍAS", 0, 1, 'R')
     pdf.ln(10)
 
-    # --- TABLA DE ARTÍCULOS ---
     pdf.set_fill_color(79, 129, 189)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("DejaVu", 'B', 9)
@@ -281,7 +280,8 @@ with tab3:
         proveedores_disponibles = ['Todos'] + sorted(df_plan_compras['Proveedor'].unique().tolist())
         selected_proveedor = st.selectbox("Filtrar por Proveedor para generar la orden:", proveedores_disponibles)
         if selected_proveedor != 'Todos':
-            df_plan_compras = df_plan_compras[df_plan_compras['Proveedor'] == selected_proveedor]
+            # ✅ CORRECCIÓN PANDAS: Añadir .copy() para evitar SettingWithCopyWarning
+            df_plan_compras = df_plan_compras[df_plan_compras['Proveedor'] == selected_proveedor].copy()
     else:
         selected_proveedor = "Todos"; st.selectbox("Filtrar por Proveedor:", ['Todos'], disabled=True)
         
