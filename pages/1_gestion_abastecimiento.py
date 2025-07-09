@@ -5,6 +5,10 @@ import io
 import plotly.express as px
 from fpdf import FPDF
 from datetime import datetime
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_icon="💡")
@@ -13,6 +17,38 @@ st.title("💡 Tablero de Control de Abastecimiento")
 st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para maximizar la rentabilidad.")
 
 # --- 1. FUNCIONES AUXILIARES ---
+
+# ✅ MEJORA: Nueva función para enviar correos.
+def enviar_correo_con_adjunto(destinatario, asunto, cuerpo_html, nombre_adjunto, datos_adjuntos):
+    """Envía un correo con un archivo adjunto usando credenciales de st.secrets."""
+    try:
+        # Extraer credenciales de los secrets de Streamlit
+        remitente = st.secrets["gmail"]["email"]
+        password = st.secrets["gmail"]["password"]
+
+        # Crear el mensaje
+        msg = MIMEMultipart()
+        msg['From'] = remitente
+        msg['To'] = destinatario
+        msg['Subject'] = asunto
+
+        # Adjuntar el cuerpo del correo en formato HTML
+        msg.attach(MIMEText(cuerpo_html, 'html'))
+
+        # Adjuntar el PDF
+        adjunto = MIMEApplication(datos_adjuntos, _subtype="pdf")
+        adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_adjunto)
+        msg.attach(adjunto)
+
+        # Conectar al servidor SMTP de Gmail y enviar
+        with smtplib.SMTP('smtp.gmail.com', 587) as server:
+            server.starttls()
+            server.login(remitente, password)
+            server.send_message(msg)
+        
+        return True, "Correo enviado exitosamente."
+    except Exception as e:
+        return False, f"Error al enviar el correo: {e}. Revisa la configuración de 'secrets'."
 
 @st.cache_data
 def generar_plan_traslados_inteligente(_df_analisis_maestro):
@@ -60,11 +96,13 @@ class PDF(FPDF):
         self.empresa_nit = "NIT 901.349.073-1"
         self.empresa_tel = "Tel: 312 7574279"
         self.empresa_web = "www.ferreinox.co"
-        self.empresa_email = "ventas@ferreinox.co" # Email de ejemplo
+        # ✅ MEJORA: Correo actualizado en el pie de página
+        self.empresa_email = "compras@ferreinox.co"
         
-        # ✅ MEJORA: Colores institucionales
-        self.color_rojo_ferreinox = (212, 32, 39) # #D42027
-        self.color_gris_oscuro = (68, 68, 68)   # #444444
+        self.color_rojo_ferreinox = (212, 32, 39) 
+        self.color_gris_oscuro = (68, 68, 68)
+        # ✅ MEJORA: Nuevo color azul oscuro para encabezados de tabla
+        self.color_azul_oscuro = (79, 129, 189)
 
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
@@ -75,7 +113,6 @@ class PDF(FPDF):
             st.error("Error al cargar la fuente. Asegúrate de que los archivos .ttf están en la carpeta 'fonts'.")
 
     def header(self):
-        # ✅ MEJORA: Encabezado con logo más grande y textos alineados a la derecha
         try:
             self.image('LOGO FERREINOX SAS BIC 2024.png', x=10, y=8, w=65)
         except RuntimeError:
@@ -83,13 +120,11 @@ class PDF(FPDF):
             self.set_font('DejaVu', 'B', 12)
             self.cell(65, 25, '[LOGO]', 1, 0, 'C')
 
-        # Posicionar el cursor a la derecha del logo para el bloque de texto
         self.set_y(12)
         self.set_x(80) 
         
         self.set_font('DejaVu', 'B', 22)
         self.set_text_color(*self.color_gris_oscuro)
-        # El ancho de celda 120 (210 total - 10 margen - 80 de X) asegura alineación a la derecha
         self.cell(120, 10, 'ORDEN DE COMPRA', 0, 1, 'R') 
 
         self.set_x(80)
@@ -102,10 +137,7 @@ class PDF(FPDF):
         self.ln(15)
 
     def footer(self):
-        # ✅ MEJORA: Pie de página informativo con colores de marca
         self.set_y(-20)
-        
-        # Línea superior de color
         self.set_draw_color(*self.color_rojo_ferreinox)
         self.set_line_width(1)
         self.line(10, self.get_y(), 200, self.get_y())
@@ -114,33 +146,15 @@ class PDF(FPDF):
         self.set_font('DejaVu', '', 8)
         self.set_text_color(128, 128, 128)
         
-        # Información de contacto en el pie de página
         footer_text = f"{self.empresa_nombre}   |   {self.empresa_web}   |   {self.empresa_email}   |   {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         
-        # Número de página
         self.set_y(-12)
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
-def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
+def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, direccion_entrega, contacto_proveedor):
     """Genera un PDF de Orden de Compra rediseñado y con datos dinámicos."""
     if df_seleccion.empty: return None
-    
-    DIRECCIONES_TIENDAS = {
-        'Armenia': 'Carrera 19 11 05',
-        'Olaya': 'Carrera 13 19 26',
-        'Manizales': 'Calle 16 21 32',
-        'FerreBox': 'Calle 20 12 32',
-    }
-    CONTACTOS_PROVEEDOR = {
-        'ABRACOL': 'Jhon Jairo Duque',
-        'SAINT GOBAIN': 'Sara Corrales',
-        'GOYA': 'Julian Nañes',
-        'YALE': 'Juan Carlos Gutierrez',
-    }
-
-    direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_nombre, "Dirección no especificada")
-    contacto_proveedor = CONTACTOS_PROVEEDOR.get(proveedor_nombre, "")
 
     pdf = PDF()
     pdf.add_page()
@@ -169,8 +183,9 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.cell(64, 7, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 1, 0, 'C', 1)
     pdf.cell(63, 7, "CONDICIONES: NETO 30 DÍAS", 1, 1, 'C', 1)
     pdf.ln(10)
-
-    pdf.set_fill_color(*pdf.color_rojo_ferreinox)
+    
+    # ✅ MEJORA: Usar el color azul oscuro para el encabezado de la tabla
+    pdf.set_fill_color(*pdf.color_azul_oscuro)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("DejaVu", 'B', 9)
     pdf.cell(25, 8, 'Cód. Interno', 1, 0, 'C', 1)
@@ -255,9 +270,24 @@ marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
 selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, default=marcas_unicas)
 df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
 
+# ✅ MEJORA: Diccionarios de datos para fácil acceso en toda la app
+DIRECCIONES_TIENDAS = {
+    'Armenia': 'Carrera 19 11 05',
+    'Olaya': 'Carrera 13 19 26',
+    'Manizales': 'Calle 16 21 32',
+    'FerreBox': 'Calle 20 12 32',
+}
+CONTACTOS_PROVEEDOR = {
+    'ABRACOL': 'Jhon Jairo Duque',
+    'SAINT GOBAIN': 'Sara Corrales',
+    'GOYA': 'Julian Nañes',
+    'YALE': 'Juan Carlos Gutierrez',
+}
+
 tab1, tab2, tab3 = st.tabs(["📊 Diagnóstico General", "🔄 Plan de Traslados", "🛒 Plan de Compras"])
 
 with tab1:
+    # ... (Sin cambios en esta pestaña)
     st.subheader(f"Diagnóstico para: {selected_almacen_nombre}")
     necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
     df_origen_kpi = df_maestro[df_maestro['Excedente_Trasladable'] > 0]
@@ -269,12 +299,10 @@ with tab1:
         oportunidad_ahorro = (df_sugerencias_kpi['Ahorro_Potencial'] * df_sugerencias_kpi['Costo_Promedio_UND']).sum()
     df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
     venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
-    
     kpi1, kpi2, kpi3 = st.columns(3)
     kpi1.metric(label="💰 Valor Compra Requerida", value=f"${necesidad_compra_total:,.0f}")
     kpi2.metric(label="💸 Ahorro por Traslados", value=f"${oportunidad_ahorro:,.0f}")
     kpi3.metric(label="📉 Venta Potencial Perdida", value=f"${venta_perdida:,.0f}")
-    
     st.markdown("##### Análisis y Recomendaciones Clave")
     with st.container(border=True):
         if venta_perdida > 0: st.markdown(f"**🚨 Alerta:** Se estima una pérdida de venta de **${venta_perdida:,.0f}** en 30 días por **{len(df_quiebre)}** productos en quiebre.")
@@ -286,7 +314,6 @@ with tab1:
                 top_categoria = df_compras_prioridad.groupby('Segmento_ABC')['Valor_Compra'].sum().idxmax()
                 st.markdown(f"**🎯 Enfoque:** Tu principal necesidad de inversión se concentra en productos de **Clase '{top_categoria}'**.")
         if venta_perdida == 0 and oportunidad_ahorro == 0 and necesidad_compra_total == 0: st.markdown("✅ **¡Inventario Optimizado!** No se detectan necesidades urgentes.")
-    
     st.markdown("---")
     col_g1, col_g2 = st.columns(2)
     with col_g1:
@@ -304,10 +331,10 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
+    # ... (Sin cambios en esta pestaña)
     st.subheader("Sugerencias de Balanceo entre Tiendas")
     with st.spinner("Calculando plan de traslados óptimo..."):
         df_plan_maestro = generar_plan_traslados_inteligente(df_maestro)
-
     if df_plan_maestro.empty:
         st.success("✅ ¡No se sugieren traslados! No hay cruces de necesidad y excedente.")
     else:
@@ -317,7 +344,6 @@ with tab2:
         else:
             df_plan_display = df_plan_maestro[df_plan_maestro['Tienda Destino'] == selected_almacen_nombre].copy()
             st.info(f"Mostrando únicamente traslados con destino a **{selected_almacen_nombre}**.")
-        
         if df_plan_display.empty:
             st.success(f"✅ La tienda **{selected_almacen_nombre}** no tiene sugerencias de recepción de traslados.")
         else:
@@ -329,7 +355,6 @@ with tab3:
     st.subheader("Sugerencias de Compra")
     df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
     if not df_plan_compras.empty:
-        # ✅ MEJORA: Se normaliza el nombre del proveedor para que coincida con el diccionario
         df_plan_compras['Proveedor'] = df_plan_compras['Proveedor'].str.upper()
         proveedores_disponibles = ['Todos'] + sorted(df_plan_compras['Proveedor'].unique().tolist())
         selected_proveedor = st.selectbox("Filtrar por Proveedor para generar la orden:", proveedores_disponibles)
@@ -349,52 +374,114 @@ with tab3:
         ]
         df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Tienda'})[columnas_ordenadas]
     
-    c1, c2 = st.columns([3, 1]) # Dar más espacio al botón de descarga de excel
-    with c1:
-        excel_compras = generar_excel_dinamico(df_plan_compras_final.drop(columns=['Seleccionar', 'Costo_Promedio_UND'], errors='ignore'), "Plan de Compras")
-        st.download_button("📥 Descargar Plan de Compras (Excel)", excel_compras, "Plan_Compras.xlsx")
-
+    # --- Interfaz de Usuario ---
+    
     if df_plan_compras_final.empty:
         st.success("✅ ¡No se requieren compras con los filtros actuales!")
     else:
         st.markdown("Marque los artículos y **ajuste las cantidades** que desea incluir en la orden de compra:")
         
         edited_df = st.data_editor(
-            df_plan_compras_final, 
-            hide_index=True, 
-            use_container_width=True,
+            df_plan_compras_final, hide_index=True, use_container_width=True,
             column_config={
                 "Uds a Comprar": st.column_config.NumberColumn(label="Cant. a Comprar", min_value=0, step=1),
                 "Seleccionar": st.column_config.CheckboxColumn(required=True), 
                 "SKU_Proveedor": st.column_config.TextColumn("Cód. Proveedor"), 
-                "SKU": st.column_config.TextColumn("Cód. Interno")
-            },
+                "SKU": st.column_config.TextColumn("Cód. Interno")},
             disabled=[col for col in df_plan_compras_final.columns if col not in ['Seleccionar', 'Uds a Comprar']], 
-            key="data_editor_compras"
-        )
+            key="data_editor_compras")
         
         df_seleccionados = edited_df[edited_df['Seleccionar']]
         
         if not df_seleccionados.empty:
-            df_seleccionados = df_seleccionados.copy() # Evitar SettingWithCopyWarning
+            df_seleccionados = df_seleccionados.copy()
             df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
         
         pdf_bytes = None
+        # Solo generar PDF si hay items seleccionados y un proveedor específico
         if not df_seleccionados.empty and selected_proveedor != 'Todos':
-            tienda_de_entrega = selected_almacen_nombre
-            if tienda_de_entrega == opcion_consolidado:
-                tienda_de_entrega = df_seleccionados['Tienda'].iloc[0]
+            tienda_de_entrega_nombre = selected_almacen_nombre
+            # ✅ MEJORA: Lógica para orden consolidada
+            if tienda_de_entrega_nombre == opcion_consolidado:
+                tienda_de_entrega_nombre = 'FerreBox'
             
-            pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, tienda_de_entrega)
+            direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_de_entrega_nombre, "N/A")
+            contacto_proveedor = CONTACTOS_PROVEEDOR.get(selected_proveedor, "N/A")
+            
+            pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, tienda_de_entrega_nombre, direccion_entrega, contacto_proveedor)
+
+        st.markdown("---")
+        
+        # ✅ MEJORA: Campo para email y botones en 3 columnas
+        email_destinatario = st.text_input("📧 Correo del destinatario para la orden de compra:")
+        
+        c1, c2, c3 = st.columns(3)
+        
+        with c1:
+            excel_compras = generar_excel_dinamico(df_seleccionados.drop(columns=['Seleccionar', 'Costo_Promedio_UND'], errors='ignore'), "Plan de Compras Seleccionado")
+            st.download_button("📥 Descargar Selección (Excel)", excel_compras, f"Seleccion_Compras_{selected_proveedor}.xlsx")
 
         with c2:
+            if st.button("✉️ Enviar por Correo", disabled=(pdf_bytes is None), use_container_width=True):
+                if email_destinatario:
+                    with st.spinner("Enviando correo..."):
+                        # Re-generar los datos necesarios para el cuerpo del email
+                        tienda_entrega_final = selected_almacen_nombre
+                        if tienda_entrega_final == opcion_consolidado:
+                            tienda_entrega_final = 'FerreBox'
+                        
+                        direccion_final = DIRECCIONES_TIENDAS.get(tienda_entrega_final, "N/A")
+                        
+                        asunto = f"Nueva Orden de Compra de Ferreinox SAS BIC - {selected_proveedor}"
+                        cuerpo_html = f"""
+                        <html>
+                        <body>
+                            <p>Estimados Sres. {selected_proveedor},</p>
+                            <p>Adjunto a este correo encontrarán nuestra orden de compra.</p>
+                            <p>Por favor, realizar el despacho a la siguiente dirección:</p>
+                            <p>
+                                <b>Sede de Entrega:</b> {tienda_entrega_final}<br>
+                                <b>Dirección:</b> {direccion_final}<br>
+                                <b>Contacto:</b> Leivyn Gabriel Garcia
+                            </p>
+                            <p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p>
+                            <p>Cordialmente,</p>
+                            <p>--<br>
+                            <b>Departamento de Compras</b><br>
+                            Ferreinox SAS BIC<br>
+                            Tel: 312 7574279<br>
+                            compras@ferreinox.co
+                            </p>
+                        </body>
+                        </html>
+                        """
+                        nombre_archivo = f"OC_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+                        
+                        enviado, mensaje = enviar_correo_con_adjunto(
+                            destinatario=email_destinatario,
+                            asunto=asunto,
+                            cuerpo_html=cuerpo_html,
+                            nombre_adjunto=nombre_archivo,
+                            datos_adjuntos=pdf_bytes
+                        )
+                        if enviado:
+                            st.success(mensaje)
+                        else:
+                            st.error(mensaje)
+                else:
+                    st.warning("Por favor, ingresa un correo electrónico de destinatario.")
+
+        with c3:
             st.download_button(
-                label="📄 Generar Orden de Compra (PDF)",
+                label="📄 Descargar Orden (PDF)",
                 data=pdf_bytes if pdf_bytes else b"",
                 file_name=f"OC_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
                 mime="application/pdf",
-                disabled=pdf_bytes is None)
+                disabled=pdf_bytes is None,
+                use_container_width=True)
         
+        st.markdown("---")
+
         if selected_proveedor == 'Todos' and not df_seleccionados.empty:
             st.warning("Por favor, seleccione un proveedor específico para generar la orden de compra.")
         
