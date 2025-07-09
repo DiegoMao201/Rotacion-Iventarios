@@ -10,11 +10,10 @@ from datetime import datetime
 st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_icon="💡")
 
 st.title("💡 Tablero de Control de Abastecimiento")
-st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para maximizar la rentabilidad.")
+st.markdown("Filtra por tienda o visión consolidada, analiza y actúa para optimizar tus compras.")
 
-# --- 1. FUNCIONES AUXILIARES ---
+# --- 1. FUNCIONES AUXILIARES (Sin cambios) ---
 
-# Clase para crear el PDF profesional (sin cambios)
 class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 20)
@@ -27,7 +26,6 @@ class PDF(FPDF):
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
-# Función de generación de PDF (sin cambios)
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     if df_seleccion.empty:
         return None
@@ -51,14 +49,13 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.cell(130, 6, tu_contacto, 0, 1)
     pdf.ln(10)
 
-    y_antes = pdf.get_y()
     pdf.set_font("Arial", 'B', 10)
     pdf.cell(95, 7, "PROVEEDOR:", 1, 0, 'C')
     pdf.cell(95, 7, "ENVIAR A:", 1, 1, 'C')
     
     pdf.set_font("Arial", '', 10)
     pdf.cell(95, 7, f" {proveedor_nombre}", 1, 0)
-    pdf.cell(95, 7, f" {tu_empresa} - Bodega {tienda_nombre}", 1, 1)
+    pdf.cell(95, 7, f" {tu_empresa} - {tienda_nombre}", 1, 1)
     
     pdf.cell(95, 7, " ", 1, 0)
     pdf.cell(95, 7, f" {tu_direccion}", 1, 1) 
@@ -109,143 +106,145 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     
     return pdf.output(dest='S').encode('latin-1')
 
-# ✨ CORRECCIÓN: Esta es la función completa para generar el Excel.
-# Reemplaza la versión con 'pass' que tenías antes.
 @st.cache_data
 def generar_excel_dinamico(df, nombre_hoja):
-    """Crea un archivo Excel dinámico con formato."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         if df.empty:
-            # Esto evita que la app se caiga si no hay datos.
             pd.DataFrame([{'Notificación': f"No se encontraron datos para '{nombre_hoja}'."}]).to_excel(writer, index=False, sheet_name=nombre_hoja)
             writer.sheets[nombre_hoja].set_column('A:A', 70)
             return output.getvalue()
-
-        # Asegurar que las unidades son enteros
         for col in ['Uds a Enviar', 'Uds a Comprar']:
             if col in df.columns:
                 df[col] = df[col].astype(int)
-
         df.to_excel(writer, index=False, sheet_name=nombre_hoja, startrow=1)
         workbook = writer.book
         worksheet = writer.sheets[nombre_hoja]
-
         header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top', 'fg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
-
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
-        
         for i, col in enumerate(df.columns):
             width = max(df[col].astype(str).map(len).max(), len(col)) + 4
             worksheet.set_column(i, i, min(width, 45))
-            
     return output.getvalue()
-
-# Esta función no cambia
-def generar_plan_traslados_inteligente(df_analisis_maestro):
-    # (El código de esta función es el mismo que ya tenías)
-    pass
 
 
 # --- 2. LÓGICA PRINCIPAL DE LA PÁGINA ---
-if 'df_analisis_maestro' in st.session_state:
-    df_maestro = st.session_state['df_analisis_maestro']
-    
-    tab_diagnostico, tab_traslados, tab_compras = st.tabs(["📊 Diagnóstico General", "🔄 Plan de Traslados", "🛒 Plan de Compras"])
-
-    # Las pestañas de diagnóstico y traslados no cambian
-    with tab_diagnostico:
-        # (El código de esta pestaña es el mismo)
-        pass
-
-    with tab_traslados:
-        # (El código de esta pestaña es el mismo)
-        pass
-        
-    # --- PESTAÑA 3: PLAN DE COMPRAS ---
-    with tab_compras:
-        # Aquí la lógica es la misma que la versión final anterior
-        if 'df_analisis' in st.session_state:
-            df_vista_tienda = st.session_state.get('df_analisis')
-            selected_almacen_nombre = df_vista_tienda['Almacen_Nombre'].iloc[0] if not df_vista_tienda.empty else "N/A"
-        else:
-            df_vista_tienda = df_maestro
-            selected_almacen_nombre = "Consolidado"
-
-        st.info(f"Prioridad 2: Comprar únicamente lo necesario para **{selected_almacen_nombre}** después de agotar traslados.")
-        
-        df_plan_compras = df_vista_tienda[df_vista_tienda['Sugerencia_Compra'] > 0].copy()
-
-        if not df_plan_compras.empty:
-            proveedores_disponibles = ['Todos'] + sorted(df_plan_compras['Proveedor'].unique().tolist())
-            selected_proveedor = st.selectbox("Filtrar por Proveedor:", proveedores_disponibles)
-            
-            if selected_proveedor != 'Todos':
-                df_plan_compras = df_plan_compras[df_plan_compras['Proveedor'] == selected_proveedor]
-        else:
-            selected_proveedor = "Todos"
-            st.selectbox("Filtrar por Proveedor:", ['Todos'], disabled=True)
-            
-        df_plan_compras_final = pd.DataFrame()
-        if not df_plan_compras.empty:
-            df_plan_compras['Uds a Comprar'] = df_plan_compras['Sugerencia_Compra'].astype(int)
-            df_plan_compras['Valor de la Compra'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Costo_Promedio_UND']
-            df_plan_compras['Seleccionar'] = False 
-            
-            df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Tienda'})[
-                [
-                    'Seleccionar', 'Tienda', 'Proveedor', 'SKU_Proveedor', 'SKU', 'Descripcion', 
-                    'Segmento_ABC', 'Uds a Comprar', 'Valor de la Compra', 'Costo_Promedio_UND'
-                ]
-            ].sort_values(by='Valor de la Compra', ascending=[False])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            excel_display_df = df_plan_compras_final.drop(columns=['Seleccionar', 'Costo_Promedio_UND'], errors='ignore')
-            excel_bytes = generar_excel_dinamico(excel_display_df, "Plan de Compras")
-            st.download_button(
-                "📥 Descargar Plan de Compras (Excel)", 
-                excel_bytes, 
-                f"Plan_de_Compras_{selected_proveedor.replace(' ','_')}.xlsx"
-            )
-        
-        if df_plan_compras_final.empty: 
-            st.success("¡No se requieren compras con los filtros actuales!")
-        else:
-            st.markdown("Marque los artículos que desea incluir en la orden de compra:")
-            edited_df = st.data_editor(
-                df_plan_compras_final, 
-                hide_index=True, 
-                use_container_width=True, 
-                column_config={
-                    "Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), 
-                    "Seleccionar": st.column_config.CheckboxColumn(required=True),
-                    "SKU_Proveedor": st.column_config.TextColumn("Cód. Proveedor"),
-                    "SKU": st.column_config.TextColumn("Cód. Interno"),
-                },
-                disabled=[col for col in df_plan_compras_final.columns if col != 'Seleccionar']
-            )
-
-            df_seleccionados = edited_df[edited_df['Seleccionar']]
-
-            with col2:
-                pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, selected_almacen_nombre)
-                st.download_button(
-                    "📄 Generar Orden de Compra (PDF)",
-                    data=pdf_bytes,
-                    file_name=f"OC_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    disabled=df_seleccionados.empty or selected_proveedor == 'Todos'
-                )
-            
-            if selected_proveedor == 'Todos' and not df_seleccionados.empty:
-                st.warning("Por favor, seleccione un proveedor específico para generar la orden de compra.")
-
-            if not df_seleccionados.empty:
-                total_seleccionado = df_seleccionados['Valor de la Compra'].sum()
-                st.info(f"**Total de la selección actual:** ${total_seleccionado:,.0f}")
-
-else:
+if 'df_analisis_maestro' not in st.session_state or st.session_state['df_analisis_maestro'].empty:
     st.error("🔴 Los datos de inventario no se han cargado. Regresa a la página principal para recargar.")
     st.page_link("app.py", label="Ir a la página principal", icon="🏠")
+else:
+    df_maestro = st.session_state['df_analisis_maestro']
+
+    # ✨ SECCIÓN DE FILTROS RESTAURADA EN LA BARRA LATERAL
+    st.sidebar.header("⚙️ Filtros de Gestión")
+
+    opcion_consolidado = '-- Consolidado (Todas las Tiendas) --'
+    
+    # El usuario gerente ve todas las tiendas, el de tienda solo ve la suya.
+    if st.session_state.get('user_role') == 'gerente':
+        almacen_options = [opcion_consolidado] + sorted(df_maestro['Almacen_Nombre'].unique().tolist())
+    else:
+        almacen_options = [st.session_state.get('almacen_nombre')]
+
+    selected_almacen_nombre = st.sidebar.selectbox(
+        "Selecciona la Vista de Tienda:",
+        almacen_options
+    )
+
+    # Filtrar el DataFrame principal según la selección de la tienda
+    if selected_almacen_nombre == opcion_consolidado:
+        df_vista = df_maestro.copy()
+    else:
+        df_vista = df_maestro[df_maestro['Almacen_Nombre'] == selected_almacen_nombre]
+
+    # Filtro por marca
+    marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
+    selected_marcas = st.sidebar.multiselect(
+        "Filtrar por Marca:",
+        marcas_unicas,
+        default=marcas_unicas
+    )
+
+    # Aplicar filtro de marca
+    if selected_marcas:
+        df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
+    else:
+        df_filtered = df_vista
+    
+    # --- Pestaña de Plan de Compras ---
+    st.header("🛒 Plan de Compras")
+    st.info(f"Mostrando sugerencias de compra para: **{selected_almacen_nombre}**")
+
+    df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
+
+    # Filtro por Proveedor
+    if not df_plan_compras.empty:
+        proveedores_disponibles = ['Todos'] + sorted(df_plan_compras['Proveedor'].unique().tolist())
+        selected_proveedor = st.selectbox("Filtrar por Proveedor para generar la orden:", proveedores_disponibles)
+        
+        if selected_proveedor != 'Todos':
+            df_plan_compras = df_plan_compras[df_plan_compras['Proveedor'] == selected_proveedor]
+    else:
+        selected_proveedor = "Todos"
+        st.selectbox("Filtrar por Proveedor para generar la orden:", ['Todos'], disabled=True)
+        
+    df_plan_compras_final = pd.DataFrame()
+    if not df_plan_compras.empty:
+        df_plan_compras['Uds a Comprar'] = df_plan_compras['Sugerencia_Compra'].astype(int)
+        df_plan_compras['Valor de la Compra'] = df_plan_compras['Uds a Comprar'] * df_plan_compras['Costo_Promedio_UND']
+        df_plan_compras['Seleccionar'] = False 
+        
+        df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Tienda'})[
+            [
+                'Seleccionar', 'Tienda', 'Proveedor', 'SKU_Proveedor', 'SKU', 'Descripcion', 
+                'Segmento_ABC', 'Uds a Comprar', 'Valor de la Compra', 'Costo_Promedio_UND'
+            ]
+        ].sort_values(by=['Tienda', 'Valor de la Compra'], ascending=[True, False])
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        excel_display_df = df_plan_compras_final.drop(columns=['Seleccionar', 'Costo_Promedio_UND'], errors='ignore')
+        excel_bytes = generar_excel_dinamico(excel_display_df, "Plan de Compras")
+        st.download_button(
+            "📥 Descargar Plan de Compras (Excel)", 
+            excel_bytes, 
+            f"Plan_de_Compras_{selected_almacen_nombre.replace(' ','_')}.xlsx"
+        )
+    
+    if df_plan_compras_final.empty: 
+        st.success("✅ ¡No se requieren compras con los filtros actuales!")
+    else:
+        st.markdown("Marque los artículos que desea incluir en la orden de compra:")
+        edited_df = st.data_editor(
+            df_plan_compras_final, 
+            hide_index=True, 
+            use_container_width=True, 
+            column_config={
+                "Valor de la Compra": st.column_config.NumberColumn(format="$ %d"), 
+                "Seleccionar": st.column_config.CheckboxColumn(required=True),
+                "SKU_Proveedor": st.column_config.TextColumn("Cód. Proveedor"),
+                "SKU": st.column_config.TextColumn("Cód. Interno"),
+            },
+            disabled=[col for col in df_plan_compras_final.columns if col != 'Seleccionar']
+        )
+
+        df_seleccionados = edited_df[edited_df['Seleccionar']]
+
+        with col2:
+            # La lógica del botón ahora es más robusta
+            pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, selected_almacen_nombre)
+            st.download_button(
+                "📄 Generar Orden de Compra (PDF)",
+                data=pdf_bytes if pdf_bytes is not None else b"", # Pasa bytes vacíos si es None
+                file_name=f"OC_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                disabled=df_seleccionados.empty or selected_proveedor == 'Todos'
+            )
+        
+        if selected_proveedor == 'Todos' and not df_seleccionados.empty:
+            st.warning("Por favor, seleccione un proveedor específico del menú desplegable para generar la orden de compra.")
+
+        if not df_seleccionados.empty:
+            total_seleccionado = df_seleccionados['Valor de la Compra'].sum()
+            st.info(f"**Total de la selección actual:** ${total_seleccionado:,.0f}")
