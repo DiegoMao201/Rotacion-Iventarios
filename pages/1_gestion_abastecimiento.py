@@ -10,6 +10,8 @@ import urllib.parse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from email.mime.base import MIMEBase
+from email import encoders
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA ---
 st.set_page_config(page_title="Gestión de Abastecimiento", layout="wide", page_icon="💡")
@@ -19,7 +21,8 @@ st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para m
 
 # --- 1. FUNCIONES AUXILIARES ---
 
-def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto, datos_adjuntos):
+# ✅ MEJORA: Función de correo ahora maneja diferentes tipos de adjuntos (PDF y Excel)
+def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto, datos_adjuntos, tipo_mime='application', subtipo_mime='octet-stream'):
     """Envía un correo a una LISTA de destinatarios con un archivo adjunto."""
     try:
         remitente = st.secrets["gmail"]["email"]
@@ -29,9 +32,15 @@ def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto
         msg['To'] = ", ".join(destinatarios)
         msg['Subject'] = asunto
         msg.attach(MIMEText(cuerpo_html, 'html'))
-        adjunto = MIMEApplication(datos_adjuntos, _subtype="pdf")
+        
+        with io.BytesIO(datos_adjuntos) as attachment_stream:
+            adjunto = MIMEBase(tipo_mime, subtipo_mime)
+            adjunto.set_payload(attachment_stream.read())
+        
+        encoders.encode_base64(adjunto)
         adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_adjunto)
         msg.attach(adjunto)
+
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(remitente, password)
@@ -39,6 +48,7 @@ def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto
         return True, "Correo enviado exitosamente."
     except Exception as e:
         return False, f"Error al enviar el correo: '{e}'. Revisa la configuración de 'secrets'."
+
 
 def generar_link_whatsapp(numero, mensaje):
     """Genera un link de WhatsApp pre-llenado y codificado."""
@@ -69,19 +79,16 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
                 excedentes_mutables[(sku, tienda_origen)] -= unidades_a_enviar
     if not plan_final: return pd.DataFrame()
     df_resultado = pd.DataFrame(plan_final)
+    # Se calcula el peso, pero el valor se deja fuera de la vista principal según solicitado
     df_resultado['Peso del Traslado (kg)'] = df_resultado['Uds a Enviar'] * df_resultado['Peso Individual (kg)']
     df_resultado['Valor del Traslado'] = df_resultado['Uds a Enviar'] * df_resultado['Valor Individual']
-    return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
+    return df_resultado.sort_values(by=['Valor del Traslado'], ascending=False)
 
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.empresa_nombre = "Ferreinox SAS BIC"
-        # ✅ MEJORA: NIT corregido
-        self.empresa_nit = "NIT 800.224.617"
-        self.empresa_tel = "Tel: 312 7574279"
-        self.empresa_web = "www.ferreinox.co"
-        self.empresa_email = "compras@ferreinox.co"
+        self.empresa_nombre = "Ferreinox SAS BIC"; self.empresa_nit = "NIT 800.224.617"; self.empresa_tel = "Tel: 312 7574279"
+        self.empresa_web = "www.ferreinox.co"; self.empresa_email = "compras@ferreinox.co"
         self.color_rojo_ferreinox = (212, 32, 39); self.color_gris_oscuro = (68, 68, 68); self.color_azul_oscuro = (79, 129, 189)
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf'); self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
@@ -186,8 +193,6 @@ selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, de
 df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
 
 DIRECCIONES_TIENDAS = {'Armenia': 'Carrera 19 11 05', 'Olaya': 'Carrera 13 19 26', 'Manizales': 'Calle 16 21 32', 'FerreBox': 'Calle 20 12 32'}
-
-# ✅ MEJORA: Datos de contacto y celulares actualizados.
 CONTACTOS_PROVEEDOR = {
     'ABRACOL': {'nombre': 'JHON JAIRO DUQUE', 'celular': '573113032448'},
     'SAINT GOBAIN': {'nombre': 'SARA LARA', 'celular': '573165257917'},
@@ -241,24 +246,79 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("Sugerencias de Balanceo entre Tiendas")
+    st.subheader("🚚 Plan de Traslados entre Tiendas")
+    
     with st.spinner("Calculando plan de traslados óptimo..."):
-        df_plan_maestro = generar_plan_traslados_inteligente(df_maestro)
+        df_plan_maestro = generar_plan_traslados_inteligente(df_filtered)
+
     if df_plan_maestro.empty:
-        st.success("✅ ¡No se sugieren traslados! No hay cruces de necesidad y excedente.")
+        st.success("✅ ¡No se sugieren traslados con los filtros actuales!")
     else:
-        if selected_almacen_nombre == opcion_consolidado:
-            df_plan_display = df_plan_maestro
-            st.info("Mostrando todas las sugerencias de traslado entre todas las tiendas.")
+        search_term_traslado = st.text_input("Buscar producto a trasladar por SKU o Descripción:", key="search_traslados")
+        
+        df_traslados_filtrado = df_plan_maestro
+        if search_term_traslado:
+            mask_traslado = (
+                df_plan_maestro['SKU'].astype(str).str.contains(search_term_traslado, case=False, na=False) |
+                df_plan_maestro['Descripcion'].astype(str).str.contains(search_term_traslado, case=False, na=False)
+            )
+            df_traslados_filtrado = df_plan_maestro[mask_traslado]
+
+        if df_traslados_filtrado.empty:
+            st.warning("No se encontraron traslados que coincidan con la búsqueda.")
         else:
-            df_plan_display = df_plan_maestro[df_plan_maestro['Tienda Destino'] == selected_almacen_nombre].copy()
-            st.info(f"Mostrando únicamente traslados con destino a **{selected_almacen_nombre}**.")
-        if df_plan_display.empty:
-            st.success(f"✅ La tienda **{selected_almacen_nombre}** no tiene sugerencias de recepción de traslados.")
-        else:
-            excel_traslados = generar_excel_dinamico(df_plan_display.drop(columns=['Valor Individual', 'Peso Individual (kg)'], errors='ignore'), "Plan de Traslados")
-            st.download_button("📥 Descargar Plan de Traslados", excel_traslados, "Plan_Traslados.xlsx")
-            st.dataframe(df_plan_display.drop(columns=['Valor Individual', 'Peso Individual (kg)'], errors='ignore'), use_container_width=True)
+            df_para_editar = df_traslados_filtrado.copy()
+            df_para_editar['Seleccionar'] = False
+            
+            columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Tienda Origen', 'Tienda Destino', 'Uds a Enviar', 'Peso Individual (kg)']
+            edited_df_traslados = st.data_editor(
+                df_para_editar[columnas_traslado],
+                hide_index=True, use_container_width=True,
+                column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
+                disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']],
+                key="editor_traslados"
+            )
+
+            df_seleccionados_traslado = edited_df_traslados[edited_df_traslados['Seleccionar']]
+
+            if not df_seleccionados_traslado.empty:
+                df_seleccionados_traslado = df_seleccionados_traslado.copy()
+                df_seleccionados_traslado['Peso del Traslado (kg)'] = df_seleccionados_traslado['Uds a Enviar'] * df_seleccionados_traslado['Peso Individual (kg)']
+                
+                st.markdown("---")
+                
+                email_dest_traslado = st.text_input("📧 Correo del destinatario para el plan de traslado:", key="email_traslado", help="Ej: logistica@ferreinox.co")
+                
+                t_c1, t_c2 = st.columns(2)
+                with t_c1:
+                    if st.button("✉️ Enviar Plan por Correo", use_container_width=True, key="btn_enviar_traslado"):
+                        if email_dest_traslado:
+                            with st.spinner("Enviando correo con el plan..."):
+                                excel_bytes = generar_excel_dinamico(df_seleccionados_traslado, "Plan_de_Traslados")
+                                asunto = f"Nuevo Plan de Traslado Interno - {datetime.now().strftime('%d/%m/%Y')}"
+                                cuerpo_html = f"<html><body><p>Hola equipo de logística,</p><p>Adjunto se encuentra el plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado.</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"
+                                nombre_archivo = f"Plan_Traslado_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                                
+                                email_string = email_dest_traslado.replace(';', ',')
+                                lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
+
+                                enviado, mensaje = enviar_correo_con_adjunto(
+                                    lista_destinatarios, asunto, cuerpo_html, nombre_archivo, excel_bytes, 
+                                    tipo_mime='application', subtipo_mime='vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                                
+                                if enviado:
+                                    st.success(mensaje)
+                                else:
+                                    st.error(mensaje)
+                        else:
+                            st.warning("Por favor, ingresa un correo de destinatario.")
+                with t_c2:
+                    st.download_button("📥 Descargar Plan (Excel)", data=generar_excel_dinamico(df_seleccionados_traslado, "Plan_de_Traslados"), file_name="Plan_de_Traslado.xlsx", use_container_width=True)
+
+                st.markdown("---")
+                total_unidades = df_seleccionados_traslado['Uds a Enviar'].sum()
+                total_peso = df_seleccionados_traslado['Peso del Traslado (kg)'].sum()
+                st.info(f"**Resumen de la Carga Seleccionada:** {total_unidades} Unidades Totales | **{total_peso:,.2f} kg** de Peso Total")
 
 with tab3:
     st.header("🛒 Plan de Compras")
