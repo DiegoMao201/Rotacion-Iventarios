@@ -61,23 +61,26 @@ class PDF(FPDF):
         self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
 
     def header(self):
-        self.set_font('Arial', 'B', 24)
+        # ✅ CAMBIO: Usar la fuente DejaVu para soportar caracteres especiales.
+        self.set_font('DejaVu', 'B', 24)
         self.set_text_color(79, 129, 189)
         self.cell(0, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
-        self.set_font('Arial', 'I', 10)
+        # ✅ CAMBIO: Usar la fuente DejaVu.
+        self.set_font('DejaVu', 'I', 10)
         self.set_text_color(128, 128, 128)
         self.cell(0, 6, f"{self.empresa_nombre} - {self.empresa_nit}", 0, 1, 'R')
         self.ln(15)
 
     def footer(self):
         self.set_y(-20)
-        self.set_font('Arial', 'I', 8)
+        # ✅ CAMBIO: Usar la fuente DejaVu.
+        self.set_font('DejaVu', 'I', 8)
         self.set_text_color(128, 128, 128)
         self.multi_cell(0, 5, f"Esta orden de compra es un documento oficial de {self.empresa_nombre}. Para cualquier duda, contactar a: {self.empresa_contacto}", 0, 'C')
         self.cell(0, 5, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
-    """Genera un PDF de Orden de Compra con un diseño mejorado."""
+    """Genera un PDF de Orden de Compra con un diseño mejorado y soporte Unicode."""
     if df_seleccion.empty: return None
     
     direccion_entrega = f"Bodega {tienda_nombre}, Zona Industrial, Ciudad"
@@ -85,12 +88,25 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf = PDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=25)
+    
+    # ✅ CAMBIO CRÍTICO: Añadir una fuente que soporte Unicode (UTF-8).
+    # FPDF2 intentará descargar la fuente si no está instalada en el sistema.
+    try:
+        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+    except RuntimeError:
+        # Fallback por si la descarga falla o no hay permisos.
+        st.error("No se pudo cargar la fuente para el PDF. Algunos caracteres podrían no mostrarse.")
+        # Se usará la fuente por defecto, que puede dar errores con caracteres especiales.
+        pass
 
-    pdf.set_font("Arial", 'B', 11)
+    # --- BLOQUES DE INFORMACIÓN: PROVEEDOR Y ENTREGA ---
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(95, 8, "PROVEEDOR:", 0, 0, 'L')
     pdf.cell(95, 8, "ENVIAR A:", 0, 1, 'L')
     
-    pdf.set_font("Arial", '', 10)
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", '', 10)
     line_height = 6
     y_start = pdf.get_y()
     pdf.multi_cell(95, line_height, f"{proveedor_nombre}\n[NIT/ID del Proveedor]\n[Dirección del Proveedor]\n[Contacto del Proveedor]", border=1, ln=3)
@@ -99,15 +115,19 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.multi_cell(95, line_height, f"{pdf.empresa_nombre} - Sede {tienda_nombre}\n{direccion_entrega}\nRecibe: [Nombre de contacto en tienda]\nTel: [Teléfono de la tienda]", border=1, ln=3)
     pdf.ln(5)
 
-    pdf.set_font("Arial", 'B', 10)
+    # --- METADATOS DE LA ORDEN ---
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", 'B', 10)
     pdf.cell(60, 8, f"N° ORDEN: {datetime.now().strftime('%Y%m%d-%H%M')}", 0, 0)
     pdf.cell(60, 8, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 0, 0)
     pdf.cell(70, 8, "CONDICIONES: NETO 30 DÍAS", 0, 1, 'R')
     pdf.ln(10)
 
+    # --- TABLA DE ARTÍCULOS ---
     pdf.set_fill_color(79, 129, 189)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Arial", 'B', 9)
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", 'B', 9)
     pdf.cell(30, 8, 'Cód. Interno', 1, 0, 'C', 1)
     pdf.cell(25, 8, 'Cód. Prov.', 1, 0, 'C', 1)
     pdf.cell(70, 8, 'Descripción del Producto', 1, 0, 'C', 1)
@@ -115,7 +135,8 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1)
     pdf.cell(25, 8, 'Costo Total', 1, 1, 'C', 1)
 
-    pdf.set_font("Arial", '', 9)
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", '', 9)
     pdf.set_text_color(0, 0, 0)
     subtotal = 0
     for _, row in df_seleccion.iterrows():
@@ -142,12 +163,14 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     total_general = subtotal + iva_valor
     
     pdf.set_x(110)
-    pdf.set_font("Arial", '', 10)
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", '', 10)
     pdf.cell(55, 8, 'Subtotal:', 1, 0, 'R'); pdf.cell(35, 8, f"${subtotal:,.2f}", 1, 1, 'R')
     pdf.set_x(110)
     pdf.cell(55, 8, f'IVA ({iva_porcentaje*100:.0f}%):', 1, 0, 'R'); pdf.cell(35, 8, f"${iva_valor:,.2f}", 1, 1, 'R')
     pdf.set_x(110)
-    pdf.set_font("Arial", 'B', 11)
+    # ✅ CAMBIO: Usar la fuente DejaVu.
+    pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     
     return pdf.output()
@@ -169,14 +192,11 @@ def generar_excel_dinamico(df, nombre_hoja):
 
 # --- 2. LÓGICA PRINCIPAL DE LA PÁGINA ---
 
-# ✅ CAMBIO PRINCIPAL: Verificación de sesión de usuario mejorada.
-# Si no hay datos, muestra un mensaje amigable y detiene la ejecución.
 if 'df_analisis_maestro' not in st.session_state or st.session_state['df_analisis_maestro'].empty:
     st.warning("⚠️ Por favor, inicia sesión en la página principal para cargar los datos.")
     st.page_link("app.py", label="Ir a la página principal", icon="🏠")
-    st.stop() # Detiene la ejecución del script para evitar errores.
+    st.stop() 
 
-# --- El resto del código solo se ejecuta si la verificación anterior es exitosa ---
 df_maestro = st.session_state['df_analisis_maestro']
 if 'Precio_Venta_Estimado' not in df_maestro.columns:
     df_maestro['Precio_Venta_Estimado'] = df_maestro['Costo_Promedio_UND'] * 1.30
