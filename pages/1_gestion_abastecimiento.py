@@ -53,19 +53,24 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
-    """Clase PDF mejorada para un look más profesional."""
+    """Clase PDF mejorada con la fuente Unicode cargada en el constructor."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.empresa_nombre = "Nombre de Tu Empresa"
         self.empresa_nit = "NIT 123.456.789-0"
         self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
+        # ✅ CORRECCIÓN: La fuente se añade al crear el objeto PDF.
+        # Esto asegura que esté disponible para el header, footer y cuerpo.
+        try:
+            self.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+        except RuntimeError:
+            st.error("No se pudo cargar la fuente para el PDF. Algunos caracteres podrían no mostrarse.")
 
     def header(self):
-        # ✅ CAMBIO: Usar la fuente DejaVu para soportar caracteres especiales.
+        # Ahora esta llamada es segura porque la fuente ya fue añadida.
         self.set_font('DejaVu', 'B', 24)
         self.set_text_color(79, 129, 189)
         self.cell(0, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
-        # ✅ CAMBIO: Usar la fuente DejaVu.
         self.set_font('DejaVu', 'I', 10)
         self.set_text_color(128, 128, 128)
         self.cell(0, 6, f"{self.empresa_nombre} - {self.empresa_nit}", 0, 1, 'R')
@@ -73,7 +78,6 @@ class PDF(FPDF):
 
     def footer(self):
         self.set_y(-20)
-        # ✅ CAMBIO: Usar la fuente DejaVu.
         self.set_font('DejaVu', 'I', 8)
         self.set_text_color(128, 128, 128)
         self.multi_cell(0, 5, f"Esta orden de compra es un documento oficial de {self.empresa_nombre}. Para cualquier duda, contactar a: {self.empresa_contacto}", 0, 'C')
@@ -85,27 +89,16 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     
     direccion_entrega = f"Bodega {tienda_nombre}, Zona Industrial, Ciudad"
 
+    # Se crea el objeto PDF, que ahora carga la fuente automáticamente.
     pdf = PDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=25)
     
-    # ✅ CAMBIO CRÍTICO: Añadir una fuente que soporte Unicode (UTF-8).
-    # FPDF2 intentará descargar la fuente si no está instalada en el sistema.
-    try:
-        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
-    except RuntimeError:
-        # Fallback por si la descarga falla o no hay permisos.
-        st.error("No se pudo cargar la fuente para el PDF. Algunos caracteres podrían no mostrarse.")
-        # Se usará la fuente por defecto, que puede dar errores con caracteres especiales.
-        pass
-
     # --- BLOQUES DE INFORMACIÓN: PROVEEDOR Y ENTREGA ---
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(95, 8, "PROVEEDOR:", 0, 0, 'L')
     pdf.cell(95, 8, "ENVIAR A:", 0, 1, 'L')
     
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", '', 10)
     line_height = 6
     y_start = pdf.get_y()
@@ -116,7 +109,6 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.ln(5)
 
     # --- METADATOS DE LA ORDEN ---
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", 'B', 10)
     pdf.cell(60, 8, f"N° ORDEN: {datetime.now().strftime('%Y%m%d-%H%M')}", 0, 0)
     pdf.cell(60, 8, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 0, 0)
@@ -126,7 +118,6 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     # --- TABLA DE ARTÍCULOS ---
     pdf.set_fill_color(79, 129, 189)
     pdf.set_text_color(255, 255, 255)
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", 'B', 9)
     pdf.cell(30, 8, 'Cód. Interno', 1, 0, 'C', 1)
     pdf.cell(25, 8, 'Cód. Prov.', 1, 0, 'C', 1)
@@ -135,7 +126,6 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1)
     pdf.cell(25, 8, 'Costo Total', 1, 1, 'C', 1)
 
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", '', 9)
     pdf.set_text_color(0, 0, 0)
     subtotal = 0
@@ -163,13 +153,11 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     total_general = subtotal + iva_valor
     
     pdf.set_x(110)
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", '', 10)
     pdf.cell(55, 8, 'Subtotal:', 1, 0, 'R'); pdf.cell(35, 8, f"${subtotal:,.2f}", 1, 1, 'R')
     pdf.set_x(110)
     pdf.cell(55, 8, f'IVA ({iva_porcentaje*100:.0f}%):', 1, 0, 'R'); pdf.cell(35, 8, f"${iva_valor:,.2f}", 1, 1, 'R')
     pdf.set_x(110)
-    # ✅ CAMBIO: Usar la fuente DejaVu.
     pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     
