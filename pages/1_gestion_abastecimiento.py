@@ -176,7 +176,9 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     
-    return pdf.output(dest='S').encode('latin-1')
+    # ✅ CORRECCIÓN APLICADA AQUÍ:
+    # Se elimina .encode('latin-1') porque pdf.output() ya devuelve bytes.
+    return pdf.output()
 
 @st.cache_data
 def generar_excel_dinamico(df, nombre_hoja):
@@ -324,27 +326,15 @@ else:
             df_seleccionados = edited_df[edited_df['Seleccionar']]
             
             # --- LÓGICA MEJORADA PARA MANEJAR EL ESTADO DEL BOTÓN PDF ---
-            # 1. Se generan los bytes del PDF solo si las condiciones son válidas.
-            # 2. Si no, la variable `pdf_bytes` será None.
-            # 3. Este cambio previene que el estado `pdf_bytes` de una sesión anterior
-            #    permanezca activo cuando ya no es válido.
             pdf_bytes = None
             if not df_seleccionados.empty and selected_proveedor != 'Todos':
-                # La tienda de entrega es la que está seleccionada en el filtro principal.
-                # Si es la vista consolidada, se debe escoger una tienda. Aquí asumimos
-                # que una orden de compra se genera para UNA tienda de entrega.
                 tienda_de_entrega = selected_almacen_nombre
                 if tienda_de_entrega == opcion_consolidado:
-                    # Si el usuario está en modo consolidado, toma la primera tienda de la selección como destino.
-                    # Una mejora sería permitirle al usuario escoger la tienda de destino aquí.
                     tienda_de_entrega = df_seleccionados['Tienda'].iloc[0]
                 
                 pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, tienda_de_entrega)
 
             with c2:
-                # 4. El botón de descarga ahora recibe `pdf_bytes` (que puede ser None).
-                #    Le pasamos bytes vacíos `b""` si es None para evitar el error.
-                # 5. La condición `disabled` ahora es más simple y segura.
                 st.download_button(
                     label="📄 Generar Orden de Compra (PDF)",
                     data=pdf_bytes if pdf_bytes else b"",
