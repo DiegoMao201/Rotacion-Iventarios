@@ -21,7 +21,6 @@ st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para m
 
 # --- 1. FUNCIONES AUXILIARES ---
 
-# ✅ MEJORA: Función de correo ahora maneja diferentes tipos de adjuntos (PDF y Excel)
 def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto, datos_adjuntos, tipo_mime='application', subtipo_mime='octet-stream'):
     """Envía un correo a una LISTA de destinatarios con un archivo adjunto."""
     try:
@@ -49,7 +48,6 @@ def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto
     except Exception as e:
         return False, f"Error al enviar el correo: '{e}'. Revisa la configuración de 'secrets'."
 
-
 def generar_link_whatsapp(numero, mensaje):
     """Genera un link de WhatsApp pre-llenado y codificado."""
     mensaje_codificado = urllib.parse.quote(mensaje)
@@ -57,6 +55,7 @@ def generar_link_whatsapp(numero, mensaje):
 
 @st.cache_data
 def generar_plan_traslados_inteligente(_df_analisis_maestro):
+    """Genera un plan de traslados óptimo incluyendo la información del proveedor."""
     if _df_analisis_maestro is None or _df_analisis_maestro.empty: return pd.DataFrame()
     df_origen = _df_analisis_maestro[_df_analisis_maestro['Excedente_Trasladable'] > 0].sort_values(by='Excedente_Trasladable', ascending=False).copy()
     df_destino = _df_analisis_maestro[_df_analisis_maestro['Necesidad_Total'] > 0].sort_values(by='Necesidad_Total', ascending=False).copy()
@@ -74,12 +73,25 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
             if excedente_disponible > 0 and necesidad_actual > 0:
                 unidades_a_enviar = np.floor(min(necesidad_actual, excedente_disponible))
                 if unidades_a_enviar < 1: continue
-                plan_final.append({'SKU': sku, 'Descripcion': necesidad_row['Descripcion'], 'Marca_Nombre': origen_row['Marca_Nombre'],'Segmento_ABC': necesidad_row['Segmento_ABC'], 'Tienda Origen': tienda_origen,'Stock en Origen': origen_row['Stock'], 'Tienda Destino': tienda_necesitada,'Stock en Destino': necesidad_row['Stock'], 'Necesidad en Destino': necesidad_row['Necesidad_Total'],'Uds a Enviar': unidades_a_enviar, 'Peso Individual (kg)': necesidad_row['Peso_Articulo'],'Valor Individual': necesidad_row['Costo_Promedio_UND']})
+                plan_final.append({
+                    'SKU': sku, 
+                    'Descripcion': necesidad_row['Descripcion'], 
+                    'Marca_Nombre': origen_row['Marca_Nombre'],
+                    'Proveedor': origen_row['Proveedor'], # ✅ MEJORA: Se incluye el proveedor en el plan de traslados
+                    'Segmento_ABC': necesidad_row['Segmento_ABC'], 
+                    'Tienda Origen': tienda_origen,
+                    'Stock en Origen': origen_row['Stock'], 
+                    'Tienda Destino': tienda_necesitada,
+                    'Stock en Destino': necesidad_row['Stock'], 
+                    'Necesidad en Destino': necesidad_row['Necesidad_Total'],
+                    'Uds a Enviar': unidades_a_enviar, 
+                    'Peso Individual (kg)': necesidad_row['Peso_Articulo'],
+                    'Valor Individual': necesidad_row['Costo_Promedio_UND']
+                })
                 necesidad_actual -= unidades_a_enviar
                 excedentes_mutables[(sku, tienda_origen)] -= unidades_a_enviar
     if not plan_final: return pd.DataFrame()
     df_resultado = pd.DataFrame(plan_final)
-    # Se calcula el peso, pero el valor se deja fuera de la vista principal según solicitado
     df_resultado['Peso del Traslado (kg)'] = df_resultado['Uds a Enviar'] * df_resultado['Peso Individual (kg)']
     df_resultado['Valor del Traslado'] = df_resultado['Uds a Enviar'] * df_resultado['Valor Individual']
     return df_resultado.sort_values(by=['Valor del Traslado'], ascending=False)
@@ -188,6 +200,7 @@ selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista de Tienda:",
 if selected_almacen_nombre == opcion_consolidado: df_vista = df_maestro.copy()
 else: df_vista = df_maestro[df_maestro['Almacen_Nombre'] == selected_almacen_nombre]
 
+# El filtro de marca en la barra lateral se aplica a TODO el dashboard
 marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
 selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, default=marcas_unicas)
 df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
@@ -249,35 +262,48 @@ with tab2:
     st.subheader("🚚 Plan de Traslados entre Tiendas")
     
     with st.spinner("Calculando plan de traslados óptimo..."):
+        # ✅ MEJORA: El plan de traslados ahora obedece a los filtros de marca de la barra lateral
         df_plan_maestro = generar_plan_traslados_inteligente(df_filtered)
 
     if df_plan_maestro.empty:
         st.success("✅ ¡No se sugieren traslados con los filtros actuales!")
     else:
+        # ✅ MEJORA: Nuevos filtros interactivos para la pestaña de traslados
+        st.markdown("##### Filtros Avanzados de Traslados")
+        f_col1, f_col2, f_col3 = st.columns(3)
+        
+        lista_origenes = ["Todas"] + sorted(df_plan_maestro['Tienda Origen'].unique().tolist())
+        filtro_origen = f_col1.selectbox("Filtrar por Tienda Origen:", lista_origenes, key="filtro_origen")
+
+        lista_destinos = ["Todas"] + sorted(df_plan_maestro['Tienda Destino'].unique().tolist())
+        filtro_destino = f_col2.selectbox("Filtrar por Tienda Destino:", lista_destinos, key="filtro_destino")
+        
+        lista_proveedores = ["Todos"] + sorted(df_plan_maestro['Proveedor'].unique().tolist())
+        filtro_proveedor = f_col3.selectbox("Filtrar por Proveedor:", lista_proveedores, key="filtro_proveedor")
+
+        df_aplicar_filtros = df_plan_maestro.copy()
+        if filtro_origen != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Origen'] == filtro_origen]
+        if filtro_destino != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Destino'] == filtro_destino]
+        if filtro_proveedor != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor]
+        
         search_term_traslado = st.text_input("Buscar producto a trasladar por SKU o Descripción:", key="search_traslados")
         
-        df_traslados_filtrado = df_plan_maestro
+        df_traslados_filtrado = df_aplicar_filtros
         if search_term_traslado:
-            mask_traslado = (
-                df_plan_maestro['SKU'].astype(str).str.contains(search_term_traslado, case=False, na=False) |
-                df_plan_maestro['Descripcion'].astype(str).str.contains(search_term_traslado, case=False, na=False)
-            )
-            df_traslados_filtrado = df_plan_maestro[mask_traslado]
+            mask_traslado = (df_traslados_filtrado['SKU'].astype(str).str.contains(search_term_traslado, case=False, na=False) |
+                             df_traslados_filtrado['Descripcion'].astype(str).str.contains(search_term_traslado, case=False, na=False))
+            df_traslados_filtrado = df_traslados_filtrado[mask_traslado]
 
         if df_traslados_filtrado.empty:
-            st.warning("No se encontraron traslados que coincidan con la búsqueda.")
+            st.warning("No se encontraron traslados que coincidan con los filtros y la búsqueda.")
         else:
             df_para_editar = df_traslados_filtrado.copy()
             df_para_editar['Seleccionar'] = False
+            columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Marca_Nombre', 'Tienda Origen', 'Tienda Destino', 'Uds a Enviar', 'Peso Individual (kg)']
             
-            columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Tienda Origen', 'Tienda Destino', 'Uds a Enviar', 'Peso Individual (kg)']
-            edited_df_traslados = st.data_editor(
-                df_para_editar[columnas_traslado],
-                hide_index=True, use_container_width=True,
+            edited_df_traslados = st.data_editor(df_para_editar[columnas_traslado], hide_index=True, use_container_width=True,
                 column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
-                disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']],
-                key="editor_traslados"
-            )
+                disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']], key="editor_traslados")
 
             df_seleccionados_traslado = edited_df_traslados[edited_df_traslados['Seleccionar']]
 
@@ -286,7 +312,6 @@ with tab2:
                 df_seleccionados_traslado['Peso del Traslado (kg)'] = df_seleccionados_traslado['Uds a Enviar'] * df_seleccionados_traslado['Peso Individual (kg)']
                 
                 st.markdown("---")
-                
                 email_dest_traslado = st.text_input("📧 Correo del destinatario para el plan de traslado:", key="email_traslado", help="Ej: logistica@ferreinox.co")
                 
                 t_c1, t_c2 = st.columns(2)
@@ -298,20 +323,12 @@ with tab2:
                                 asunto = f"Nuevo Plan de Traslado Interno - {datetime.now().strftime('%d/%m/%Y')}"
                                 cuerpo_html = f"<html><body><p>Hola equipo de logística,</p><p>Adjunto se encuentra el plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado.</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"
                                 nombre_archivo = f"Plan_Traslado_{datetime.now().strftime('%Y%m%d')}.xlsx"
-                                
                                 email_string = email_dest_traslado.replace(';', ',')
                                 lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
-
-                                enviado, mensaje = enviar_correo_con_adjunto(
-                                    lista_destinatarios, asunto, cuerpo_html, nombre_archivo, excel_bytes, 
-                                    tipo_mime='application', subtipo_mime='vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                                
-                                if enviado:
-                                    st.success(mensaje)
-                                else:
-                                    st.error(mensaje)
-                        else:
-                            st.warning("Por favor, ingresa un correo de destinatario.")
+                                enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, excel_bytes, tipo_mime='application', subtipo_mime='vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                                if enviado: st.success(mensaje)
+                                else: st.error(mensaje)
+                        else: st.warning("Por favor, ingresa un correo de destinatario.")
                 with t_c2:
                     st.download_button("📥 Descargar Plan (Excel)", data=generar_excel_dinamico(df_seleccionados_traslado, "Plan_de_Traslados"), file_name="Plan_de_Traslado.xlsx", use_container_width=True)
 
@@ -378,7 +395,7 @@ with tab3:
                                 asunto = f"Nueva Orden de Compra de Ferreinox SAS BIC - {selected_proveedor_asignado}"
                                 cuerpo_html = f"<html><body><p>Estimados Sres. {selected_proveedor_asignado},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_entrega_asig}<br><b>Dirección:</b> {direccion_entrega_asig}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
                                 nombre_archivo = f"OC_Ferreinox_{selected_proveedor_asignado.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-                                enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, pdf_bytes_asignado)
+                                enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, pdf_bytes_asignado, subtipo_mime='pdf')
                                 if enviado:
                                     st.success(mensaje)
                                     if celular_proveedor_asig:
@@ -452,7 +469,7 @@ with tab3:
                                         asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
                                         cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
                                         nombre_archivo_sp = f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf"
-                                        enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp)
+                                        enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp, subtipo_mime='pdf')
                                         if enviado_sp:
                                             st.success(mensaje_sp)
                                             if celular_destinatario_sp:
