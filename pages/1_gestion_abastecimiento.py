@@ -60,7 +60,6 @@ class PDF(FPDF):
         self.empresa_nit = "NIT 123.456.789-0"
         self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
         
-        # ✅ CORRECCIÓN DEFINITIVA: Apuntar a la carpeta 'fonts' que creaste.
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
             self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
@@ -159,7 +158,8 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.set_font("DejaVu", 'B', 11)
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     
-    return pdf.output()
+    # ✅ CORRECCIÓN FINAL: Convertir el `bytearray` a `bytes`.
+    return bytes(pdf.output())
 
 @st.cache_data
 def generar_excel_dinamico(df, nombre_hoja):
