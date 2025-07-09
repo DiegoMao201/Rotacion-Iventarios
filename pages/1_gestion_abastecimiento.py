@@ -53,22 +53,21 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
-    """Clase PDF que define todos los estilos de fuente necesarios en el constructor."""
+    """Clase PDF que carga las fuentes desde una carpeta local 'fonts'."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.empresa_nombre = "Nombre de Tu Empresa"
         self.empresa_nit = "NIT 123.456.789-0"
         self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
         
-        # ✅ CORRECCIÓN PRINCIPAL: Definir todos los estilos de la fuente (Regular, Bold, Italic).
-        # También se elimina el parámetro obsoleto `uni=True`.
+        # ✅ CORRECCIÓN DEFINITIVA: Apuntar a la carpeta 'fonts' que creaste.
         try:
-            self.add_font('DejaVu', '', 'DejaVuSans.ttf')
-            self.add_font('DejaVu', 'B', 'DejaVuSans-Bold.ttf')
-            self.add_font('DejaVu', 'I', 'DejaVuSans-Oblique.ttf')
-            self.add_font('DejaVu', 'BI', 'DejaVuSans-BoldOblique.ttf')
-        except RuntimeError:
-            st.error("No se pudo cargar la fuente para el PDF. Asegúrate de que el archivo 'packages.txt' existe y la app se ha reiniciado.")
+            self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
+            self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
+            self.add_font('DejaVu', 'I', 'fonts/DejaVuSans-Oblique.ttf')
+            self.add_font('DejaVu', 'BI', 'fonts/DejaVuSans-BoldOblique.ttf')
+        except RuntimeError as e:
+            st.error(f"Error al cargar la fuente: {e}. Asegúrate de que los archivos .ttf están en la carpeta 'fonts' de tu repositorio.")
 
     def header(self):
         self.set_font('DejaVu', 'B', 24)
@@ -280,7 +279,6 @@ with tab3:
         proveedores_disponibles = ['Todos'] + sorted(df_plan_compras['Proveedor'].unique().tolist())
         selected_proveedor = st.selectbox("Filtrar por Proveedor para generar la orden:", proveedores_disponibles)
         if selected_proveedor != 'Todos':
-            # ✅ CORRECCIÓN PANDAS: Añadir .copy() para evitar SettingWithCopyWarning
             df_plan_compras = df_plan_compras[df_plan_compras['Proveedor'] == selected_proveedor].copy()
     else:
         selected_proveedor = "Todos"; st.selectbox("Filtrar por Proveedor:", ['Todos'], disabled=True)
