@@ -53,14 +53,19 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
-    """Clase PDF rediseñada para un look profesional y con logo."""
+    """Clase PDF rediseñada con colores institucionales y layout mejorado."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # ✅ MEJORA: Datos de la empresa actualizados
         self.empresa_nombre = "Ferreinox SAS BIC"
-        self.empresa_nit = "NIT 901.349.073-1" # Se asume un NIT, puedes cambiarlo
+        self.empresa_nit = "NIT 901.349.073-1"
         self.empresa_tel = "Tel: 312 7574279"
+        self.empresa_web = "www.ferreinox.co"
+        self.empresa_email = "ventas@ferreinox.co" # Email de ejemplo
         
+        # ✅ MEJORA: Colores institucionales
+        self.color_rojo_ferreinox = (212, 32, 39) # #D42027
+        self.color_gris_oscuro = (68, 68, 68)   # #444444
+
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf')
             self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
@@ -70,40 +75,62 @@ class PDF(FPDF):
             st.error("Error al cargar la fuente. Asegúrate de que los archivos .ttf están en la carpeta 'fonts'.")
 
     def header(self):
-        # ✅ MEJORA: Encabezado con logo y datos de la empresa bien distribuidos.
+        # ✅ MEJORA: Encabezado con logo más grande y textos alineados a la derecha
         try:
-            # Asegúrate de que 'LOGO FERREINOX SAS BIC 2024.png' esté en la misma carpeta
-            self.image('LOGO FERREINOX SAS BIC 2024.png', 10, 8, 50)
+            self.image('LOGO FERREINOX SAS BIC 2024.png', x=10, y=8, w=65)
         except RuntimeError:
+            self.set_xy(10, 8)
             self.set_font('DejaVu', 'B', 12)
-            self.cell(50, 20, '[LOGO]', 1, 0, 'C')
+            self.cell(65, 25, '[LOGO]', 1, 0, 'C')
 
+        # Posicionar el cursor a la derecha del logo para el bloque de texto
+        self.set_y(12)
+        self.set_x(80) 
+        
         self.set_font('DejaVu', 'B', 22)
-        self.set_text_color(40, 40, 40)
-        self.cell(130, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
+        self.set_text_color(*self.color_gris_oscuro)
+        # El ancho de celda 120 (210 total - 10 margen - 80 de X) asegura alineación a la derecha
+        self.cell(120, 10, 'ORDEN DE COMPRA', 0, 1, 'R') 
 
+        self.set_x(80)
         self.set_font('DejaVu', '', 10)
         self.set_text_color(100, 100, 100)
-        self.cell(130, 7, self.empresa_nombre, 0, 1, 'R')
-        self.cell(130, 7, f"{self.empresa_nit} - {self.empresa_tel}", 0, 1, 'R')
-        self.ln(10) # Espacio después del cabecero
+        self.cell(120, 7, self.empresa_nombre, 0, 1, 'R')
+        
+        self.set_x(80)
+        self.cell(120, 7, f"{self.empresa_nit} - {self.empresa_tel}", 0, 1, 'R')
+        self.ln(15)
 
     def footer(self):
-        self.set_y(-15)
-        self.set_font('DejaVu', 'I', 8)
+        # ✅ MEJORA: Pie de página informativo con colores de marca
+        self.set_y(-20)
+        
+        # Línea superior de color
+        self.set_draw_color(*self.color_rojo_ferreinox)
+        self.set_line_width(1)
+        self.line(10, self.get_y(), 200, self.get_y())
+        self.ln(2)
+
+        self.set_font('DejaVu', '', 8)
         self.set_text_color(128, 128, 128)
+        
+        # Información de contacto en el pie de página
+        footer_text = f"{self.empresa_nombre}   |   {self.empresa_web}   |   {self.empresa_email}   |   {self.empresa_tel}"
+        self.cell(0, 10, footer_text, 0, 0, 'C')
+        
+        # Número de página
+        self.set_y(-12)
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     """Genera un PDF de Orden de Compra rediseñado y con datos dinámicos."""
     if df_seleccion.empty: return None
     
-    # ✅ MEJORA: Diccionarios para gestionar la información dinámica.
     DIRECCIONES_TIENDAS = {
-        'Armenia': 'Carrera 19 #11-05',
-        'Olaya': 'Carrera 13 #19-26',
-        'Manizales': 'Calle 16 #21-32',
-        'FerreBox': 'Calle 20 #12-32',
+        'Armenia': 'Carrera 19 11 05',
+        'Olaya': 'Carrera 13 19 26',
+        'Manizales': 'Calle 16 21 32',
+        'FerreBox': 'Calle 20 12 32',
     }
     CONTACTOS_PROVEEDOR = {
         'ABRACOL': 'Jhon Jairo Duque',
@@ -119,15 +146,12 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=25)
     
-    # --- BLOQUES DE INFORMACIÓN: PROVEEDOR, ENVÍO Y DATOS DE ORDEN ---
     pdf.set_font("DejaVu", 'B', 10)
     pdf.set_fill_color(240, 240, 240)
     
-    # Títulos
     pdf.cell(95, 7, "PROVEEDOR", 1, 0, 'C', 1)
     pdf.cell(95, 7, "ENVIAR A", 1, 1, 'C', 1)
 
-    # Contenido
     pdf.set_font("DejaVu", '', 9)
     y_start = pdf.get_y()
     proveedor_info = f"Razón Social: {proveedor_nombre}\nContacto: {contacto_proveedor}"
@@ -140,15 +164,13 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
     pdf.multi_cell(95, 7, envio_info, 1, 'L')
     pdf.ln(5)
 
-    # --- METADATOS DE LA ORDEN ---
     pdf.set_font("DejaVu", 'B', 10)
     pdf.cell(63, 7, f"ORDEN N°: {datetime.now().strftime('%Y%m%d-%H%M')}", 1, 0, 'C', 1)
     pdf.cell(64, 7, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 1, 0, 'C', 1)
     pdf.cell(63, 7, "CONDICIONES: NETO 30 DÍAS", 1, 1, 'C', 1)
     pdf.ln(10)
 
-    # --- TABLA DE ARTÍCULOS ---
-    pdf.set_fill_color(79, 129, 189)
+    pdf.set_fill_color(*pdf.color_rojo_ferreinox)
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("DejaVu", 'B', 9)
     pdf.cell(25, 8, 'Cód. Interno', 1, 0, 'C', 1)
@@ -307,6 +329,8 @@ with tab3:
     st.subheader("Sugerencias de Compra")
     df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
     if not df_plan_compras.empty:
+        # ✅ MEJORA: Se normaliza el nombre del proveedor para que coincida con el diccionario
+        df_plan_compras['Proveedor'] = df_plan_compras['Proveedor'].str.upper()
         proveedores_disponibles = ['Todos'] + sorted(df_plan_compras['Proveedor'].unique().tolist())
         selected_proveedor = st.selectbox("Filtrar por Proveedor para generar la orden:", proveedores_disponibles)
         if selected_proveedor != 'Todos':
@@ -316,7 +340,6 @@ with tab3:
         
     df_plan_compras_final = pd.DataFrame()
     if not df_plan_compras.empty:
-        # Se mueven los cálculos para después del editor
         df_plan_compras['Uds a Comprar'] = df_plan_compras['Sugerencia_Compra'].astype(int)
         df_plan_compras['Seleccionar'] = False 
         
@@ -326,9 +349,8 @@ with tab3:
         ]
         df_plan_compras_final = df_plan_compras.rename(columns={'Almacen_Nombre': 'Tienda'})[columnas_ordenadas]
     
-    c1, c2 = st.columns(2)
+    c1, c2 = st.columns([3, 1]) # Dar más espacio al botón de descarga de excel
     with c1:
-        # Se genera un excel base, sin el valor total que puede cambiar.
         excel_compras = generar_excel_dinamico(df_plan_compras_final.drop(columns=['Seleccionar', 'Costo_Promedio_UND'], errors='ignore'), "Plan de Compras")
         st.download_button("📥 Descargar Plan de Compras (Excel)", excel_compras, "Plan_Compras.xlsx")
 
@@ -337,7 +359,6 @@ with tab3:
     else:
         st.markdown("Marque los artículos y **ajuste las cantidades** que desea incluir en la orden de compra:")
         
-        # ✅ MEJORA: Habilitar la edición de 'Uds a Comprar'
         edited_df = st.data_editor(
             df_plan_compras_final, 
             hide_index=True, 
@@ -354,8 +375,8 @@ with tab3:
         
         df_seleccionados = edited_df[edited_df['Seleccionar']]
         
-        # ✅ MEJORA: Recalcular el valor total DESPUÉS de la edición
         if not df_seleccionados.empty:
+            df_seleccionados = df_seleccionados.copy() # Evitar SettingWithCopyWarning
             df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
         
         pdf_bytes = None
@@ -378,5 +399,4 @@ with tab3:
             st.warning("Por favor, seleccione un proveedor específico para generar la orden de compra.")
         
         if not df_seleccionados.empty:
-            # ✅ MEJORA: El total mostrado al usuario también se recalcula.
             st.info(f"**Total de la selección actual:** ${df_seleccionados['Valor de la Compra'].sum():,.0f}")
