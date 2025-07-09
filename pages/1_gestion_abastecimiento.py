@@ -24,25 +24,18 @@ def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto
     try:
         remitente = st.secrets["gmail"]["email"]
         password = st.secrets["gmail"]["password"]
-
         msg = MIMEMultipart()
-        msg['From'] = remitente
-        # ✅ MEJORA: El campo 'To' ahora une la lista de correos para mostrarse correctamente.
+        msg['From'] = f"Compras Ferreinox <{remitente}>"
         msg['To'] = ", ".join(destinatarios)
         msg['Subject'] = asunto
-
         msg.attach(MIMEText(cuerpo_html, 'html'))
-
         adjunto = MIMEApplication(datos_adjuntos, _subtype="pdf")
         adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_adjunto)
         msg.attach(adjunto)
-
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(remitente, password)
-            # ✅ MEJORA: Se envía el correo a la lista de destinatarios.
             server.sendmail(remitente, destinatarios, msg.as_string())
-        
         return True, "Correo enviado exitosamente."
     except Exception as e:
         return False, f"Error al enviar el correo: '{e}'. Revisa la configuración de 'secrets'."
@@ -54,7 +47,6 @@ def generar_link_whatsapp(numero, mensaje):
 
 @st.cache_data
 def generar_plan_traslados_inteligente(_df_analisis_maestro):
-    # (Sin cambios en esta función)
     if _df_analisis_maestro is None or _df_analisis_maestro.empty: return pd.DataFrame()
     df_origen = _df_analisis_maestro[_df_analisis_maestro['Excedente_Trasladable'] > 0].sort_values(by='Excedente_Trasladable', ascending=False).copy()
     df_destino = _df_analisis_maestro[_df_analisis_maestro['Necesidad_Total'] > 0].sort_values(by='Necesidad_Total', ascending=False).copy()
@@ -82,11 +74,14 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
-    # (Sin cambios en esta clase)
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.empresa_nombre = "Ferreinox SAS BIC"; self.empresa_nit = "NIT 901.349.073-1"; self.empresa_tel = "Tel: 312 7574279"
-        self.empresa_web = "www.ferreinox.co"; self.empresa_email = "compras@ferreinox.co"
+        self.empresa_nombre = "Ferreinox SAS BIC"
+        # ✅ MEJORA: NIT corregido
+        self.empresa_nit = "NIT 800.224.617"
+        self.empresa_tel = "Tel: 312 7574279"
+        self.empresa_web = "www.ferreinox.co"
+        self.empresa_email = "compras@ferreinox.co"
         self.color_rojo_ferreinox = (212, 32, 39); self.color_gris_oscuro = (68, 68, 68); self.color_azul_oscuro = (79, 129, 189)
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf'); self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf')
@@ -106,7 +101,6 @@ class PDF(FPDF):
         self.cell(0, 10, footer_text, 0, 0, 'C'); self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, direccion_entrega, contacto_proveedor):
-    # (Sin cambios en esta función)
     if df_seleccion.empty: return None
     pdf = PDF()
     pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=25)
@@ -152,7 +146,6 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
 
 @st.cache_data
 def generar_excel_dinamico(df, nombre_hoja):
-    # (Sin cambios en esta función)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         if df.empty:
@@ -193,17 +186,17 @@ selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, de
 df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
 
 DIRECCIONES_TIENDAS = {'Armenia': 'Carrera 19 11 05', 'Olaya': 'Carrera 13 19 26', 'Manizales': 'Calle 16 21 32', 'FerreBox': 'Calle 20 12 32'}
-# ✅ MEJORA: Se añade el celular a los datos del proveedor.
+
+# ✅ MEJORA: Datos de contacto y celulares actualizados.
 CONTACTOS_PROVEEDOR = {
-    'ABRACOL': {'nombre': 'Jhon Jairo Duque', 'celular': '573001234567'},
-    'SAINT GOBAIN': {'nombre': 'Sara Corrales', 'celular': '573011234567'},
-    'GOYA': {'nombre': 'Julian Nañes', 'celular': '573021234567'},
-    'YALE': {'nombre': 'Juan Carlos Gutierrez', 'celular': '573031234567'},
+    'ABRACOL': {'nombre': 'JHON JAIRO DUQUE', 'celular': '573113032448'},
+    'SAINT GOBAIN': {'nombre': 'SARA LARA', 'celular': '573165257917'},
+    'GOYA': {'nombre': 'JULIAN NAÑES', 'celular': '573208334589'},
+    'YALE': {'nombre': 'JUAN CARLOS MARTINEZ', 'celular': '573208130893'},
 }
 
 tab1, tab2, tab3 = st.tabs(["📊 Diagnóstico General", "🔄 Plan de Traslados", "🛒 Plan de Compras"])
 
-# ... (El código de las pestañas 1 y 2 no cambia, se incluye completo al final)
 with tab1:
     st.subheader(f"Diagnóstico para: {selected_almacen_nombre}")
     necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
@@ -304,8 +297,6 @@ with tab3:
                     tienda_entrega_asig = 'FerreBox'
                 
                 direccion_entrega_asig = DIRECCIONES_TIENDAS.get(tienda_entrega_asig, "N/A")
-                
-                # ✅ MEJORA: Obtener nombre y celular del diccionario anidado.
                 info_proveedor = CONTACTOS_PROVEEDOR.get(selected_proveedor_asignado, {})
                 contacto_proveedor_asig = info_proveedor.get('nombre', '')
                 celular_proveedor_asig = info_proveedor.get('celular', '')
@@ -323,12 +314,10 @@ with tab3:
                         if email_dest_asignado:
                             with st.spinner("Enviando correo..."):
                                 email_string = email_dest_asignado.replace(';', ',')
-                                lista_destinatarios = [email.strip() for email in email_string.split(',')]
-
+                                lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
                                 asunto = f"Nueva Orden de Compra de Ferreinox SAS BIC - {selected_proveedor_asignado}"
                                 cuerpo_html = f"<html><body><p>Estimados Sres. {selected_proveedor_asignado},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_entrega_asig}<br><b>Dirección:</b> {direccion_entrega_asig}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
                                 nombre_archivo = f"OC_Ferreinox_{selected_proveedor_asignado.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-                                
                                 enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, pdf_bytes_asignado)
                                 if enviado:
                                     st.success(mensaje)
@@ -389,7 +378,7 @@ with tab3:
                         pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, "")
 
                         email_destinatario_sp = st.text_input("📧 Correo(s) del nuevo proveedor (separados por coma):", key="email_sp")
-                        celular_destinatario_sp = st.text_input("📲 Celular del nuevo proveedor (Ej: 573001234567):", key="cel_sp")
+                        celular_destinatario_sp = st.text_input("📲 Celular del nuevo proveedor (sin el 57):", key="cel_sp", help="Ej: 3001234567")
 
                         sp_c1, sp_c2, sp_c3 = st.columns(3)
                         with sp_c1:
@@ -399,16 +388,19 @@ with tab3:
                                 if email_destinatario_sp:
                                     with st.spinner("Enviando correo..."):
                                         email_string_sp = email_destinatario_sp.replace(';', ',')
-                                        lista_destinatarios_sp = [email.strip() for email in email_string_sp.split(',')]
+                                        lista_destinatarios_sp = [email.strip() for email in email_string_sp.split(',') if email.strip()]
                                         asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
-                                        cuerpo_html_sp = f"<html><body>...</body></html>" # Similar al anterior
+                                        cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
                                         nombre_archivo_sp = f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf"
                                         enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp)
                                         if enviado_sp:
                                             st.success(mensaje_sp)
                                             if celular_destinatario_sp:
-                                                mensaje_wpp_sp = f"Hola {nuevo_proveedor_nombre}, te acabamos de enviar una Orden de Compra al correo. ¡Gracias!"
-                                                link_wpp_sp = generar_link_whatsapp(celular_destinatario_sp, mensaje_wpp_sp)
+                                                numero_completo = celular_destinatario_sp.strip()
+                                                if not numero_completo.startswith('57'):
+                                                    numero_completo = '57' + numero_completo
+                                                mensaje_wpp_sp = f"Hola {nuevo_proveedor_nombre}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
+                                                link_wpp_sp = generar_link_whatsapp(numero_completo, mensaje_wpp_sp)
                                                 st.link_button("📲 Notificar por WhatsApp (SP)", link_wpp_sp, use_container_width=True)
                                         else:
                                             st.error(mensaje_sp)
