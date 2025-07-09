@@ -53,39 +53,130 @@ def generar_plan_traslados_inteligente(_df_analisis_maestro):
     return df_resultado.sort_values(by=['Valor del Traslado', 'Segmento_ABC'], ascending=[False, True])
 
 class PDF(FPDF):
+    """Clase PDF mejorada para un look más profesional."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Puedes establecer aquí variables para toda la clase
+        self.empresa_nombre = "Nombre de Tu Empresa" # Tu empresa
+        self.empresa_nit = "NIT 123.456.789-0"
+        self.empresa_contacto = "Tel: 300 123 4567 / email: compras@tuempresa.com"
+
     def header(self):
-        self.set_font('Arial', 'B', 20); self.cell(80); self.cell(30, 10, 'Orden de Compra', 0, 0, 'C'); self.ln(25)
+        # Logo de la empresa (opcional pero recomendado)
+        # self.image('tu_logo.png', 10, 8, 33) # Descomenta y ajusta si tienes un logo
+        self.set_font('Arial', 'B', 24)
+        self.set_text_color(79, 129, 189) # Color azul corporativo
+        self.cell(0, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
+        self.set_font('Arial', 'I', 10)
+        self.set_text_color(128, 128, 128) # Gris para texto secundario
+        self.cell(0, 6, f"{self.empresa_nombre} - {self.empresa_nit}", 0, 1, 'R')
+        self.ln(15) # Espacio extra después del cabecero
+
     def footer(self):
-        self.set_y(-15); self.set_font('Arial', 'I', 8); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.set_y(-20) # Posición a 2 cm del final
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(128, 128, 128)
+        self.multi_cell(0, 5, f"Esta orden de compra es un documento oficial de {self.empresa_nombre}. Para cualquier duda, contactar a: {self.empresa_contacto}", 0, 'C')
+        self.cell(0, 5, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre):
+    """
+    Genera un PDF de Orden de Compra con un diseño mejorado.
+    Incluye la dirección de entrega del almacén seleccionado.
+    """
     if df_seleccion.empty: return None
-    tu_empresa, tu_nit, tu_direccion, tu_contacto = "Nombre de Tu Empresa", "NIT 123.456.789-0", "Carrera 1 # 2-3, Ciudad", "Tel: 300 123 4567"
-    pdf = PDF(); pdf.add_page()
-    pdf.set_font("Arial", 'B', 11); pdf.cell(130, 8, f"De: {tu_empresa}", 0, 0); pdf.cell(60, 8, f"ORDEN N°: {datetime.now().strftime('%Y%m%d-%H%M')}", 0, 1)
-    pdf.set_font("Arial", '', 11); pdf.cell(130, 6, tu_nit, 0, 0); pdf.cell(60, 6, f"Fecha: {datetime.now().strftime('%d/%m/%Y')}", 0, 1)
-    pdf.cell(130, 6, tu_direccion, 0, 1); pdf.cell(130, 6, tu_contacto, 0, 1); pdf.ln(10)
-    pdf.set_font("Arial", 'B', 10); pdf.cell(95, 7, "PROVEEDOR:", 1, 0, 'C'); pdf.cell(95, 7, "ENVIAR A:", 1, 1, 'C')
-    pdf.set_font("Arial", '', 10); pdf.cell(95, 7, f" {proveedor_nombre}", 1, 0); pdf.cell(95, 7, f" {tu_empresa} - {tienda_nombre}", 1, 1)
-    pdf.cell(95, 7, " ", 1, 0); pdf.cell(95, 7, f" {tu_direccion}", 1, 1); pdf.ln(10)
-    pdf.set_fill_color(230, 230, 230); pdf.set_font("Arial", 'B', 9)
-    pdf.cell(35, 8, 'Cód. Proveedor', 1, 0, 'C', 1); pdf.cell(30, 8, 'Cód. Interno', 1, 0, 'C', 1); pdf.cell(65, 8, 'Descripción', 1, 0, 'C', 1)
-    pdf.cell(15, 8, 'Cant.', 1, 0, 'C', 1); pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1); pdf.cell(20, 8, 'Total', 1, 1, 'C', 1)
-    pdf.set_font("Arial", '', 9); subtotal = 0
+
+    # --- DATOS DE LA EMPRESA Y TIENDA ---
+    # Idealmente, la dirección de la tienda vendría en el dataframe.
+    # Por ahora, usamos placeholders que puedes adaptar.
+    tu_empresa_direccion_fiscal = "Carrera Fiscal # 1-23, Ciudad Principal"
+    # Placeholder para la dirección de la tienda de entrega
+    direccion_entrega = f"Bodega {tienda_nombre}, Zona Industrial, Ciudad"
+
+    pdf = PDF() # Usamos nuestra clase PDF mejorada
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=25)
+
+    # --- BLOQUES DE INFORMACIÓN: PROVEEDOR Y ENTREGA ---
+    pdf.set_font("Arial", 'B', 11)
+    # Bloque Proveedor
+    pdf.cell(95, 8, "PROVEEDOR:", 0, 0, 'L')
+    # Bloque Envío
+    pdf.cell(95, 8, "ENVIAR A:", 0, 1, 'L')
+    
+    pdf.set_font("Arial", '', 10)
+    line_height = 6
+    # Usamos get_y para alinear verticalmente los bloques si tienen alturas diferentes
+    y_start = pdf.get_y()
+    pdf.multi_cell(95, line_height, f"{proveedor_nombre}\n[NIT/ID del Proveedor]\n[Dirección del Proveedor]\n[Contacto del Proveedor]", border=1, ln=3)
+    pdf.set_y(y_start) # Volver al inicio Y
+    pdf.set_x(105) # Mover a la segunda columna
+    pdf.multi_cell(95, line_height, f"{pdf.empresa_nombre} - Sede {tienda_nombre}\n{direccion_entrega}\nRecibe: [Nombre de contacto en tienda]\nTel: [Teléfono de la tienda]", border=1, ln=3)
+    pdf.ln(5)
+
+    # --- METADATOS DE LA ORDEN ---
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(60, 8, f"N° ORDEN: {datetime.now().strftime('%Y%m%d-%H%M')}", 0, 0)
+    pdf.cell(60, 8, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 0, 0)
+    pdf.cell(70, 8, "CONDICIONES: NETO 30 DÍAS", 0, 1, 'R') # Ejemplo de condición
+    pdf.ln(10)
+
+    # --- TABLA DE ARTÍCULOS ---
+    pdf.set_fill_color(79, 129, 189) # Azul corporativo para el header de la tabla
+    pdf.set_text_color(255, 255, 255) # Texto blanco
+    pdf.set_font("Arial", 'B', 9)
+    pdf.cell(30, 8, 'Cód. Interno', 1, 0, 'C', 1)
+    pdf.cell(25, 8, 'Cód. Prov.', 1, 0, 'C', 1)
+    pdf.cell(70, 8, 'Descripción del Producto', 1, 0, 'C', 1)
+    pdf.cell(15, 8, 'Cant.', 1, 0, 'C', 1)
+    pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1)
+    pdf.cell(25, 8, 'Costo Total', 1, 1, 'C', 1)
+
+    pdf.set_font("Arial", '', 9)
+    pdf.set_text_color(0, 0, 0) # Texto negro
+    subtotal = 0
     for _, row in df_seleccion.iterrows():
-        costo_total_item = row['Uds a Comprar'] * row['Costo_Promedio_UND']; subtotal += costo_total_item
-        x, y = pdf.get_x(), pdf.get_y()
-        pdf.multi_cell(35, 8, str(row['SKU_Proveedor']), 1, 'L'); pdf.set_xy(x + 35, y)
-        pdf.multi_cell(30, 8, str(row['SKU']), 1, 'L'); pdf.set_xy(x + 65, y)
-        pdf.multi_cell(65, 8, row['Descripcion'], 1, 'L'); pdf.set_xy(x + 130, y)
-        pdf.multi_cell(15, 8, str(row['Uds a Comprar']), 1, 'C'); pdf.set_xy(x + 145, y)
-        pdf.multi_cell(25, 8, f"${row['Costo_Promedio_UND']:,.2f}", 1, 'R'); pdf.set_xy(x + 170, y)
-        pdf.multi_cell(20, 8, f"${costo_total_item:,.2f}", 1, 'R')
-    iva_porcentaje, iva_valor = 0.19, subtotal * 0.19; total_general = subtotal + iva_valor
-    pdf.set_font("Arial", '', 10); pdf.cell(145, 8, 'Subtotal', 1, 0, 'R'); pdf.cell(45, 8, f"${subtotal:,.2f}", 1, 1, 'R')
-    pdf.cell(145, 8, f'IVA ({iva_porcentaje*100:.0f}%)', 1, 0, 'R'); pdf.cell(45, 8, f"${iva_valor:,.2f}", 1, 1, 'R')
-    pdf.set_font("Arial", 'B', 11); pdf.cell(145, 8, 'TOTAL GENERAL', 1, 0, 'R'); pdf.cell(45, 8, f"${total_general:,.2f}", 1, 1, 'R')
-    return pdf.output()
+        costo_total_item = row['Uds a Comprar'] * row['Costo_Promedio_UND']
+        subtotal += costo_total_item
+        
+        # Lógica de MultiCell para descripciones largas
+        x_start, y_start = pdf.get_x(), pdf.get_y()
+        # Celda 1: SKU Interno
+        pdf.multi_cell(30, 8, str(row['SKU']), 1, 'L')
+        pdf.set_xy(x_start + 30, y_start)
+        # Celda 2: SKU Proveedor
+        pdf.multi_cell(25, 8, str(row['SKU_Proveedor']), 1, 'L')
+        pdf.set_xy(x_start + 55, y_start)
+        # Celda 3: Descripción (puede ocupar varias líneas)
+        pdf.multi_cell(70, 8, row['Descripcion'], 1, 'L')
+        # Guardamos la altura de la fila, que es la máxima altura de las celdas
+        y_end_desc = pdf.get_y()
+        row_height = y_end_desc - y_start
+        # Posicionamos el resto de las celdas alineadas con la fila
+        pdf.set_xy(x_start + 125, y_start)
+        pdf.multi_cell(15, row_height, str(row['Uds a Comprar']), 1, 'C')
+        pdf.set_xy(x_start + 140, y_start)
+        pdf.multi_cell(25, row_height, f"${row['Costo_Promedio_UND']:,.2f}", 1, 'R')
+        pdf.set_xy(x_start + 165, y_start)
+        pdf.multi_cell(25, row_height, f"${costo_total_item:,.2f}", 1, 'R')
+        pdf.set_y(y_end_desc) # Asegurar que la siguiente fila empiece correctamente
+    
+    # --- CÁLCULO DE TOTALES ---
+    iva_porcentaje, iva_valor = 0.19, subtotal * 0.19
+    total_general = subtotal + iva_valor
+    
+    # --- BLOQUE DE TOTALES ---
+    # Mover a la derecha para alinear el bloque de totales
+    pdf.set_x(110)
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(55, 8, 'Subtotal:', 1, 0, 'R'); pdf.cell(35, 8, f"${subtotal:,.2f}", 1, 1, 'R')
+    pdf.set_x(110)
+    pdf.cell(55, 8, f'IVA ({iva_porcentaje*100:.0f}%):', 1, 0, 'R'); pdf.cell(35, 8, f"${iva_valor:,.2f}", 1, 1, 'R')
+    pdf.set_x(110)
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
+    
+    return pdf.output(dest='S').encode('latin-1')
 
 @st.cache_data
 def generar_excel_dinamico(df, nombre_hoja):
@@ -232,21 +323,37 @@ else:
             
             df_seleccionados = edited_df[edited_df['Seleccionar']]
             
-            # Lógica para manejar el estado del botón de PDF
+            # --- LÓGICA MEJORADA PARA MANEJAR EL ESTADO DEL BOTÓN PDF ---
+            # 1. Se generan los bytes del PDF solo si las condiciones son válidas.
+            # 2. Si no, la variable `pdf_bytes` será None.
+            # 3. Este cambio previene que el estado `pdf_bytes` de una sesión anterior
+            #    permanezca activo cuando ya no es válido.
+            pdf_bytes = None
             if not df_seleccionados.empty and selected_proveedor != 'Todos':
-                st.session_state.pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, selected_almacen_nombre)
-            else:
-                st.session_state.pdf_bytes = None
+                # La tienda de entrega es la que está seleccionada en el filtro principal.
+                # Si es la vista consolidada, se debe escoger una tienda. Aquí asumimos
+                # que una orden de compra se genera para UNA tienda de entrega.
+                tienda_de_entrega = selected_almacen_nombre
+                if tienda_de_entrega == opcion_consolidado:
+                    # Si el usuario está en modo consolidado, toma la primera tienda de la selección como destino.
+                    # Una mejora sería permitirle al usuario escoger la tienda de destino aquí.
+                    tienda_de_entrega = df_seleccionados['Tienda'].iloc[0]
+                
+                pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, tienda_de_entrega)
 
             with c2:
+                # 4. El botón de descarga ahora recibe `pdf_bytes` (que puede ser None).
+                #    Le pasamos bytes vacíos `b""` si es None para evitar el error.
+                # 5. La condición `disabled` ahora es más simple y segura.
                 st.download_button(
-                    "📄 Generar Orden de Compra (PDF)",
-                    data=st.session_state.get('pdf_bytes', b""),
+                    label="📄 Generar Orden de Compra (PDF)",
+                    data=pdf_bytes if pdf_bytes else b"",
                     file_name=f"OC_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
                     mime="application/pdf",
-                    disabled=st.session_state.get('pdf_bytes') is None)
+                    disabled=pdf_bytes is None)
             
             if selected_proveedor == 'Todos' and not df_seleccionados.empty:
                 st.warning("Por favor, seleccione un proveedor específico para generar la orden de compra.")
+            
             if not df_seleccionados.empty:
                 st.info(f"**Total de la selección actual:** ${df_seleccionados['Valor de la Compra'].sum():,.0f}")
