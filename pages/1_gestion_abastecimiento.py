@@ -145,7 +145,7 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
         subtotal += costo_total_item
         x_start, y_start = pdf.get_x(), pdf.get_y()
         pdf.multi_cell(25, 8, str(row['SKU']), 1, 'L'); pdf.set_xy(x_start + 25, y_start)
-        pdf.multi_cell(30, 8, str(row.get('SKU_Proveedor', 'N/A')), 1, 'L'); pdf.set_xy(x_start + 55, y_start) # Uso de .get para seguridad
+        pdf.multi_cell(30, 8, str(row.get('SKU_Proveedor', 'N/A')), 1, 'L'); pdf.set_xy(x_start + 55, y_start) 
         pdf.multi_cell(70, 8, row['Descripcion'], 1, 'L')
         y_end_desc = pdf.get_y(); row_height = y_end_desc - y_start
         pdf.set_xy(x_start + 125, y_start); pdf.multi_cell(15, row_height, str(int(row['Uds a Comprar'])), 1, 'C')
@@ -502,14 +502,10 @@ with tab3:
 
     st.markdown("---")
     
-    # --- CÓDIGO MEJORADO ---
-    # La lógica de esta sección ha sido reescrita para agrupar por SKU y mostrar Stock y Sugerencia total.
-    
-    with st.expander("🆕 **Compras Especiales (Búsqueda Inteligente y Manual)**", expanded=False):
+    with st.expander("🆕 **Compras Especiales (Búsqueda Inteligente y Manual)**", expanded=True):
         if 'compra_especial_items' not in st.session_state:
             st.session_state.compra_especial_items = []
 
-        # 1. BUSCADOR INTELIGENTE
         st.markdown("##### 1. Buscar productos para añadir a la Orden de Compra")
         search_term_sp = st.text_input("Buscar cualquier producto por SKU o Descripción:", key="search_sp")
         
@@ -519,7 +515,6 @@ with tab3:
             df_resultados_raw = df_maestro[mask_sp]
 
             if not df_resultados_raw.empty:
-                # ✅ AGRUPAR POR SKU PARA MOSTRAR RESULTADOS ÚNICOS
                 df_resultados_sp = df_resultados_raw.groupby('SKU').agg(
                     Descripcion=('Descripcion', 'first'),
                     SKU_Proveedor=('SKU_Proveedor', 'first'),
@@ -528,14 +523,13 @@ with tab3:
                     Costo_Promedio_UND=('Costo_Promedio_UND', 'mean') 
                 ).reset_index()
 
-                # ✅ PRE-RELLENAR CANTIDAD A COMPRAR CON SUGERENCIA SI EXISTE
                 df_resultados_sp['Uds a Comprar'] = df_resultados_sp['Sugerencia_Compra'].apply(lambda x: int(x) if x > 0 else 1)
                 df_resultados_sp['Seleccionar'] = False
                 
                 st.markdown("Resultados de la búsqueda (agrupados por producto):")
                 
-                # ✅ MOSTRAR NUEVAS COLUMNAS EN LA TABLA
-                columnas_sp = ['Seleccionar', 'SKU', 'Descripcion', 'Stock', 'Sugerencia_Compra', 'Uds a Comprar', 'Costo_Promedio_UND']
+                # ✅ CORRECCIÓN: Añadir 'SKU_Proveedor' a la lista de columnas para evitar el KeyError.
+                columnas_sp = ['Seleccionar', 'SKU', 'Descripcion', 'SKU_Proveedor', 'Stock', 'Sugerencia_Compra', 'Uds a Comprar', 'Costo_Promedio_UND']
                 
                 edited_df_sp = st.data_editor(
                     df_resultados_sp[columnas_sp],
@@ -546,7 +540,8 @@ with tab3:
                         "Uds a Comprar": st.column_config.NumberColumn("Cant. a Comprar", min_value=1, step=1),
                         "Seleccionar": st.column_config.CheckboxColumn(required=True)
                     },
-                    disabled=['SKU', 'Descripcion', 'Stock', 'Sugerencia_Compra', 'Costo_Promedio_UND']
+                    # ✅ CORRECCIÓN: Añadir 'SKU_Proveedor' a la lista de columnas deshabilitadas.
+                    disabled=['SKU', 'Descripcion', 'SKU_Proveedor', 'Stock', 'Sugerencia_Compra', 'Costo_Promedio_UND']
                 )
 
                 df_para_anadir_sp = edited_df_sp[edited_df_sp['Seleccionar']]
@@ -554,7 +549,7 @@ with tab3:
                 if st.button("➕ Añadir seleccionados a la Orden", key="btn_anadir_compra_sp"):
                     tienda_destino_compra = selected_almacen_nombre if selected_almacen_nombre != opcion_consolidado else 'FerreBox'
                     for _, row in df_para_anadir_sp.iterrows():
-                        item_id = f"{row['SKU']}_{tienda_destino_compra}" # ID único para el carrito
+                        item_id = f"{row['SKU']}_{tienda_destino_compra}"
                         if not any(item['id'] == item_id for item in st.session_state.compra_especial_items):
                             st.session_state.compra_especial_items.append({
                                 'id': item_id,
@@ -570,7 +565,6 @@ with tab3:
             else:
                 st.warning("No se encontraron productos con ese criterio de búsqueda.")
 
-        # 2. MOSTRAR LA ORDEN DE COMPRA EN CONSTRUCCIÓN (CARRITO)
         if st.session_state.compra_especial_items:
             st.markdown("---")
             st.markdown("##### 2. Orden de Compra Actual")
@@ -587,7 +581,6 @@ with tab3:
                 st.session_state.compra_especial_items = []
                 st.rerun()
 
-            # 3. DATOS DEL PROVEEDOR Y ACCIONES FINALES
             st.markdown("---")
             st.markdown("##### 3. Ingresar Datos del Proveedor y Finalizar")
             
