@@ -528,7 +528,6 @@ with tab3:
                 
                 st.markdown("Resultados de la búsqueda (agrupados por producto):")
                 
-                # ✅ CORRECCIÓN: Añadir 'SKU_Proveedor' a la lista de columnas para evitar el KeyError.
                 columnas_sp = ['Seleccionar', 'SKU', 'Descripcion', 'SKU_Proveedor', 'Stock', 'Sugerencia_Compra', 'Uds a Comprar', 'Costo_Promedio_UND']
                 
                 edited_df_sp = st.data_editor(
@@ -540,16 +539,15 @@ with tab3:
                         "Uds a Comprar": st.column_config.NumberColumn("Cant. a Comprar", min_value=1, step=1),
                         "Seleccionar": st.column_config.CheckboxColumn(required=True)
                     },
-                    # ✅ CORRECCIÓN: Añadir 'SKU_Proveedor' a la lista de columnas deshabilitadas.
                     disabled=['SKU', 'Descripcion', 'SKU_Proveedor', 'Stock', 'Sugerencia_Compra', 'Costo_Promedio_UND']
                 )
 
                 df_para_anadir_sp = edited_df_sp[edited_df_sp['Seleccionar']]
                 
                 if st.button("➕ Añadir seleccionados a la Orden", key="btn_anadir_compra_sp"):
-                    tienda_destino_compra = selected_almacen_nombre if selected_almacen_nombre != opcion_consolidado else 'FerreBox'
                     for _, row in df_para_anadir_sp.iterrows():
-                        item_id = f"{row['SKU']}_{tienda_destino_compra}"
+                        # ✅ CORRECCIÓN: Se usa el SKU como ID único. La tienda se decide después.
+                        item_id = row['SKU']
                         if not any(item['id'] == item_id for item in st.session_state.compra_especial_items):
                             st.session_state.compra_especial_items.append({
                                 'id': item_id,
@@ -558,7 +556,6 @@ with tab3:
                                 'Descripcion': row['Descripcion'],
                                 'Uds a Comprar': row['Uds a Comprar'],
                                 'Costo_Promedio_UND': row['Costo_Promedio_UND'],
-                                'Tienda': tienda_destino_compra
                             })
                     st.success(f"{len(df_para_anadir_sp)} producto(s) añadidos. Puedes seguir buscando y añadiendo más.")
                     st.rerun()
@@ -569,7 +566,22 @@ with tab3:
             st.markdown("---")
             st.markdown("##### 2. Orden de Compra Actual")
             
+            # Construir el DF base desde el session_state
             df_seleccionados_sp = pd.DataFrame(st.session_state.compra_especial_items)
+            
+            # ✅ CORRECCIÓN: Añadir selector de tienda para la orden de compra especial
+            st.markdown("###### Seleccione la Tienda de Destino para esta Orden de Compra")
+            lista_tiendas_validas = sorted([t for t in df_maestro['Almacen_Nombre'].unique() if t != opcion_consolidado])
+            tienda_de_entrega_sp = st.selectbox(
+                "📍 Enviar esta orden de compra a:",
+                lista_tiendas_validas,
+                key="tienda_destino_sp"
+            )
+
+            # Asignar la tienda seleccionada y mostrarla en la tabla
+            if tienda_de_entrega_sp:
+                df_seleccionados_sp['Tienda'] = tienda_de_entrega_sp
+            
             df_seleccionados_sp['Valor de la Compra'] = df_seleccionados_sp['Uds a Comprar'] * df_seleccionados_sp['Costo_Promedio_UND']
             
             st.dataframe(df_seleccionados_sp[['Tienda', 'SKU', 'Descripcion', 'Uds a Comprar', 'Costo_Promedio_UND', 'Valor de la Compra']], use_container_width=True)
@@ -593,7 +605,6 @@ with tab3:
                 celular_destinatario_sp = st.text_input("📲 Celular para notificar por WhatsApp:", key="cel_sp", help="Ingresar solo el número, ej: 3001234567")
 
             if nuevo_proveedor_nombre:
-                tienda_de_entrega_sp = df_seleccionados_sp['Tienda'].iloc[0]
                 direccion_entrega_sp = DIRECCIONES_TIENDAS.get(tienda_de_entrega_sp, "N/A")
                 
                 pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, contacto_proveedor_sp)
