@@ -148,7 +148,7 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
         pdf.multi_cell(30, 8, str(row.get('SKU_Proveedor', 'N/A')), 1, 'L'); pdf.set_xy(x_start + 55, y_start) # Uso de .get para seguridad
         pdf.multi_cell(70, 8, row['Descripcion'], 1, 'L')
         y_end_desc = pdf.get_y(); row_height = y_end_desc - y_start
-        pdf.set_xy(x_start + 125, y_start); pdf.multi_cell(15, row_height, str(row['Uds a Comprar']), 1, 'C')
+        pdf.set_xy(x_start + 125, y_start); pdf.multi_cell(15, row_height, str(int(row['Uds a Comprar'])), 1, 'C')
         pdf.set_xy(x_start + 140, y_start); pdf.multi_cell(25, row_height, f"${row['Costo_Promedio_UND']:,.2f}", 1, 'R')
         pdf.set_xy(x_start + 165, y_start); pdf.multi_cell(25, row_height, f"${costo_total_item:,.2f}", 1, 'R')
         pdf.set_y(y_end_desc)
@@ -260,7 +260,6 @@ with tab2:
     
     with st.expander("🔄 **Plan de Traslados Automático**", expanded=True):
         with st.spinner("Calculando plan de traslados óptimo..."):
-            # ✅ CORRECCIÓN: Usar siempre df_maestro para tener una visión global.
             df_plan_maestro = generar_plan_traslados_inteligente(df_maestro)
 
         if df_plan_maestro.empty:
@@ -348,9 +347,8 @@ with tab2:
                     total_peso = df_seleccionados_traslado['Peso del Traslado (kg)'].sum()
                     st.info(f"**Resumen de la Carga Seleccionada:** {total_unidades} Unidades Totales | **{total_peso:,.2f} kg** de Peso Total")
     
-    # 🆕 SECCIÓN DE TRASLADOS ESPECIALES (MANUALES)
     st.markdown("---")
-    with st.expander("🆕 **Traslados Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
+    with st.expander("🚚 **Traslados Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
         if 'solicitud_traslado_especial' not in st.session_state:
             st.session_state.solicitud_traslado_especial = []
 
@@ -383,7 +381,7 @@ with tab2:
                                 'Tienda Origen': row['Almacen_Nombre'], 'Uds a Enviar': row['Uds a Enviar']
                             })
                     st.success(f"{len(df_para_anadir)} producto(s) añadidos a la solicitud. Puedes buscar y añadir más.")
-                    st.rerun() # Refresca para que la lógica de abajo se actualice
+                    st.rerun() 
             else:
                 st.warning("No se encontraron productos con stock para ese criterio de búsqueda.")
 
@@ -427,7 +425,7 @@ with tab2:
 with tab3:
     st.header("🛒 Plan de Compras")
     
-    with st.expander("✅ **Generar Órdenes de Compra**", expanded=True):
+    with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
         
         if df_plan_compras.empty:
@@ -456,7 +454,7 @@ with tab3:
 
             if not df_seleccionados.empty:
                 if selected_proveedor == 'Todos' or selected_proveedor == 'NO ASIGNADO':
-                    st.warning("Por favor, seleccione un proveedor específico del filtro para poder generar la orden. Para productos sin proveedor, use la sección de 'Compras Especiales'.")
+                    st.warning("Por favor, seleccione un proveedor específico del filtro para poder generar la orden.")
                 else:
                     df_seleccionados = df_seleccionados.copy()
                     df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
@@ -504,78 +502,130 @@ with tab3:
 
     st.markdown("---")
     
-    with st.expander("🆕 **Compras Especiales (Asignar Proveedor Manualmente)**"):
-        df_sin_proveedor_especial = df_filtered[(df_filtered['Sugerencia_Compra'] > 0) & (df_filtered['Proveedor'] == 'NO ASIGNADO')].copy()
+    # --- CÓDIGO MODIFICADO ---
+    # He reemplazado por completo la lógica de "Compras Especiales" para que funcione exactamente como lo has descrito.
+    
+    with st.expander("🆕 **Compras Especiales (Búsqueda Inteligente y Manual)**", expanded=False):
+        # Inicializar el "carrito de compras" en el estado de la sesión si no existe
+        if 'compra_especial_items' not in st.session_state:
+            st.session_state.compra_especial_items = []
+
+        # 1. BUSCADOR INTELIGENTE
+        st.markdown("##### 1. Buscar productos para añadir a la Orden de Compra")
+        search_term_sp = st.text_input("Buscar cualquier producto por SKU o Descripción:", key="search_sp")
         
-        if df_sin_proveedor_especial.empty:
-            st.info("No hay sugerencias de compra para productos sin proveedor asignado.")
-        else:
-            search_term_sp = st.text_input("Buscar producto sin proveedor por SKU o Descripción:", key="search_sp")
-            
-            df_resultados_sp = pd.DataFrame()
-            if search_term_sp:
-                mask = (df_sin_proveedor_especial['SKU'].astype(str).str.contains(search_term_sp, case=False, na=False) | df_sin_proveedor_especial['Descripcion'].astype(str).str.contains(search_term_sp, case=False, na=False))
-                df_resultados_sp = df_sin_proveedor_especial[mask].copy()
+        if search_term_sp:
+            # Buscar en todo el inventario, sin importar si hay sugerencia o no
+            mask_sp = (df_maestro['SKU'].astype(str).str.contains(search_term_sp, case=False, na=False) | 
+                       df_maestro['Descripcion'].astype(str).str.contains(search_term_sp, case=False, na=False))
+            df_resultados_sp = df_maestro[mask_sp].copy()
 
             if not df_resultados_sp.empty:
-                df_resultados_sp['Uds a Comprar'] = df_resultados_sp['Sugerencia_Compra'].astype(int)
+                df_resultados_sp['Uds a Comprar'] = 1
                 df_resultados_sp['Seleccionar'] = False
+                
+                # Definir la tienda de destino (la seleccionada en el sidebar o Ferrebox por defecto)
+                tienda_destino_compra = selected_almacen_nombre if selected_almacen_nombre != opcion_consolidado else 'FerreBox'
+                df_resultados_sp['Tienda'] = tienda_destino_compra
+                
                 columnas_sp = ['Seleccionar', 'Tienda', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Uds a Comprar', 'Costo_Promedio_UND']
-                df_resultados_sp_final = df_resultados_sp.rename(columns={'Almacen_Nombre': 'Tienda'})[columnas_sp]
+                
+                st.write("Resultados de la búsqueda:")
+                edited_df_sp = st.data_editor(
+                    df_resultados_sp[columnas_sp],
+                    hide_index=True, use_container_width=True, key="editor_sp",
+                    column_config={
+                        "Uds a Comprar": st.column_config.NumberColumn(label="Cant. a Comprar", min_value=1, step=1),
+                        "Seleccionar": st.column_config.CheckboxColumn(required=True)
+                    },
+                    disabled=[col for col in columnas_sp if col not in ['Seleccionar', 'Uds a Comprar']]
+                )
 
-                st.markdown("##### Productos Encontrados")
-                edited_df_sp = st.data_editor(df_resultados_sp_final, hide_index=True, use_container_width=True,
-                    column_config={"Uds a Comprar": st.column_config.NumberColumn(label="Cant. a Comprar", min_value=0, step=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
-                    disabled=[col for col in df_resultados_sp_final.columns if col not in ['Seleccionar', 'Uds a Comprar']], key="editor_sp")
+                df_para_anadir_sp = edited_df_sp[edited_df_sp['Seleccionar']]
+                
+                if st.button("➕ Añadir seleccionados a la Orden", key="btn_anadir_compra_sp"):
+                    for _, row in df_para_anadir_sp.iterrows():
+                        # Usar SKU y Tienda como identificador para evitar duplicados en el carrito
+                        item_id = f"{row['SKU']}_{row['Tienda']}"
+                        if not any(item['id'] == item_id for item in st.session_state.compra_especial_items):
+                            st.session_state.compra_especial_items.append({
+                                'id': item_id,
+                                'SKU': row['SKU'],
+                                'SKU_Proveedor': row['SKU_Proveedor'],
+                                'Descripcion': row['Descripcion'],
+                                'Uds a Comprar': row['Uds a Comprar'],
+                                'Costo_Promedio_UND': row['Costo_Promedio_UND'],
+                                'Tienda': row['Tienda']
+                            })
+                    st.success(f"{len(df_para_anadir_sp)} producto(s) añadidos. Puedes seguir buscando y añadiendo más.")
+                    st.rerun() # Recargar para ver los cambios en el carrito
+            else:
+                st.warning("No se encontraron productos con ese criterio de búsqueda.")
 
-                df_seleccionados_sp = edited_df_sp[edited_df_sp['Seleccionar']]
+        # 2. MOSTRAR LA ORDEN DE COMPRA EN CONSTRUCCIÓN (CARRITO)
+        if st.session_state.compra_especial_items:
+            st.markdown("---")
+            st.markdown("##### 2. Orden de Compra Actual")
+            
+            df_seleccionados_sp = pd.DataFrame(st.session_state.compra_especial_items)
+            df_seleccionados_sp['Valor de la Compra'] = df_seleccionados_sp['Uds a Comprar'] * df_seleccionados_sp['Costo_Promedio_UND']
+            
+            st.dataframe(df_seleccionados_sp[['Tienda', 'SKU', 'Descripcion', 'Uds a Comprar', 'Costo_Promedio_UND', 'Valor de la Compra']], use_container_width=True)
+            
+            total_orden = df_seleccionados_sp['Valor de la Compra'].sum()
+            st.info(f"**Valor total de la orden actual: ${total_orden:,.2f}**")
+            
+            if st.button("🗑️ Vaciar Orden de Compra", key="btn_limpiar_compra_sp"):
+                st.session_state.compra_especial_items = []
+                st.rerun()
 
-                if not df_seleccionados_sp.empty:
-                    st.markdown("##### Asignar Proveedor para esta Compra")
-                    nuevo_proveedor_nombre = st.text_input("Nombre del Nuevo Proveedor:", key="nuevo_prov_nombre")
-                    
-                    if nuevo_proveedor_nombre:
-                        df_seleccionados_sp = df_seleccionados_sp.copy()
-                        df_seleccionados_sp['Valor de la Compra'] = df_seleccionados_sp['Uds a Comprar'] * df_seleccionados_sp['Costo_Promedio_UND']
-                        df_seleccionados_sp['Proveedor'] = nuevo_proveedor_nombre
-                        
-                        tienda_de_entrega_sp = selected_almacen_nombre
-                        if tienda_de_entrega_sp == opcion_consolidado:
-                            tienda_de_entrega_sp = 'FerreBox'
-                        
-                        direccion_entrega_sp = DIRECCIONES_TIENDAS.get(tienda_de_entrega_sp, "N/A")
-                        pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, "")
+            # 3. DATOS DEL PROVEEDOR Y ACCIONES FINALES
+            st.markdown("---")
+            st.markdown("##### 3. Ingresar Datos del Proveedor y Finalizar")
+            
+            sp_col1, sp_col2 = st.columns(2)
+            with sp_col1:
+                nuevo_proveedor_nombre = st.text_input("Nombre del Proveedor:", key="nuevo_prov_nombre_sp")
+                email_destinatario_sp = st.text_input("📧 Correo(s) del Proveedor (separados por coma):", key="email_sp")
+            with sp_col2:
+                contacto_proveedor_sp = st.text_input("Nombre del Contacto (Opcional):", key="contacto_prov_sp")
+                celular_destinatario_sp = st.text_input("📲 Celular para notificar por WhatsApp:", key="cel_sp", help="Ingresar solo el número, ej: 3001234567")
 
-                        email_destinatario_sp = st.text_input("📧 Correo(s) del nuevo proveedor (separados por coma):", key="email_sp")
-                        celular_destinatario_sp = st.text_input("📲 Celular del nuevo proveedor (sin el 57):", key="cel_sp", help="Ej: 3001234567")
+            if nuevo_proveedor_nombre:
+                tienda_de_entrega_sp = df_seleccionados_sp['Tienda'].iloc[0] # Usar la tienda del primer item
+                direccion_entrega_sp = DIRECCIONES_TIENDAS.get(tienda_de_entrega_sp, "N/A")
+                
+                # Generar PDF en memoria
+                pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, contacto_proveedor_sp)
+                
+                # Generar Excel en memoria
+                excel_bytes_sp = generar_excel_dinamico(df_seleccionados_sp.drop(columns=['id']), f"Compra_{nuevo_proveedor_nombre}")
 
-                        sp_c1, sp_c2, sp_c3 = st.columns(3)
-                        with sp_c1:
-                            st.download_button("📥 Descargar Excel (SP)", data=generar_excel_dinamico(df_seleccionados_sp, "compra_especial"), file_name=f"Compra_Especial_{nuevo_proveedor_nombre}.xlsx", use_container_width=True, key="btn_dl_excel_sp")
-                        with sp_c2:
-                            if st.button("✉️ Enviar Correo (SP)", disabled=(pdf_bytes_sp is None), use_container_width=True, key="btn_enviar_sp"):
-                                if email_destinatario_sp:
-                                    with st.spinner("Enviando correo..."):
-                                        email_string_sp = email_destinatario_sp.replace(';', ',')
-                                        lista_destinatarios_sp = [email.strip() for email in email_string_sp.split(',') if email.strip()]
-                                        asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
-                                        cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
-                                        nombre_archivo_sp = f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf"
-                                        enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp, subtipo_mime='pdf')
-                                        if enviado_sp:
-                                            st.success(mensaje_sp)
-                                            if celular_destinatario_sp:
-                                                numero_completo = celular_destinatario_sp.strip()
-                                                if not numero_completo.startswith('57'):
-                                                    numero_completo = '57' + numero_completo
-                                                mensaje_wpp_sp = f"Hola {nuevo_proveedor_nombre}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
-                                                link_wpp_sp = generar_link_whatsapp(numero_completo, mensaje_wpp_sp)
-                                                st.link_button("📲 Notificar por WhatsApp (SP)", link_wpp_sp, use_container_width=True)
-                                        else:
-                                            st.error(mensaje_sp)
+                sp_c1, sp_c2, sp_c3 = st.columns(3)
+                with sp_c1:
+                    st.download_button("📥 Descargar Excel", data=excel_bytes_sp, file_name=f"Compra_Especial_{nuevo_proveedor_nombre}.xlsx", use_container_width=True, key="btn_dl_excel_sp")
+                with sp_c2:
+                    if st.button("✉️ Enviar Correo", use_container_width=True, key="btn_enviar_sp"):
+                        if email_destinatario_sp:
+                            with st.spinner("Enviando correo..."):
+                                email_string_sp = email_destinatario_sp.replace(';', ',')
+                                lista_destinatarios_sp = [email.strip() for email in email_string_sp.split(',') if email.strip()]
+                                asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
+                                cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
+                                nombre_archivo_sp = f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf"
+                                enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp, subtipo_mime='pdf')
+                                if enviado_sp:
+                                    st.success(mensaje_sp)
+                                    if celular_destinatario_sp:
+                                        numero_completo = celular_destinatario_sp.strip()
+                                        if not numero_completo.startswith('57'):
+                                            numero_completo = '57' + numero_completo
+                                        mensaje_wpp_sp = f"Hola {contacto_proveedor_sp if contacto_proveedor_sp else nuevo_proveedor_nombre}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
+                                        link_wpp_sp = generar_link_whatsapp(numero_completo, mensaje_wpp_sp)
+                                        st.link_button("📲 Notificar por WhatsApp", link_wpp_sp, use_container_width=True)
                                 else:
-                                    st.warning("Ingresa un correo para el nuevo proveedor.")
-                        with sp_c3:
-                            st.download_button("📄 Descargar PDF (SP)", data=pdf_bytes_sp, file_name=f"OC_Especial_{nuevo_proveedor_nombre}.pdf", use_container_width=True, key="btn_dl_pdf_sp", disabled=(pdf_bytes_sp is None))
-
-                        st.info(f"Total de la selección para **{nuevo_proveedor_nombre}**: ${df_seleccionados_sp['Valor de la Compra'].sum():,.0f}")
+                                    st.error(mensaje_sp)
+                        else:
+                            st.warning("Ingresa un correo para el nuevo proveedor.")
+                with sp_c3:
+                    st.download_button("📄 Descargar PDF", data=pdf_bytes_sp, file_name=f"OC_Especial_{nuevo_proveedor_nombre}.pdf", use_container_width=True, key="btn_dl_pdf_sp", disabled=(pdf_bytes_sp is None))
