@@ -67,7 +67,6 @@ def calcular_tendencia_y_volumen(historial_str):
     except Exception:
         return 0.0, volumen_90d
 
-# ✅ FUNCIÓN NUEVA PARA CORREGIR EL ERROR Y CALCULAR ESTACIONALIDAD
 @st.cache_data
 def calcular_estacionalidad_reciente(historial_str):
     """Compara ventas de últimos 30 días vs 30 días anteriores (31-60)."""
@@ -84,20 +83,18 @@ def calcular_estacionalidad_reciente(historial_str):
 
     return ventas_ultimos_30 - ventas_31_60
 
-# ✅ FUNCIÓN NUEVA PARA EL ANÁLISIS ESTRATÉGICO
 def clasificar_producto(row):
     """Clasifica el producto en categorías estratégicas basadas en tendencia y volumen de ventas."""
     tendencia = row['Tendencia_Ventas']
     volumen = row['Volumen_Ventas_90d']
     
-    # Umbrales (pueden ser ajustados)
     umbral_tendencia_alta = 0.05
     umbral_tendencia_baja = -0.05
-    percentil_volumen = 75 # Consideramos "alto volumen" si está en el 25% superior de ventas
+    percentil_volumen = 75 
     
     try:
         umbral_volumen = np.percentile(row['all_volumes'], percentil_volumen)
-    except: # Si falla el cálculo del percentil, usar un valor por defecto.
+    except: 
         umbral_volumen = 10 
 
     if tendencia > umbral_tendencia_alta and volumen > umbral_volumen:
@@ -113,7 +110,7 @@ def clasificar_producto(row):
     else:
         return "Producto Estable 😐"
 
-# --- Lógica Principal de la Página ---
+# --- 2. Lógica Principal de la Página ---
 
 if 'df_analisis' not in st.session_state or st.session_state['df_analisis'].empty:
     st.error("Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
@@ -147,19 +144,16 @@ else:
     else:
         with st.spinner("Realizando análisis estratégico de tendencias..."):
             # --- CÁLCULOS AVANZADOS ---
-            # 1. Calcular Tendencia y Volumen de Ventas
             tendencias_volumenes = df_filtered['Historial_Ventas'].apply(calcular_tendencia_y_volumen)
             df_filtered['Tendencia_Ventas'] = tendencias_volumenes.apply(lambda x: x[0])
             df_filtered['Volumen_Ventas_90d'] = tendencias_volumenes.apply(lambda x: x[1])
-            
-            # 2. Calcular Estacionalidad Reciente (Corrige el KeyError)
             df_filtered['Estacionalidad_Reciente'] = df_filtered['Historial_Ventas'].apply(calcular_estacionalidad_reciente)
-            
-            # 3. Calcular Impacto Financiero de la Tendencia
             df_filtered['Impacto_Potencial'] = df_filtered['Tendencia_Ventas'] * df_filtered['Costo_Promedio_UND']
             
-            # 4. Clasificación Estratégica
-            df_filtered['all_volumes'] = df_filtered['Volumen_Ventas_90d'].sum() # Ayuda para el cálculo de percentil
+            # ✅ **CORRECCIÓN**: Crear columna para el tamaño del gráfico con valores absolutos (no negativos)
+            df_filtered['Plot_Size'] = df_filtered['Impacto_Potencial'].abs()
+            
+            df_filtered['all_volumes'] = df_filtered['Volumen_Ventas_90d'].sum()
             df_filtered['Clasificacion'] = df_filtered.apply(clasificar_producto, axis=1)
 
         # --- KPIs Y MÉTRICAS PRINCIPALES ---
@@ -182,15 +176,16 @@ else:
             - **Problemas Potenciales (Abajo-Izquierda):** Bajas ventas y en caída. ¡Evaluar y decidir!
             """)
             
+            # ✅ **CORRECCIÓN**: Usar 'Plot_Size' para el tamaño y añadir 'Impacto_Potencial' al hover
             fig = px.scatter(
-                df_filtered,
+                df_filtered.sort_values(by='Plot_Size', ascending=False), # Ordenar para mejor visualización
                 x="Tendencia_Ventas",
                 y="Volumen_Ventas_90d",
-                size="Impacto_Potencial",
+                size="Plot_Size",
                 color="Clasificacion",
                 hover_name="Descripcion",
-                hover_data=['SKU', 'Marca_Nombre'],
-                log_y=True,  # Escala logarítmica para manejar grandes diferencias de volumen
+                hover_data=['SKU', 'Marca_Nombre', 'Impacto_Potencial'],
+                log_y=True,
                 size_max=60,
                 title="Matriz Estratégica de Productos",
                 color_discrete_map={
