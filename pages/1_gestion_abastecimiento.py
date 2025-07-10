@@ -635,7 +635,3 @@ with tab3:
                             st.warning("Ingresa un correo para el nuevo proveedor.")
                 with sp_c3:
                     st.download_button("📄 Descargar PDF", data=pdf_bytes_sp, file_name=f"OC_Especial_{nuevo_proveedor_nombre}.pdf", use_container_width=True, key="btn_dl_pdf_sp", disabled=(pdf_bytes_sp is None))
-                        else:
-                            st.warning("Ingresa un correo para el nuevo proveedor.")
-                with sp_c3:
-                    st.download_button("📄 Descargar PDF", data=pdf_bytes_sp, file_name=f"OC_Especial_{nuevo_proveedor_nombre}.pdf", use_container_width=True, key="btn_dl_pdf_sp", disabled=(pdf_bytes_sp is None))
