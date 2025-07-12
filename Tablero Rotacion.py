@@ -4,6 +4,7 @@ import numpy as np
 import dropbox
 import io
 from datetime import datetime
+import time # ✨ NUEVO: Importamos la librería time para una pequeña pausa visual
 
 # --- 0. CONFIGURACIÓN INICIAL ---
 st.set_page_config(
@@ -59,6 +60,13 @@ st.markdown("""
 <style>
     .section-header { color: #7792E3; font-weight: bold; border-bottom: 2px solid #7792E3; padding-bottom: 5px; margin-bottom: 15px; }
     .stAlert { border-radius: 10px; }
+    /* Estilo para que el botón de actualizar sea más prominente */
+    div[data-testid="stButton"] > button {
+        background-color: #4CAF50;
+        color: white;
+        font-weight: bold;
+        border-radius: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,7 +89,6 @@ def cargar_datos_desde_dropbox():
         info_message.error(f"Error al cargar datos de inventario: {e}", icon="🔥")
         return None
 
-# ✨ CAMBIO: La función ahora carga 'COD PROVEEDOR'
 @st.cache_data(ttl=600)
 def cargar_proveedores_desde_dropbox():
     """Carga el archivo de proveedores 'Provedores.xlsx' desde Dropbox."""
@@ -96,16 +103,14 @@ def cargar_proveedores_desde_dropbox():
             with io.BytesIO(res.content) as stream:
                 df_proveedores = pd.read_excel(stream, dtype={'REFERENCIA': str, 'COD PROVEEDOR': str})
 
-        # ✨ CAMBIO: Renombrar y mantener las 3 columnas necesarias.
         df_proveedores.rename(columns={
             'REFERENCIA': 'SKU', 
             'PROVEEDOR': 'Proveedor',
-            'COD PROVEEDOR': 'SKU_Proveedor' # Renombramos para facilidad de uso
+            'COD PROVEEDOR': 'SKU_Proveedor'
         }, inplace=True)
-        
-        # Eliminar filas donde el SKU del proveedor es nulo para evitar problemas
+       
         df_proveedores.dropna(subset=['SKU_Proveedor'], inplace=True)
-        
+       
         df_proveedores = df_proveedores[['SKU', 'Proveedor', 'SKU_Proveedor']]
 
         info_message.success("Archivo de proveedores cargado exitosamente!", icon="👍")
@@ -126,7 +131,7 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
 
     df = _df_crudo.copy()
 
-    # 1. Limpieza y Preparación (sin cambios en la lógica)
+    # 1. Limpieza y Preparación
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
@@ -135,7 +140,6 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     }
     df.rename(columns=column_mapping, inplace=True)
     df['SKU'] = df['SKU'].astype(str)
-    # ... (resto de la lógica de limpieza y análisis sin cambios) ...
     almacen_map = {'158':'Opalo', '155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
     df['Almacen_Nombre'] = df['Almacen'].astype(str).map(almacen_map).fillna(df['Almacen'])
     marca_map = {'41':'TERINSA','50':'P8-ASC-MEGA','54':'MPY-International','55':'DPP-AN COLORANTS LATAM','56':'DPP-Pintuco Profesional','57':'ASC-Mega','58':'DPP-Pintuco','59':'DPP-Madetec','60':'POW-Interpon','61':'various','62':'DPP-ICO','63':'DPP-Terinsa','64':'MPY-Pintuco','65':'non-AN Third Party','66':'ICO-AN Packaging','67':'ASC-Automotive OEM','68':'POW-Resicoat'}
@@ -182,9 +186,7 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     df['Sugerencia_Compra'] = np.ceil(df['Necesidad_Total'] - df['Unidades_Traslado_Sugeridas'].fillna(0))
     df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'].fillna(0))
 
-    # ✨ CAMBIO: Se fusionan los datos del proveedor al final del análisis
     if _df_proveedores is not None and not _df_proveedores.empty:
-        # Se usa left merge para mantener todos los productos, incluso si no tienen proveedor asignado
         df = pd.merge(df, _df_proveedores, on='SKU', how='left')
         df['Proveedor'] = df['Proveedor'].fillna('No Asignado')
         df['SKU_Proveedor'] = df['SKU_Proveedor'].fillna('N/A')
@@ -200,11 +202,24 @@ st.sidebar.button("Cerrar Sesión", on_click=logout)
 st.sidebar.markdown("---")
 
 st.title("🚀 Resumen Ejecutivo de Inventario")
-st.markdown(f"###### Panel de control para la toma de decisiones. Actualizado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+st.markdown(f"###### Panel de control para la toma de decisiones. Última carga: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+
+# ✨ NUEVO: BOTÓN DE ACTUALIZACIÓN MANUAL
+# Este botón limpia la caché de todas las funciones @st.cache_data y reinicia el script.
+if st.button("🔄 Actualizar Datos de Inventario", help="Borra la memoria caché y vuelve a cargar los archivos más recientes desde Dropbox."):
+    st.cache_data.clear()
+    # Mostramos un mensaje temporal al usuario
+    toast_message = st.toast('Borrando caché y recargando datos...', icon='⏳')
+    time.sleep(2) # Pausa de 2 segundos para que el usuario vea el mensaje
+    toast_message.toast('¡Datos actualizados! Recargando panel...', icon='✅')
+    time.sleep(1)
+    st.rerun() # Vuelve a ejecutar el script desde el principio
+
+st.markdown("---") # ✨ NUEVO: Separador visual
 
 # Cargar ambos dataframes desde Dropbox
 df_crudo = cargar_datos_desde_dropbox()
-df_proveedores = cargar_proveedores_desde_dropbox() # ✨ Llamada a la nueva función
+df_proveedores = cargar_proveedores_desde_dropbox()
 
 if df_crudo is not None and not df_crudo.empty:
     st.sidebar.header("⚙️ Parámetros del Análisis")
@@ -219,7 +234,7 @@ if df_crudo is not None and not df_crudo.empty:
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(
             df_crudo,
-            df_proveedores, # ✨ Se pasa el dataframe de proveedores
+            df_proveedores,
             dias_seguridad=dias_seguridad_input,
             dias_objetivo=dias_objetivo_dict
         ).reset_index()
@@ -227,7 +242,6 @@ if df_crudo is not None and not df_crudo.empty:
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
 
     # --- EL RESTO DE LA PÁGINA ES IDÉNTICO Y NO REQUIERE CAMBIOS ---
-    # ... (código de la UI de app.py sin modificaciones) ...
     if st.session_state.user_role == 'tienda':
         st.session_state['df_analisis'] = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
     else:
@@ -299,4 +313,4 @@ if df_crudo is not None and not df_crudo.empty:
             st.dataframe(pivot_stock.drop(columns=[col for col in pivot_stock.columns if pivot_stock[col].sum() == 0]), use_container_width=True)
 
 else:
-    st.error("La carga de datos inicial falló. Revisa los mensajes de error o el archivo en Dropbox.")
+    st.error("La carga de datos inicial falló. Revisa los mensajes de error, el archivo en Dropbox o intenta actualizar los datos.")
