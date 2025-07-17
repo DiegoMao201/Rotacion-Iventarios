@@ -296,7 +296,6 @@ with tab2:
                 df_para_editar = df_traslados_filtrado.copy()
                 df_para_editar['Seleccionar'] = False
                 
-                # ✅ CAMBIO: Columnas añadidas para mayor claridad en el stock y necesidad.
                 columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Marca_Nombre', 'Tienda Origen', 
                                      'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Necesidad en Destino', 'Uds a Enviar']
                 
@@ -315,9 +314,29 @@ with tab2:
 
                 df_seleccionados_traslado = edited_df_traslados[edited_df_traslados['Seleccionar']]
 
+                # ✅ INICIO: Nuevo bloque para mostrar detalle de stock al seleccionar
+                if not df_seleccionados_traslado.empty:
+                    # Obtener el último SKU seleccionado por el usuario
+                    ultimo_item_seleccionado = df_seleccionados_traslado.iloc[-1]
+                    sku_seleccionado = ultimo_item_seleccionado['SKU']
+                    desc_seleccionada = ultimo_item_seleccionado['Descripcion']
+
+                    with st.container(border=True):
+                        st.markdown(f"##### 🔍 Detalle de Stock para: **{desc_seleccionada}** (SKU: {sku_seleccionado})")
+                        
+                        # Filtrar el dataframe maestro para obtener el stock en todas las tiendas
+                        df_stock_detalle = df_maestro[df_maestro['SKU'] == sku_seleccionado][['Almacen_Nombre', 'Stock', 'Sugerencia_Compra', 'Estado_Inventario']].copy()
+                        df_stock_detalle.rename(columns={
+                            'Almacen_Nombre': 'Tienda',
+                            'Sugerencia_Compra': 'Compra Sugerida'
+                        }, inplace=True)
+                        
+                        # Mostrar la tabla de detalles
+                        st.dataframe(df_stock_detalle, use_container_width=True, hide_index=True)
+                # ✅ FIN: Nuevo bloque para mostrar detalle de stock
+
                 if not df_seleccionados_traslado.empty:
                     df_seleccionados_traslado = df_seleccionados_traslado.copy()
-                    # Recalcular peso con base en el dataframe original para no perder la columna
                     df_seleccionados_traslado = pd.merge(
                         df_seleccionados_traslado,
                         df_plan_maestro[['SKU', 'Tienda Origen', 'Tienda Destino', 'Peso Individual (kg)']],
@@ -476,8 +495,6 @@ with tab3:
                 
                 st.markdown("---")
                 
-                # ✅ CAMBIO: Lógica de botones modificada
-                # Siempre permitir la descarga de Excel. Deshabilitar PDF/Correo si no hay un proveedor único.
                 es_proveedor_unico = selected_proveedor != 'Todos' and selected_proveedor != 'NO ASIGNADO'
                 
                 if es_proveedor_unico:
@@ -488,13 +505,11 @@ with tab3:
 
                 c1, c2, c3 = st.columns(3)
                 
-                # Botón de Descargar Excel
                 with c1:
                     excel_data = generar_excel_dinamico(df_seleccionados, "compra")
                     file_name_excel = f"Compra_{selected_proveedor if es_proveedor_unico else 'Consolidado'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
                     st.download_button("📥 Descargar Excel", data=excel_data, file_name=file_name_excel, use_container_width=True)
 
-                # Botones de Correo y PDF
                 pdf_bytes = None
                 if es_proveedor_unico:
                     tienda_entrega = selected_almacen_nombre if selected_almacen_nombre != opcion_consolidado else 'FerreBox'
@@ -633,7 +648,6 @@ with tab3:
             if nuevo_proveedor_nombre and tienda_de_entrega_sp:
                 direccion_entrega_sp = DIRECCIONES_TIENDAS.get(tienda_de_entrega_sp, "N/A")
                 
-                # ✅ CAMBIO: Se asegura que el dataframe usado para el excel no tenga la columna 'id'
                 df_para_excel_sp = df_seleccionados_sp.drop(columns=['id']) if 'id' in df_seleccionados_sp.columns else df_seleccionados_sp
                 excel_bytes_sp = generar_excel_dinamico(df_para_excel_sp, f"Compra_{nuevo_proveedor_nombre}")
                 pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, contacto_proveedor_sp)
