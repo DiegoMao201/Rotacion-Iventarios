@@ -21,8 +21,9 @@ st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para m
 
 # --- 1. FUNCIONES AUXILIARES ---
 
-def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto, datos_adjuntos, tipo_mime='application', subtipo_mime='octet-stream'):
-    """Envía un correo a una LISTA de destinatarios con un archivo adjunto."""
+# ✅ CAMBIO: La función ahora acepta una lista de adjuntos para poder enviar más de uno.
+def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adjuntos):
+    """Envía un correo a una LISTA de destinatarios con uno o más archivos adjuntos."""
     try:
         remitente = st.secrets["gmail"]["email"]
         password = st.secrets["gmail"]["password"]
@@ -31,14 +32,15 @@ def enviar_correo_con_adjunto(destinatarios, asunto, cuerpo_html, nombre_adjunto
         msg['To'] = ", ".join(destinatarios)
         msg['Subject'] = asunto
         msg.attach(MIMEText(cuerpo_html, 'html'))
-        
-        with io.BytesIO(datos_adjuntos) as attachment_stream:
-            adjunto = MIMEBase(tipo_mime, subtipo_mime)
-            adjunto.set_payload(attachment_stream.read())
-        
-        encoders.encode_base64(adjunto)
-        adjunto.add_header('Content-Disposition', 'attachment', filename=nombre_adjunto)
-        msg.attach(adjunto)
+
+        for adj_info in lista_de_adjuntos:
+            with io.BytesIO(adj_info['datos']) as attachment_stream:
+                adjunto = MIMEBase(adj_info.get('tipo_mime', 'application'), adj_info.get('subtipo_mime', 'octet-stream'))
+                adjunto.set_payload(attachment_stream.read())
+            
+            encoders.encode_base64(adjunto)
+            adjunto.add_header('Content-Disposition', 'attachment', filename=adj_info['nombre_archivo'])
+            msg.attach(adjunto)
 
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
@@ -314,7 +316,6 @@ with tab2:
 
                 df_seleccionados_traslado = edited_df_traslados[edited_df_traslados['Seleccionar']]
 
-                # ✅ INICIO: Nuevo bloque para mostrar detalle de stock al seleccionar
                 if not df_seleccionados_traslado.empty:
                     # Obtener el último SKU seleccionado por el usuario
                     ultimo_item_seleccionado = df_seleccionados_traslado.iloc[-1]
@@ -333,7 +334,6 @@ with tab2:
                         
                         # Mostrar la tabla de detalles
                         st.dataframe(df_stock_detalle, use_container_width=True, hide_index=True)
-                # ✅ FIN: Nuevo bloque para mostrar detalle de stock
 
                 if not df_seleccionados_traslado.empty:
                     df_seleccionados_traslado = df_seleccionados_traslado.copy()
@@ -357,10 +357,17 @@ with tab2:
                                     excel_bytes = generar_excel_dinamico(df_seleccionados_traslado.drop(columns=['Peso Individual (kg)']), "Plan_de_Traslados")
                                     asunto = f"Nuevo Plan de Traslado Interno - {datetime.now().strftime('%d/%m/%Y')}"
                                     cuerpo_html = f"<html><body><p>Hola equipo de logística,</p><p>Adjunto se encuentra el plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado.</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"
-                                    nombre_archivo = f"Plan_Traslado_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                                    
+                                    adjunto_traslado = [{
+                                        'datos': excel_bytes,
+                                        'nombre_archivo': f"Plan_Traslado_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                        'tipo_mime': 'application',
+                                        'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                                    }]
+                                    
                                     email_string = email_dest_traslado.replace(';', ',')
                                     lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
-                                    enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, excel_bytes, tipo_mime='application', subtipo_mime='vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                                    enviado, mensaje = enviar_correo_con_adjuntos(lista_destinatarios, asunto, cuerpo_html, adjunto_traslado)
                                     if enviado: st.success(mensaje)
                                     else: st.error(mensaje)
                             else: st.warning("Por favor, ingresa un correo de destinatario.")
@@ -449,9 +456,16 @@ with tab2:
                         with st.spinner("Enviando correo..."):
                             asunto = f"Solicitud de Traslado Especial - {datetime.now().strftime('%d/%m/%Y')}"
                             cuerpo_html = f"<html><body><p>Hola equipo,</p><p>Se ha generado una solicitud de traslado especial para la tienda <b>{tienda_destino_especial}</b>. Por favor, revisar el archivo adjunto y coordinar el envío.</p><p>Gracias.</p></body></html>"
-                            nombre_archivo = f"Solicitud_Traslado_Especial_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                            
+                            adjunto_especial = [{
+                                'datos': excel_bytes_especial,
+                                'nombre_archivo': f"Solicitud_Traslado_Especial_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                'tipo_mime': 'application',
+                                'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                            }]
+                            
                             lista_destinatarios = [email.strip() for email in email_dest_especial.replace(';', ',').split(',') if email.strip()]
-                            enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, excel_bytes_especial, tipo_mime='application', subtipo_mime='vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                            enviado, mensaje = enviar_correo_con_adjuntos(lista_destinatarios, asunto, cuerpo_html, adjunto_especial)
                             if enviado: st.success(mensaje)
                             else: st.error(mensaje)
                     else: st.warning("Asegúrate de tener productos en la solicitud y un correo de destinatario.")
@@ -527,8 +541,15 @@ with tab3:
                                 lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
                                 asunto = f"Nueva Orden de Compra de Ferreinox SAS BIC - {selected_proveedor}"
                                 cuerpo_html = f"<html><body><p>Estimados Sres. {selected_proveedor},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_entrega}<br><b>Dirección:</b> {direccion_entrega}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
-                                nombre_archivo = f"OC_Ferreinox_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-                                enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, pdf_bytes, subtipo_mime='pdf')
+                                
+                                adjunto_sugerencia = [{
+                                    'datos': pdf_bytes,
+                                    'nombre_archivo': f"OC_Ferreinox_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                    'tipo_mime': 'application',
+                                    'subtipo_mime': 'pdf'
+                                }]
+                                
+                                enviado, mensaje = enviar_correo_con_adjuntos(lista_destinatarios, asunto, cuerpo_html, adjunto_sugerencia)
                                 if enviado:
                                     st.success(mensaje)
                                     if celular_proveedor:
@@ -658,13 +679,28 @@ with tab3:
                 with sp_c2:
                     if st.button("✉️ Enviar Correo", use_container_width=True, key="btn_enviar_sp"):
                         if email_destinatario_sp:
-                            with st.spinner("Enviando correo..."):
+                            with st.spinner("Enviando correo con PDF y Excel..."):
                                 email_string_sp = email_destinatario_sp.replace(';', ',')
                                 lista_destinatarios_sp = [email.strip() for email in email_string_sp.split(',') if email.strip()]
                                 asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
-                                cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
-                                nombre_archivo_sp = f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf"
-                                enviado_sp, mensaje_sp = enviar_correo_con_adjunto(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, nombre_archivo_sp, pdf_bytes_sp, subtipo_mime='pdf')
+                                cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')} en formato PDF y un archivo Excel con el detalle de la misma.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
+                                
+                                # ✅ CAMBIO: Se crea una lista con dos diccionarios, uno para el PDF y otro para el Excel.
+                                adjuntos_especiales = [
+                                    {
+                                        'datos': pdf_bytes_sp,
+                                        'nombre_archivo': f"OC_Ferreinox_{nuevo_proveedor_nombre.replace(' ','_')}.pdf",
+                                        'tipo_mime': 'application', 'subtipo_mime': 'pdf'
+                                    },
+                                    {
+                                        'datos': excel_bytes_sp,
+                                        'nombre_archivo': f"Detalle_OC_{nuevo_proveedor_nombre.replace(' ','_')}.xlsx",
+                                        'tipo_mime': 'application', 'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                                    }
+                                ]
+
+                                enviado_sp, mensaje_sp = enviar_correo_con_adjuntos(lista_destinatarios_sp, asunto_sp, cuerpo_html_sp, adjuntos_especiales)
+                                
                                 if enviado_sp:
                                     st.success(mensaje_sp)
                                     if celular_destinatario_sp:
@@ -672,7 +708,7 @@ with tab3:
                                         if not numero_completo.startswith('57'):
                                             numero_completo = '57' + numero_completo
                                         nombre_contacto_wpp = contacto_proveedor_sp if contacto_proveedor_sp else nuevo_proveedor_nombre
-                                        mensaje_wpp_sp = f"Hola {nombre_contacto_wpp}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
+                                        mensaje_wpp_sp = f"Hola {nombre_contacto_wpp}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo con el PDF y el Excel. Quedamos atentos. ¡Gracias!"
                                         link_wpp_sp = generar_link_whatsapp(numero_completo, mensaje_wpp_sp)
                                         st.link_button("📲 Notificar por WhatsApp", link_wpp_sp, use_container_width=True)
                                 else:
