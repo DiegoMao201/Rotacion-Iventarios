@@ -114,7 +114,7 @@ class PDF(FPDF):
     def footer(self):
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font('DejaVu', '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}    |    {self.empresa_web}    |    {self.empresa_email}    |    {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |      {self.empresa_web}     |      {self.empresa_email}     |      {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C'); self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, direccion_entrega, contacto_proveedor):
@@ -295,17 +295,35 @@ with tab2:
             else:
                 df_para_editar = df_traslados_filtrado.copy()
                 df_para_editar['Seleccionar'] = False
-                columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Marca_Nombre', 'Tienda Origen', 'Tienda Destino', 'Uds a Enviar', 'Peso Individual (kg)']
+                
+                # ✅ CAMBIO: Columnas añadidas para mayor claridad en el stock y necesidad.
+                columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Marca_Nombre', 'Tienda Origen', 
+                                     'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Necesidad en Destino', 'Uds a Enviar']
                 
                 edited_df_traslados = st.data_editor(
                     df_para_editar[columnas_traslado], hide_index=True, use_container_width=True,
-                    column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
-                    disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']], key="editor_traslados")
+                    column_config={
+                        "Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
+                        "Seleccionar": st.column_config.CheckboxColumn(required=True),
+                        "Stock en Origen": st.column_config.NumberColumn(format="%d"),
+                        "Stock en Destino": st.column_config.NumberColumn(format="%d"),
+                        "Necesidad en Destino": st.column_config.NumberColumn(format="%d")
+                    },
+                    disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']], 
+                    key="editor_traslados"
+                )
 
                 df_seleccionados_traslado = edited_df_traslados[edited_df_traslados['Seleccionar']]
 
                 if not df_seleccionados_traslado.empty:
                     df_seleccionados_traslado = df_seleccionados_traslado.copy()
+                    # Recalcular peso con base en el dataframe original para no perder la columna
+                    df_seleccionados_traslado = pd.merge(
+                        df_seleccionados_traslado,
+                        df_plan_maestro[['SKU', 'Tienda Origen', 'Tienda Destino', 'Peso Individual (kg)']],
+                        on=['SKU', 'Tienda Origen', 'Tienda Destino'],
+                        how='left'
+                    )
                     df_seleccionados_traslado['Peso del Traslado (kg)'] = df_seleccionados_traslado['Uds a Enviar'] * df_seleccionados_traslado['Peso Individual (kg)']
                     
                     st.markdown("---")
@@ -453,53 +471,65 @@ with tab3:
             df_seleccionados = edited_df[edited_df['Seleccionar']]
 
             if not df_seleccionados.empty:
-                if selected_proveedor == 'Todos' or selected_proveedor == 'NO ASIGNADO':
-                    st.warning("Por favor, seleccione un proveedor específico del filtro para poder generar la orden.")
+                df_seleccionados = df_seleccionados.copy()
+                df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
+                
+                st.markdown("---")
+                
+                # ✅ CAMBIO: Lógica de botones modificada
+                # Siempre permitir la descarga de Excel. Deshabilitar PDF/Correo si no hay un proveedor único.
+                es_proveedor_unico = selected_proveedor != 'Todos' and selected_proveedor != 'NO ASIGNADO'
+                
+                if es_proveedor_unico:
+                    email_dest = st.text_input("📧 Correos del destinatario (separados por coma o punto y coma):", key="email_principal", help="Ej: correo1@ejemplo.com, correo2@ejemplo.com")
                 else:
-                    df_seleccionados = df_seleccionados.copy()
-                    df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
-                    
-                    tienda_entrega = selected_almacen_nombre
-                    if tienda_entrega == opcion_consolidado:
-                        tienda_entrega = 'FerreBox'
-                    
+                    st.info("Para generar un PDF o enviar una orden por correo, por favor seleccione un proveedor específico desde el filtro superior.")
+                    email_dest = ""
+
+                c1, c2, c3 = st.columns(3)
+                
+                # Botón de Descargar Excel
+                with c1:
+                    excel_data = generar_excel_dinamico(df_seleccionados, "compra")
+                    file_name_excel = f"Compra_{selected_proveedor if es_proveedor_unico else 'Consolidado'}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+                    st.download_button("📥 Descargar Excel", data=excel_data, file_name=file_name_excel, use_container_width=True)
+
+                # Botones de Correo y PDF
+                pdf_bytes = None
+                if es_proveedor_unico:
+                    tienda_entrega = selected_almacen_nombre if selected_almacen_nombre != opcion_consolidado else 'FerreBox'
                     direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_entrega, "N/A")
                     info_proveedor = CONTACTOS_PROVEEDOR.get(selected_proveedor, {})
                     contacto_proveedor = info_proveedor.get('nombre', '')
                     celular_proveedor = info_proveedor.get('celular', '')
-                    
                     pdf_bytes = generar_pdf_orden_compra(df_seleccionados, selected_proveedor, tienda_entrega, direccion_entrega, contacto_proveedor)
-                    
-                    st.markdown("---")
-                    email_dest = st.text_input("📧 Correos del destinatario (separados por coma o punto y coma):", key="email_principal", help="Ej: correo1@ejemplo.com, correo2@ejemplo.com")
-                    
-                    c1, c2, c3 = st.columns(3)
-                    with c1:
-                        st.download_button("📥 Descargar Excel", data=generar_excel_dinamico(df_seleccionados, "compra"), file_name=f"Compra_{selected_proveedor}.xlsx", use_container_width=True)
-                    with c2:
-                        if st.button("✉️ Enviar por Correo", disabled=(pdf_bytes is None), use_container_width=True, key="btn_enviar_principal"):
-                            if email_dest:
-                                with st.spinner("Enviando correo..."):
-                                    email_string = email_dest.replace(';', ',')
-                                    lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
-                                    asunto = f"Nueva Orden de Compra de Ferreinox SAS BIC - {selected_proveedor}"
-                                    cuerpo_html = f"<html><body><p>Estimados Sres. {selected_proveedor},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_entrega}<br><b>Dirección:</b> {direccion_entrega}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
-                                    nombre_archivo = f"OC_Ferreinox_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
-                                    enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, pdf_bytes, subtipo_mime='pdf')
-                                    if enviado:
-                                        st.success(mensaje)
-                                        if celular_proveedor:
-                                            mensaje_wpp = f"Hola {contacto_proveedor}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
-                                            link_wpp = generar_link_whatsapp(celular_proveedor, mensaje_wpp)
-                                            st.link_button("📲 Enviar Confirmación por WhatsApp", link_wpp, use_container_width=True)
-                                    else:
-                                        st.error(mensaje)
-                            else:
-                                st.warning("Por favor, ingresa al menos un correo electrónico de destinatario.")
-                    with c3:
-                        st.download_button("📄 Descargar PDF", data=pdf_bytes, file_name=f"OC_{selected_proveedor}.pdf", use_container_width=True, disabled=(pdf_bytes is None))
-                    st.info(f"Total de la selección para **{selected_proveedor}**: ${df_seleccionados['Valor de la Compra'].sum():,.0f}")
-
+                
+                with c2:
+                    if st.button("✉️ Enviar por Correo", disabled=(not es_proveedor_unico or pdf_bytes is None), use_container_width=True, key="btn_enviar_principal"):
+                        if email_dest:
+                            with st.spinner("Enviando correo..."):
+                                email_string = email_dest.replace(';', ',')
+                                lista_destinatarios = [email.strip() for email in email_string.split(',') if email.strip()]
+                                asunto = f"Nueva Orden de Compra de Ferreinox SAS BIC - {selected_proveedor}"
+                                cuerpo_html = f"<html><body><p>Estimados Sres. {selected_proveedor},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')}.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_entrega}<br><b>Dirección:</b> {direccion_entrega}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
+                                nombre_archivo = f"OC_Ferreinox_{selected_proveedor.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+                                enviado, mensaje = enviar_correo_con_adjunto(lista_destinatarios, asunto, cuerpo_html, nombre_archivo, pdf_bytes, subtipo_mime='pdf')
+                                if enviado:
+                                    st.success(mensaje)
+                                    if celular_proveedor:
+                                        mensaje_wpp = f"Hola {contacto_proveedor}, te acabamos de enviar la Orden de Compra N° {datetime.now().strftime('%Y%m%d-%H%M')} al correo. Quedamos atentos. ¡Gracias!"
+                                        link_wpp = generar_link_whatsapp(celular_proveedor, mensaje_wpp)
+                                        st.link_button("📲 Enviar Confirmación por WhatsApp", link_wpp, use_container_width=True)
+                                else:
+                                    st.error(mensaje)
+                        else:
+                            st.warning("Por favor, ingresa al menos un correo electrónico de destinatario.")
+                
+                with c3:
+                    st.download_button("📄 Descargar PDF", data=pdf_bytes or b"", file_name=f"OC_{selected_proveedor}.pdf", use_container_width=True, disabled=(not es_proveedor_unico or pdf_bytes is None))
+                
+                st.info(f"Total de la selección para **{selected_proveedor}**: ${df_seleccionados['Valor de la Compra'].sum():,.0f}")
+                
     st.markdown("---")
     
     with st.expander("🆕 **Compras Especiales (Búsqueda Inteligente y Manual)**", expanded=True):
@@ -546,7 +576,6 @@ with tab3:
                 
                 if st.button("➕ Añadir seleccionados a la Orden", key="btn_anadir_compra_sp"):
                     for _, row in df_para_anadir_sp.iterrows():
-                        # ✅ CORRECCIÓN: Se usa el SKU como ID único. La tienda se decide después.
                         item_id = row['SKU']
                         if not any(item['id'] == item_id for item in st.session_state.compra_especial_items):
                             st.session_state.compra_especial_items.append({
@@ -566,10 +595,8 @@ with tab3:
             st.markdown("---")
             st.markdown("##### 2. Orden de Compra Actual")
             
-            # Construir el DF base desde el session_state
             df_seleccionados_sp = pd.DataFrame(st.session_state.compra_especial_items)
             
-            # ✅ CORRECCIÓN: Añadir selector de tienda para la orden de compra especial
             st.markdown("###### Seleccione la Tienda de Destino para esta Orden de Compra")
             lista_tiendas_validas = sorted([t for t in df_maestro['Almacen_Nombre'].unique() if t != opcion_consolidado])
             tienda_de_entrega_sp = st.selectbox(
@@ -578,7 +605,6 @@ with tab3:
                 key="tienda_destino_sp"
             )
 
-            # Asignar la tienda seleccionada y mostrarla en la tabla
             if tienda_de_entrega_sp:
                 df_seleccionados_sp['Tienda'] = tienda_de_entrega_sp
             
@@ -604,11 +630,13 @@ with tab3:
                 contacto_proveedor_sp = st.text_input("Nombre del Contacto (Opcional):", key="contacto_prov_sp")
                 celular_destinatario_sp = st.text_input("📲 Celular para notificar por WhatsApp:", key="cel_sp", help="Ingresar solo el número, ej: 3001234567")
 
-            if nuevo_proveedor_nombre:
+            if nuevo_proveedor_nombre and tienda_de_entrega_sp:
                 direccion_entrega_sp = DIRECCIONES_TIENDAS.get(tienda_de_entrega_sp, "N/A")
                 
+                # ✅ CAMBIO: Se asegura que el dataframe usado para el excel no tenga la columna 'id'
+                df_para_excel_sp = df_seleccionados_sp.drop(columns=['id']) if 'id' in df_seleccionados_sp.columns else df_seleccionados_sp
+                excel_bytes_sp = generar_excel_dinamico(df_para_excel_sp, f"Compra_{nuevo_proveedor_nombre}")
                 pdf_bytes_sp = generar_pdf_orden_compra(df_seleccionados_sp, nuevo_proveedor_nombre, tienda_de_entrega_sp, direccion_entrega_sp, contacto_proveedor_sp)
-                excel_bytes_sp = generar_excel_dinamico(df_seleccionados_sp.drop(columns=['id']), f"Compra_{nuevo_proveedor_nombre}")
 
                 sp_c1, sp_c2, sp_c3 = st.columns(3)
                 with sp_c1:
