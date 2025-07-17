@@ -21,7 +21,6 @@ st.markdown("Analiza, prioriza y actúa. Optimiza tus traslados y compras para m
 
 # --- 1. FUNCIONES AUXILIARES ---
 
-# ✅ CAMBIO: La función ahora acepta una lista de adjuntos para poder enviar más de uno.
 def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adjuntos):
     """Envía un correo a una LISTA de destinatarios con uno o más archivos adjuntos."""
     try:
@@ -490,8 +489,13 @@ with tab3:
             if selected_proveedor != 'Todos':
                 df_a_mostrar = df_a_mostrar[df_a_mostrar['Proveedor'] == selected_proveedor]
 
+            # ✅ INICIO: Nueva funcionalidad de "Seleccionar Todos"
+            select_all = st.checkbox("Seleccionar / Deseleccionar Todos los Productos Visibles", key="select_all_suggested")
+            
             df_a_mostrar['Uds a Comprar'] = df_a_mostrar['Sugerencia_Compra'].astype(int)
-            df_a_mostrar['Seleccionar'] = False 
+            df_a_mostrar['Seleccionar'] = select_all  # La selección se pre-llena con el estado de la casilla
+            # ✅ FIN: Nueva funcionalidad
+            
             columnas = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Uds a Comprar', 'Costo_Promedio_UND']
             df_a_mostrar_final = df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'})[columnas]
 
@@ -685,7 +689,6 @@ with tab3:
                                 asunto_sp = f"Nueva Orden de Compra de Ferreinox SAS BIC - {nuevo_proveedor_nombre}"
                                 cuerpo_html_sp = f"<html><body><p>Estimados {nuevo_proveedor_nombre},</p><p>Adjunto a este correo encontrarán nuestra orden de compra N° {datetime.now().strftime('%Y%m%d-%H%M')} en formato PDF y un archivo Excel con el detalle de la misma.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_de_entrega_sp}<br><b>Dirección:</b> {direccion_entrega_sp}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión y quedamos atentos a la confirmación.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC<br>Tel: 312 7574279<br>compras@ferreinox.co</p></body></html>"
                                 
-                                # ✅ CAMBIO: Se crea una lista con dos diccionarios, uno para el PDF y otro para el Excel.
                                 adjuntos_especiales = [
                                     {
                                         'datos': pdf_bytes_sp,
