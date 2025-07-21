@@ -6,3 +6,4 @@ xlsxwriter
 dropbox
 fpdf2
 gspread
+gsheets
