@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
+import os  # <-- Importante para manejar rutas de archivos
 from fpdf import FPDF
 from datetime import datetime
 import smtplib
@@ -241,12 +242,25 @@ class PDF(FPDF):
         self.color_gris_oscuro = (68, 68, 68)
         self.color_azul_oscuro = (79, 129, 189)
         self.font_family = 'Helvetica'
+        
+        # --- ✅ MEJORA IMPORTANTE: RUTA ROBUSTA A LAS FUENTES Y FALLBACK ---
         try:
-            self.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
-            self.add_font('DejaVu', 'B', 'DejaVuSans-Bold.ttf', uni=True)
+            # Construye una ruta absoluta al archivo de fuentes
+            base_path = os.path.dirname(__file__)
+            font_path = os.path.join(base_path, 'fonts', 'DejaVuSans.ttf')
+            font_path_bold = os.path.join(base_path, 'fonts', 'DejaVuSans-Bold.ttf')
+            
+            self.add_font('DejaVu', '', font_path, uni=True)
+            self.add_font('DejaVu', 'B', font_path_bold, uni=True)
             self.font_family = 'DejaVu'
-        except RuntimeError:
-            pass
+        except FileNotFoundError:
+            # Si no encuentra las fuentes, no detiene la app, usa la fuente por defecto.
+            st.warning("Archivos de fuente personalizados no encontrados. Se usará la fuente por defecto.")
+            self.font_family = 'Helvetica'
+        except Exception as e:
+            st.warning(f"Ocurrió un error al cargar las fuentes: {e}. Se usará la fuente por defecto.")
+            self.font_family = 'Helvetica'
+
     def header(self):
         font_name = self.font_family
         try:
@@ -259,6 +273,7 @@ class PDF(FPDF):
         self.cell(120, 7, self.empresa_nombre, 0, 1, 'R')
         self.set_x(80); self.cell(120, 7, f"{self.empresa_nit} - {self.empresa_tel}", 0, 1, 'R')
         self.ln(15)
+
     def footer(self):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1)
