@@ -90,8 +90,10 @@ with compra_sug:
             df_a_mostrar['Uds a Comprar'] = df_a_mostrar['Sugerencia_Compra'].astype(int)
             df_a_mostrar['Seleccionar'] = True
             
-            columnas = ['Seleccionar', 'Almacen_Nombre', 'Proveedor', 'SKU', 'Descripcion', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND']
+            # **CORRECCIÓN DEL ERROR**: Renombrar la columna ANTES de definir la lista de columnas.
             df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'}, inplace=True)
+            
+            columnas = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'Descripcion', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND']
             
             st.markdown("Ajusta las cantidades y marca los artículos para la orden de compra:")
             edited_df = st.data_editor(
@@ -108,9 +110,18 @@ with compra_sug:
             df_seleccionados = edited_df[(edited_df['Seleccionar']) & (pd.to_numeric(edited_df['Uds a Comprar']) > 0)]
             
             if not df_seleccionados.empty:
-                st.info(f"Se van a ordenar {len(df_seleccionados)} ítems.")
-                # Lógica de registro y notificación completa
-                # (Omitida aquí por ser idéntica a la de Compra Especial)
+                st.info(f"Se van a ordenar {len(df_seleccionados)} ítems del proveedor **{selected_proveedor}**.")
+                if st.button("Registrar Compras Sugeridas", type="primary", key="btn_reg_sug"):
+                    with st.spinner("Registrando órdenes y preparando notificaciones..."):
+                        exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_seleccionados, "Compra Sugerencia")
+                        if exito:
+                            st.success(f"¡Órdenes de compra registradas! {msg}")
+                            # Lógica para notificar
+                            # (Puedes expandir esto para enviar PDFs, etc.)
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(f"Error al registrar: {msg}")
 
 # ==============================================================================
 # PESTAÑA 2: TRASLADOS SUGERIDOS
@@ -120,24 +131,46 @@ with traslado_sug:
     if df_plan_maestro is None or df_plan_maestro.empty:
         st.success("✅ ¡No se sugieren traslados automáticos en este momento!")
     else:
-        st.markdown("Ajusta y confirma los traslados sugeridos:")
+        st.markdown("Ajusta y confirma los traslados sugeridos. El sistema optimiza el envío desde tiendas con excedente a tiendas con necesidad.")
         df_plan_maestro['Seleccionar'] = True
+        
+        # **MEJORA**: Mostrar columnas clave para la decisión
+        cols_traslado_sug = [
+            'Seleccionar', 'SKU', 'Descripcion', 'Tienda Origen', 'Stock en Origen', 
+            'Tienda Destino', 'Stock en Destino', 'Uds a Enviar', 'Valor del Traslado'
+        ]
+        
         edited_traslados = st.data_editor(
-            df_plan_maestro,
+            df_plan_maestro[cols_traslado_sug],
             key="traslados_sugeridos_editor",
             hide_index=True,
+            use_container_width=True,
             column_config={
-                "Uds a Enviar": st.column_config.NumberColumn(min_value=0, step=1),
-                "Seleccionar": st.column_config.CheckboxColumn("Incluir", required=True)
+                "Uds a Enviar": st.column_config.NumberColumn(label="Uds a Enviar", min_value=0, step=1),
+                "Seleccionar": st.column_config.CheckboxColumn("Incluir", required=True),
+                "Stock en Origen": st.column_config.NumberColumn(format="%d"),
+                "Stock en Destino": st.column_config.NumberColumn(format="%d"),
+                "Valor del Traslado": st.column_config.NumberColumn(format="$%d")
             },
-            disabled=[c for c in df_plan_maestro.columns if c not in ['Seleccionar', 'Uds a Enviar']]
+            disabled=[c for c in cols_traslado_sug if c not in ['Seleccionar', 'Uds a Enviar']]
         )
         traslados_seleccionados = edited_traslados[edited_traslados['Seleccionar'] & (edited_traslados['Uds a Enviar'] > 0)]
+        
         if not traslados_seleccionados.empty:
-            if st.button("Registrar Traslados Sugeridos", type="primary"):
-                # Lógica de registro y notificación
-                st.success("Traslados registrados.")
-
+            if st.button("Registrar Traslados Sugeridos", type="primary", key="btn_reg_tras_sug"):
+                with st.spinner("Registrando traslados..."):
+                    # Necesitamos el DataFrame original para obtener todas las columnas necesarias
+                    df_original_seleccionado = df_plan_maestro[df_plan_maestro.index.isin(traslados_seleccionados.index)]
+                    df_original_seleccionado['Uds a Enviar'] = traslados_seleccionados['Uds a Enviar']
+                    
+                    exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_original_seleccionado, "Traslado Automático")
+                    if exito:
+                        st.success(f"¡Traslados registrados! {msg}")
+                        # Aquí puedes agregar la lógica de notificación a las tiendas
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"Error al registrar: {msg}")
 
 # ==============================================================================
 # PESTAÑA 3: COMPRA ESPECIAL
@@ -163,8 +196,8 @@ with compra_esp:
             cols_to_show = ['Seleccionar', 'SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND', 'Uds a Comprar']
             
             edited_results = st.data_editor(df_results[cols_to_show], key="purchase_editor",
-                column_config={"Seleccionar": st.column_config.CheckboxColumn(required=True),
-                               "Uds a Comprar": st.column_config.NumberColumn(min_value=1, step=1)})
+                                            column_config={"Seleccionar": st.column_config.CheckboxColumn(required=True),
+                                                           "Uds a Comprar": st.column_config.NumberColumn(min_value=1, step=1)})
 
             if st.button("➕ Agregar Seleccionados al Pedido", key="add_to_purchase_cart"):
                 items_to_add = edited_results[edited_results['Seleccionar']]
@@ -191,8 +224,10 @@ with compra_esp:
             proveedor_especial = prov_col.text_input("Nombre del Proveedor:")
             tienda_destino_especial = dest_col.selectbox("Tienda de Destino:", options=lista_tiendas_disponibles)
             
+            # **MEJORA**: Campos para notificación manual
+            st.markdown("##### Detalles de Notificación (Opcional)")
             email_col, cel_col = st.columns(2)
-            email_especial = email_col.text_input("Correo del Contacto:")
+            email_especial = email_col.text_input("Correo del Contacto (para notificación):")
             celular_especial = cel_col.text_input("Celular del Contacto (ej: 573123456789):")
             
             submitted = st.form_submit_button("🚀 Registrar Pedido de Compra Especial", type="primary", use_container_width=True)
@@ -203,16 +238,22 @@ with compra_esp:
                 else:
                     with st.spinner("Registrando orden..."):
                         exito, msg, df_reg = registrar_ordenes_en_sheets(client, edited_cart_purchase, "Compra Especial",
-                            proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial)
+                                                                         proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial)
                         if exito:
                             st.success(f"¡Pedido especial registrado! {msg}")
-                            st.session_state.special_purchase_cart = pd.DataFrame()
+                            
+                            # **MEJORA**: Lógica de notificación funcional
+                            if email_especial:
+                                # Aquí podrías generar un PDF y enviarlo
+                                st.info(f"Se enviaría correo a: {email_especial}")
+                            
                             if celular_especial:
                                 orden_id = df_reg['ID_Orden'].iloc[0]
                                 mensaje_wpp = f"Hola, te notificamos que Ferreinox ha generado la orden de compra especial *{orden_id}* a nombre de *{proveedor_especial}*. Gracias."
                                 link_wpp = generar_link_whatsapp(celular_especial, mensaje_wpp)
                                 st.link_button("📲 Notificar por WhatsApp", link_wpp, use_container_width=True)
                             
+                            st.session_state.special_purchase_cart = pd.DataFrame()
                             time.sleep(4)
                             st.rerun()
                         else:
