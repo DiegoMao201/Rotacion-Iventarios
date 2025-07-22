@@ -16,9 +16,11 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
-st.set_page_config(page_title="Gestión de Abastecimiento v3.2", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Gestión de Abastecimiento v3.3", layout="wide", page_icon="🚀")
 
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
+# Es una buena práctica inicializar todas las claves que usarás en la sesión.
+# Esto previene errores y hace el código más predecible.
 keys_to_initialize = {
     'df_analisis_maestro': pd.DataFrame(),
     'user_role': None,
@@ -27,7 +29,6 @@ keys_to_initialize = {
     'compra_especial_items': [],
     'orden_modificada_df': pd.DataFrame(),
     'orden_cargada_id': None,
-    'active_tab': "📊 Diagnóstico"
 }
 for key, default_value in keys_to_initialize.items():
     if key not in st.session_state:
@@ -87,6 +88,7 @@ def append_to_sheet(client, sheet_name, df_to_append):
         if headers:
             df_to_append_ordered = df_to_append.reindex(columns=headers).fillna('')
         else:
+            # Si la hoja está vacía, escribe las cabeceras primero
             worksheet.update([df_to_append.columns.values.tolist()] + df_to_append.astype(str).values.tolist())
             return True, "Nuevos registros y cabeceras añadidos.", df_to_append
 
@@ -103,7 +105,7 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     df_registro = df_orden.copy()
 
-    # Identificar la columna de cantidad correcta
+    # Identificar la columna de cantidad correcta dinámicamente
     if 'Uds a Comprar' in df_orden.columns:
         cantidad_col = 'Uds a Comprar'
     elif 'Uds a Enviar' in df_orden.columns:
@@ -111,15 +113,15 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     elif 'Cantidad_Solicitada' in df_orden.columns:
         cantidad_col = 'Cantidad_Solicitada'
     else:
-        return False, "No se encontró una columna de cantidad válida.", pd.DataFrame()
+        return False, "No se encontró una columna de cantidad válida ('Uds a Comprar', 'Uds a Enviar', 'Cantidad_Solicitada').", pd.DataFrame()
 
-    # Identificar la columna de costo correcta
+    # Identificar la columna de costo correcta dinámicamente
     if 'Costo_Promedio_UND' in df_orden.columns:
         costo_col = 'Costo_Promedio_UND'
     elif 'Costo_Unitario' in df_orden.columns:
         costo_col = 'Costo_Unitario'
     else:
-        return False, "No se encontró una columna de costo válida.", pd.DataFrame()
+        return False, "No se encontró una columna de costo válida ('Costo_Promedio_UND', 'Costo_Unitario').", pd.DataFrame()
 
 
     df_registro['Cantidad_Solicitada'] = df_registro[cantidad_col]
@@ -148,7 +150,7 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     else:
         return False, "Tipo de orden no reconocido.", pd.DataFrame()
 
-    df_registro['ID_Orden'] = [f"{base_id}-{i}" for i in range(len(df_registro))]
+    df_registro['ID_Orden'] = [f"{base_id}-{i+1}" for i in range(len(df_registro))]
 
     columnas_finales = ['ID_Orden', 'Fecha_Emision', 'Proveedor', 'SKU', 'Descripcion', 'Cantidad_Solicitada', 'Tienda_Destino', 'Estado', 'Costo_Unitario', 'Costo_Total']
     df_final_para_gsheets = df_registro.reindex(columns=columnas_finales).fillna('')
@@ -239,48 +241,75 @@ def generar_plan_traslados_inteligente(_df_analisis):
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.empresa_nombre = "Ferreinox SAS BIC"; self.empresa_nit = "NIT 800.224.617"; self.empresa_tel = "Tel: 312 7574279"
-        self.empresa_web = "www.ferreinox.co"; self.empresa_email = "compras@ferreinox.co"
-        self.color_rojo_ferreinox = (212, 32, 39); self.color_gris_oscuro = (68, 68, 68); self.color_azul_oscuro = (79, 129, 189)
+        self.empresa_nombre = "Ferreinox SAS BIC"
+        self.empresa_nit = "NIT 800.224.617"
+        self.empresa_tel = "Tel: 312 7574279"
+        self.empresa_web = "www.ferreinox.co"
+        self.empresa_email = "compras@ferreinox.co"
+        self.color_rojo_ferreinox = (212, 32, 39)
+        self.color_gris_oscuro = (68, 68, 68)
+        self.color_azul_oscuro = (79, 129, 189)
         self.font_family = 'Helvetica'
         try:
             self.add_font('DejaVu', '', 'fonts/DejaVuSans.ttf', uni=True)
             self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf', uni=True)
             self.font_family = 'DejaVu'
         except RuntimeError:
-            st.warning("Fuente 'DejaVu' no encontrada. Se usará Helvetica. Algunos caracteres especiales (ej. '€') podrían no mostrarse.")
+            # st.warning es para la UI, aquí es mejor solo registrarlo internamente o no hacer nada
+            pass
 
     def header(self):
         font_name = self.font_family
         try:
             self.image('LOGO FERREINOX SAS BIC 2024.png', x=10, y=8, w=65)
         except RuntimeError:
-            self.set_xy(10, 8); self.set_font(font_name, 'B', 12); self.cell(65, 25, '[LOGO]', 1, 0, 'C')
-        self.set_y(12); self.set_x(80); self.set_font(font_name, 'B', 22); self.set_text_color(*self.color_gris_oscuro)
-        self.cell(120, 10, 'ORDEN DE COMPRA', 0, 1, 'R'); self.set_x(80); self.set_font(font_name, '', 10); self.set_text_color(100, 100, 100)
-        self.cell(120, 7, self.empresa_nombre, 0, 1, 'R'); self.set_x(80); self.cell(120, 7, f"{self.empresa_nit} - {self.empresa_tel}", 0, 1, 'R')
+            self.set_xy(10, 8)
+            self.set_font(font_name, 'B', 12)
+            self.cell(65, 25, '[LOGO]', 1, 0, 'C')
+        self.set_y(12)
+        self.set_x(80)
+        self.set_font(font_name, 'B', 22)
+        self.set_text_color(*self.color_gris_oscuro)
+        self.cell(120, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
+        self.set_x(80)
+        self.set_font(font_name, '', 10)
+        self.set_text_color(100, 100, 100)
+        self.cell(120, 7, self.empresa_nombre, 0, 1, 'R')
+        self.set_x(80)
+        self.cell(120, 7, f"{self.empresa_nit} - {self.empresa_tel}", 0, 1, 'R')
         self.ln(15)
 
     def footer(self):
         font_name = self.font_family
-        self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
-        self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
+        self.set_y(-20)
+        self.set_draw_color(*self.color_rojo_ferreinox)
+        self.set_line_width(1)
+        self.line(10, self.get_y(), 200, self.get_y())
+        self.ln(2)
+        self.set_font(font_name, '', 8)
+        self.set_text_color(128, 128, 128)
         footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
-        self.cell(0, 10, footer_text, 0, 0, 'C'); self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
+        self.cell(0, 10, footer_text, 0, 0, 'C')
+        self.set_y(-12)
+        self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, direccion_entrega, contacto_proveedor, orden_num, is_consolidated=False):
     if df_seleccion.empty: return None
     pdf = PDF(orientation='P', unit='mm', format='A4')
     font_name = pdf.font_family
-    pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=25)
-    pdf.set_font(font_name, 'B', 10); pdf.set_fill_color(240, 240, 240)
-    pdf.cell(95, 7, "PROVEEDOR", 1, 0, 'C', 1); pdf.cell(95, 7, "ENVIAR A", 1, 1, 'C', 1)
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=25)
+    pdf.set_font(font_name, 'B', 10)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.cell(95, 7, "PROVEEDOR", 1, 0, 'C', 1)
+    pdf.cell(95, 7, "ENVIAR A", 1, 1, 'C', 1)
     pdf.set_font(font_name, '', 9)
     y_start_prov = pdf.get_y()
     proveedor_info = f"Razón Social: {proveedor_nombre}\nContacto: {contacto_proveedor if contacto_proveedor else 'No especificado'}"
     pdf.multi_cell(95, 7, proveedor_info, 1, 'L')
     y_end_prov = pdf.get_y()
-    pdf.set_y(y_start_prov); pdf.set_x(105)
+    pdf.set_y(y_start_prov)
+    pdf.set_x(105)
 
     if is_consolidated:
         envio_info = "Ferreinox SAS BIC\nDirección: Múltiples destinos según detalle\nRecibe: Coordinar con cada tienda"
@@ -293,8 +322,11 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
     pdf.set_font(font_name, 'B', 10)
     pdf.cell(63, 7, f"ORDEN N°: {orden_num}", 1, 0, 'C', 1)
     pdf.cell(64, 7, f"FECHA EMISIÓN: {datetime.now().strftime('%d/%m/%Y')}", 1, 0, 'C', 1)
-    pdf.cell(63, 7, "CONDICIONES: NETO 30 DÍAS", 1, 1, 'C', 1); pdf.ln(10)
-    pdf.set_fill_color(*pdf.color_azul_oscuro); pdf.set_text_color(255, 255, 255); pdf.set_font(font_name, 'B', 9)
+    pdf.cell(63, 7, "CONDICIONES: NETO 30 DÍAS", 1, 1, 'C', 1)
+    pdf.ln(10)
+    pdf.set_fill_color(*pdf.color_azul_oscuro)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font(font_name, 'B', 9)
 
     if is_consolidated:
         pdf.cell(20, 8, 'SKU', 1, 0, 'C', 1)
@@ -304,11 +336,15 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
         pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1)
         pdf.cell(30, 8, 'Costo Total', 1, 1, 'C', 1)
     else:
-        pdf.cell(25, 8, 'Cód. Interno', 1, 0, 'C', 1); pdf.cell(30, 8, 'Cód. Prov.', 1, 0, 'C', 1)
-        pdf.cell(70, 8, 'Descripción del Producto', 1, 0, 'C', 1); pdf.cell(15, 8, 'Cant.', 1, 0, 'C', 1)
-        pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1); pdf.cell(25, 8, 'Costo Total', 1, 1, 'C', 1)
+        pdf.cell(25, 8, 'Cód. Interno', 1, 0, 'C', 1)
+        pdf.cell(30, 8, 'Cód. Prov.', 1, 0, 'C', 1)
+        pdf.cell(70, 8, 'Descripción del Producto', 1, 0, 'C', 1)
+        pdf.cell(15, 8, 'Cant.', 1, 0, 'C', 1)
+        pdf.cell(25, 8, 'Costo Unit.', 1, 0, 'C', 1)
+        pdf.cell(25, 8, 'Costo Total', 1, 1, 'C', 1)
 
-    pdf.set_font(font_name, '', 8); pdf.set_text_color(0, 0, 0)
+    pdf.set_font(font_name, '', 8)
+    pdf.set_text_color(0, 0, 0)
     subtotal = 0
 
     if 'Uds a Comprar' in df_seleccion.columns:
@@ -336,35 +372,51 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
 
         if is_consolidated:
             pdf.multi_cell(20, 5, str(row['SKU']), 1, 'L')
-            y1 = pdf.get_y(); pdf.set_xy(x_start + 20, y_start)
+            y1 = pdf.get_y()
+            pdf.set_xy(x_start + 20, y_start)
             pdf.multi_cell(65, 5, row['Descripcion'], 1, 'L')
-            y2 = pdf.get_y(); pdf.set_xy(x_start + 85, y_start)
+            y2 = pdf.get_y()
+            pdf.set_xy(x_start + 85, y_start)
             pdf.multi_cell(35, 5, str(row.get('Proveedor', 'N/A')), 1, 'L')
             y3 = pdf.get_y()
             row_height = max(y1, y2, y3) - y_start
-            pdf.set_xy(x_start + 120, y_start); pdf.multi_cell(15, row_height, str(int(cantidad)), 1, 'C')
-            pdf.set_xy(x_start + 135, y_start); pdf.multi_cell(25, row_height, f"${costo_unitario:,.2f}", 1, 'R')
-            pdf.set_xy(x_start + 160, y_start); pdf.multi_cell(30, row_height, f"${costo_total_item:,.2f}", 1, 'R')
+            pdf.set_xy(x_start + 120, y_start)
+            pdf.multi_cell(15, row_height, str(int(cantidad)), 1, 'C')
+            pdf.set_xy(x_start + 135, y_start)
+            pdf.multi_cell(25, row_height, f"${costo_unitario:,.2f}", 1, 'R')
+            pdf.set_xy(x_start + 160, y_start)
+            pdf.multi_cell(30, row_height, f"${costo_total_item:,.2f}", 1, 'R')
         else:
             pdf.multi_cell(25, 5, str(row['SKU']), 1, 'L')
-            y1 = pdf.get_y(); pdf.set_xy(x_start + 25, y_start)
+            y1 = pdf.get_y()
+            pdf.set_xy(x_start + 25, y_start)
             pdf.multi_cell(30, 5, str(row.get('SKU_Proveedor', 'N/A')), 1, 'L')
-            y2 = pdf.get_y(); pdf.set_xy(x_start + 55, y_start)
+            y2 = pdf.get_y()
+            pdf.set_xy(x_start + 55, y_start)
             pdf.multi_cell(70, 5, row['Descripcion'], 1, 'L')
             y3 = pdf.get_y()
             row_height = max(y1, y2, y3) - y_start
-            pdf.set_xy(x_start + 125, y_start); pdf.multi_cell(15, row_height, str(int(cantidad)), 1, 'C')
-            pdf.set_xy(x_start + 140, y_start); pdf.multi_cell(25, row_height, f"${costo_unitario:,.2f}", 1, 'R')
-            pdf.set_xy(x_start + 165, y_start); pdf.multi_cell(25, row_height, f"${costo_total_item:,.2f}", 1, 'R')
+            pdf.set_xy(x_start + 125, y_start)
+            pdf.multi_cell(15, row_height, str(int(cantidad)), 1, 'C')
+            pdf.set_xy(x_start + 140, y_start)
+            pdf.multi_cell(25, row_height, f"${costo_unitario:,.2f}", 1, 'R')
+            pdf.set_xy(x_start + 165, y_start)
+            pdf.multi_cell(25, row_height, f"${costo_total_item:,.2f}", 1, 'R')
         pdf.set_y(y_start + row_height)
 
     iva_porcentaje, iva_valor = 0.19, subtotal * 0.19
     total_general = subtotal + iva_valor
-    pdf.set_x(110); pdf.set_font(font_name, '', 10)
-    pdf.cell(55, 8, 'Subtotal:', 1, 0, 'R'); pdf.cell(35, 8, f"${subtotal:,.2f}", 1, 1, 'R')
-    pdf.set_x(110); pdf.cell(55, 8, f'IVA ({iva_porcentaje*100:.0f}%):', 1, 0, 'R'); pdf.cell(35, 8, f"${iva_valor:,.2f}", 1, 1, 'R')
-    pdf.set_x(110); pdf.set_font(font_name, 'B', 11)
-    pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
+    pdf.set_x(110)
+    pdf.set_font(font_name, '', 10)
+    pdf.cell(55, 8, 'Subtotal:', 1, 0, 'R')
+    pdf.cell(35, 8, f"${subtotal:,.2f}", 1, 1, 'R')
+    pdf.set_x(110)
+    pdf.cell(55, 8, f'IVA ({iva_porcentaje*100:.0f}%):', 1, 0, 'R')
+    pdf.cell(35, 8, f"${iva_valor:,.2f}", 1, 1, 'R')
+    pdf.set_x(110)
+    pdf.set_font(font_name, 'B', 11)
+    pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R')
+    pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
 def generar_excel_dinamico(df, nombre_hoja):
@@ -379,13 +431,16 @@ def generar_excel_dinamico(df, nombre_hoja):
         header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top', 'fg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
         for col_num, value in enumerate(df.columns.values): worksheet.write(0, col_num, value, header_format)
         for i, col in enumerate(df.columns):
-            column_len = df[col].astype(str).map(len).max()
-            max_len = max(column_len if pd.notna(column_len) else 0, len(col)) + 2
-            worksheet.set_column(i, i, min(max_len, 45))
+            try:
+                column_len = df[col].astype(str).map(len).max()
+                max_len = max(column_len if pd.notna(column_len) else 0, len(col)) + 2
+                worksheet.set_column(i, i, min(max_len, 45))
+            except Exception:
+                worksheet.set_column(i, i, 15) # Fallback
     return output.getvalue()
 
 # --- 3. LÓGICA PRINCIPAL Y FLUJO DE LA APLICACIÓN ---
-st.title("🚀 Tablero de Control de Abastecimiento v3.2")
+st.title("🚀 Tablero de Control de Abastecimiento v3.3")
 st.markdown("Analiza, prioriza y actúa. Tu sistema de gestión en tiempo real conectado a Google Sheets.")
 
 if 'df_analisis_maestro' not in st.session_state or st.session_state.df_analisis_maestro.empty:
@@ -480,20 +535,9 @@ with st.sidebar:
             else: st.error(msg)
 
 # --- 4. INTERFAZ DE USUARIO CON PESTAÑAS ---
-tab_titles = ["📊 Diagnóstico", "🔄 Traslados", "🛒 Compras", "✅ Seguimiento"]
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Diagnóstico", "🔄 Traslados", "🛒 Compras", "✅ Seguimiento"])
 
-# Corrección para mantener la pestaña activa
-if 'active_tab_name' not in st.session_state:
-    st.session_state.active_tab_name = tab_titles[0]
-
-# Usamos un callback para actualizar el estado de la pestaña activa
-def on_tab_change():
-    st.session_state.active_tab_name = st.session_state.tabs
-
-active_tab = st.tabs(tab_titles, key="tabs", on_change=on_tab_change)
-
-# Mapeamos el nombre de la pestaña a su contenido
-with active_tab[0]:
+with tab1:
     st.subheader(f"Diagnóstico para: {selected_almacen_nombre}")
     necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
     oportunidad_ahorro = 0
@@ -535,7 +579,7 @@ with active_tab[0]:
             fig = px.sunburst(df_compras_chart, path=['Segmento_ABC', 'Marca_Nombre'], values='Valor_Compra', title="¿En qué categorías y marcas comprar?")
             st.plotly_chart(fig, use_container_width=True)
 
-with active_tab[1]:
+with tab2:
     st.subheader("🚚 Plan de Traslados entre Tiendas")
     with st.expander("🔄 **Plan de Traslados Automático**", expanded=True):
         if df_plan_maestro.empty:
@@ -676,7 +720,7 @@ with active_tab[1]:
                 else:
                     st.warning("La solicitud está vacía.")
 
-with active_tab[2]:
+with tab3:
     st.header("🛒 Plan de Compras")
     with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
@@ -772,7 +816,7 @@ with active_tab[2]:
             if not df_resultados_compra.empty:
                 df_resultados_compra['Uds a Comprar'] = 1
                 df_resultados_compra['Seleccionar'] = False
-                # MEJORA: Asegurar que la columna de costo esté presente
+                
                 columnas_busqueda_compra = ['Seleccionar', 'SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND', 'Uds a Comprar']
                 columnas_existentes_compra = [col for col in columnas_busqueda_compra if col in df_resultados_compra.columns]
                 
@@ -780,9 +824,9 @@ with active_tab[2]:
                 edited_df_compra_especial = st.data_editor(
                     df_resultados_compra[columnas_existentes_compra], key="editor_compra_especial", hide_index=True, use_container_width=True,
                     column_config={
-                        "Uds a Comprar": st.column_config.NumberColumn(min_value=1, step=1, required=True), 
+                        "Uds a Comprar": st.column_config.NumberColumn(min_value=1, step=1, required=True),
                         "Seleccionar": st.column_config.CheckboxColumn(required=True),
-                        "Costo_Promedio_UND": st.column_config.NumberColumn(label="Costo Unitario", disabled=True)
+                        "Costo_Promedio_UND": st.column_config.NumberColumn(label="Costo Unitario", disabled=True, format="$%.2f")
                     },
                     disabled=['SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND'])
                 
@@ -808,7 +852,6 @@ with active_tab[2]:
             tiendas_destino_validas = sorted(df_maestro['Almacen_Nombre'].unique().tolist())
             tienda_destino_especial = st.selectbox("Seleccionar Tienda Destino para esta compra:", tiendas_destino_validas, key="destino_compra_especial")
             
-            # Renombrar 'Costo_Promedio_UND' a 'Costo_Unitario' para consistencia
             if 'Costo_Promedio_UND' in df_solicitud_compra.columns:
                 df_solicitud_compra.rename(columns={'Costo_Promedio_UND': 'Costo_Unitario'}, inplace=True)
 
@@ -827,14 +870,13 @@ with active_tab[2]:
                         exito_registro, msg_registro, df_registrado = registrar_ordenes_en_sheets(client, df_solicitud_compra, "Compra Especial", proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial)
                         if exito_registro:
                             st.success(f"✅ Compra especial registrada. {msg_registro}")
-                            # Lógica de envío de correo
                             if email_dest_compra_especial:
                                 orden_id_real = df_registrado['ID_Orden'].iloc[0] if not df_registrado.empty else f"OC-SP-{datetime.now().strftime('%Y%m%d')}"
                                 pdf_bytes = generar_pdf_orden_compra(df_registrado, proveedor_especial, tienda_destino_especial, DIRECCIONES_TIENDAS.get(tienda_destino_especial, ""), contacto_proveedor_especial, orden_id_real)
                                 excel_bytes = generar_excel_dinamico(df_registrado, f"CompraEspecial_{proveedor_especial}")
                                 
                                 asunto = f"Nueva Orden de Compra Especial {orden_id_real} de Ferreinox"
-                                cuerpo_html = f"<html><body><p>Estimado(a) {proveedor_especial},</p><p>Adjuntamos una orden de compra especial con ID <b>{orden_id_real}</b>. Por favor, revise los detalles en los archivos adjuntos.</p><p>Gracias.</p></body></html>"
+                                cuerpo_html = f"<html><body><p>Estimado(a) {proveedor_especial},</p><p>Adjuntamos una orden de compra especial con ID <b>{orden_id_real}</b>. Por favor, revise los detalles en los archivos adjuntos.</p><p>Gracias.</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC</p></body></html>"
                                 adjuntos = [
                                     {'datos': pdf_bytes, 'nombre_archivo': f"OC_Especial_{orden_id_real}.pdf", 'tipo_mime': 'application', 'subtipo_mime': 'pdf'},
                                     {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_Especial_{orden_id_real}.xlsx", 'tipo_mime': 'application', 'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
@@ -852,8 +894,7 @@ with active_tab[2]:
                 else:
                     st.warning("La lista de compra está vacía o falta el nombre del proveedor.")
 
-
-with active_tab[3]:
+with tab4:
     st.subheader("✅ Seguimiento y Recepción de Órdenes")
     if df_ordenes_historico.empty:
         st.warning("No se pudo cargar el historial de órdenes desde Google Sheets o aún no hay órdenes registradas.")
