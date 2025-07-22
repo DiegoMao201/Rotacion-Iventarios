@@ -208,23 +208,56 @@ if df_crudo is not None and not df_crudo.empty:
 
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
 
-    if st.session_state.user_role == 'gerente':
-        opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
-        nombres_almacen = [opcion_consolidado] + sorted(df_analisis_completo['Almacen_Nombre'].unique().tolist())
-        selected_almacen_nombre = st.sidebar.selectbox("Selecciona la Vista:", nombres_almacen)
-        df_vista = df_analisis_completo if selected_almacen_nombre == opcion_consolidado else df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == selected_almacen_nombre]
-    else:
-        selected_almacen_nombre = st.session_state.almacen_nombre
-        st.sidebar.markdown(f"**Vista actual:** `{selected_almacen_nombre}`")
-        df_vista = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == selected_almacen_nombre]
+    # --- INICIO: NUEVOS FILTROS GLOBALES MEJORADOS ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("🎯 Filtros Globales de Gestión")
     
-    marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
-    selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, default=marcas_unicas)
-    df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
-    st.session_state['df_filtered_global'] = df_filtered.copy()
-    st.session_state['selected_almacen_global'] = selected_almacen_nombre
+    # Filtro de Tienda
+    if st.session_state.user_role == 'gerente':
+        all_stores = sorted(df_analisis_completo['Almacen_Nombre'].unique().tolist())
+        selected_stores = st.sidebar.multiselect("Filtrar por Tienda(s):", all_stores, default=all_stores)
+    else:
+        selected_stores = [st.session_state.almacen_nombre]
+        st.sidebar.markdown(f"**Vista de Tienda:** `{selected_stores[0]}`")
 
-    st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
+    df_vista = df_analisis_completo[df_analisis_completo['Almacen_Nombre'].isin(selected_stores)]
+
+    # Filtros Jerárquicos
+    all_departments = sorted(df_vista['Departamento'].unique().tolist())
+    selected_departments = st.sidebar.multiselect("Filtrar por Departamento(s):", all_departments, default=all_departments)
+    df_vista_dep = df_vista[df_vista['Departamento'].isin(selected_departments)]
+
+    all_brands = sorted(df_vista_dep['Marca_Nombre'].unique().tolist())
+    selected_brands = st.sidebar.multiselect("Filtrar por Marca(s):", all_brands, default=all_brands)
+    df_vista_brand = df_vista_dep[df_vista_dep['Marca_Nombre'].isin(selected_brands)]
+
+    all_providers = sorted(df_vista_brand['Proveedor'].unique().tolist())
+    selected_providers = st.sidebar.multiselect("Filtrar por Proveedor(es):", all_providers, default=all_providers)
+    
+    df_filtered = df_vista_brand[df_vista_brand['Proveedor'].isin(selected_providers)]
+    
+    # Guardar estado para las otras páginas
+    st.session_state['df_filtered_global'] = df_filtered.copy()
+    st.session_state['selected_almacen_global'] = "Varias Tiendas" if len(selected_stores) > 1 else selected_stores[0]
+    # --- FIN: NUEVOS FILTROS GLOBALES MEJORADOS ---
+    
+    # --- INICIO: NUEVOS KPIs DINÁMICOS EN SIDEBAR ---
+    st.sidebar.markdown("---")
+    st.sidebar.header("📊 Resumen del Filtro")
+    if not df_filtered.empty:
+        valor_filtrado = df_filtered['Valor_Inventario'].sum()
+        quiebres_filtrado = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
+        excedente_filtrado = df_filtered[df_filtered['Estado_Inventario'] == 'Excedente']['Valor_Inventario'].sum()
+        st.sidebar.metric("Valor Inventario Filtrado", f"${valor_filtrado:,.0f}")
+        st.sidebar.metric("SKUs en Quiebre", f"{quiebres_filtrado}")
+        st.sidebar.metric("Valor en Excedente", f"${excedente_filtrado:,.0f}")
+    else:
+        st.sidebar.info("No hay datos para los filtros seleccionados.")
+    # --- FIN: NUEVOS KPIs DINÁMICOS EN SIDEBAR ---
+
+
+    # --- Visualización del Dashboard (Usa el df_filtered) ---
+    st.markdown(f'<p class="section-header">Métricas Clave: {st.session_state.selected_almacen_global}</p>', unsafe_allow_html=True)
     if not df_filtered.empty:
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
         skus_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']['SKU'].nunique()
@@ -261,13 +294,11 @@ if df_crudo is not None and not df_crudo.empty:
             valor_excedente_total = valor_sobrestock + valor_baja_rotacion
             porc_excedente = (valor_excedente_total / valor_total_inv) * 100 if valor_total_inv > 0 else 0
             if skus_quiebre > 10:
-                st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**. Usa el módulo 'Atender Quiebres' para actuar.", icon="🚨")
+                st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La selección actual tiene **{skus_quiebre} productos en quiebre de stock**. Usa el módulo 'Atender Quiebres' para actuar.", icon="🚨")
             elif porc_excedente > 30:
-                st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente. El problema principal está en: {'Baja Rotación' if valor_baja_rotacion > valor_sobrestock else 'Sobre-stock'}.", icon="💸")
+                st.warning(f"💸 **Oportunidad de Capital:** En la selección actual, más del **{porc_excedente:.1f}%** del inventario es excedente.", icon="💸")
             else:
-                st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
-        elif st.session_state.get('user_role') == 'gerente' and selected_almacen_nombre == "-- Consolidado (Todas las Tiendas) --":
-            st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
+                st.success(f"✅ **Inventario Saludable:** La selección actual mantiene un buen balance.", icon="✅")
         else:
             st.info("No hay datos para los filtros seleccionados.")
     
