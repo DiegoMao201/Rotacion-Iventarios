@@ -155,6 +155,11 @@ def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adju
 def generar_link_whatsapp(numero, mensaje):
     mensaje_codificado = urllib.parse.quote(mensaje)
     return f"https://wa.me/{numero}?text={mensaje_codificado}"
+def whatsapp_button(label, url, target="_blank", use_container_width=True):
+    st.markdown(
+        f'<a href="{url}" target="{target}"><button style="background-color:#25d366;color:white;border:none;border-radius:5px;padding:0.5em 1em;font-size:1em;cursor:pointer;">{label}</button></a>',
+        unsafe_allow_html=True,
+    )
 
 @st.cache_data
 def generar_plan_traslados_inteligente(_df_analisis):
