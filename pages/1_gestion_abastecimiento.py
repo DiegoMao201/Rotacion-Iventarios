@@ -570,7 +570,7 @@ with tab2:
                                         ids_orden_tienda = ", ".join(ordenes_destino['ID_Orden'].unique())
                                         mensaje_wpp = f"Hola {nombre_contacto}, se ha generado una nueva orden de traslado hacia su tienda (ID: {ids_orden_tienda}). Por favor, estar atentos a la recepción. ¡Gracias!"
                                         link_wpp = generar_link_whatsapp(numero_wpp, mensaje_wpp)
-                                        st.link_button(f"📲 Notificar a {destino} por WhatsApp", link_wpp, target="_blank")
+                                        whatsapp_button(f"📲 Notificar a {destino} por WhatsApp", link_wpp, target="_blank")
                                 st.success("Proceso completado. Recargando datos...")
                                 st.cache_data.clear()
                                 st.rerun()
@@ -637,7 +637,7 @@ with tab2:
                                 ids_orden = ", ".join(df_registrado_especial['ID_Orden'].unique())
                                 mensaje_wpp = f"Hola {nombre_contacto_especial or tienda_destino_especial}, se ha generado una solicitud especial de traslado a su tienda (ID: {ids_orden})."
                                 link_wpp = generar_link_whatsapp(celular_contacto_especial, mensaje_wpp)
-                                st.link_button("📲 Notificar por WhatsApp", link_wpp, target="_blank")
+                                whatsapp_button("📲 Notificar por WhatsApp", link_wpp, target="_blank")
                             st.session_state.solicitud_traslado_especial = []
                             st.cache_data.clear()
                             st.rerun()
@@ -732,7 +732,7 @@ with tab3:
                                             numero_completo = celular_proveedor.strip().replace(" ", "")
                                             mensaje_wpp = f"Hola {nombre_contacto}, te acabamos de enviar la Orden de Compra N° {orden_id_real} al correo. Quedamos atentos. ¡Gracias!"
                                             link_wpp = generar_link_whatsapp(numero_completo, mensaje_wpp)
-                                            st.link_button("📲 Enviar Confirmación por WhatsApp", link_wpp, target="_blank")
+                                            whatsapp_button("📲 Enviar Confirmación por WhatsApp", link_wpp, target="_blank")
                                         
                                         st.success("Proceso completado. Recargando datos...")
                                         st.cache_data.clear()
@@ -888,6 +888,6 @@ with tab4:
                         if numero_wpp:
                             mensaje_wpp = f"Hola, se ha generado o modificado la orden {id_elegido}. Por favor revise los documentos enviados a su correo. ¡Gracias!"
                             link_wpp = generar_link_whatsapp(numero_wpp, mensaje_wpp)
-                            st.link_button("Abrir Chat en WhatsApp", url=link_wpp, use_container_width=True)
+                            whatsapp_button("Abrir Chat en WhatsApp", url=link_wpp, use_container_width=True)
                         else:
                             st.warning("Ingrese un número de celular válido.")
