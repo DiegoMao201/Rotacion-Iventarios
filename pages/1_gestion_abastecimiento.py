@@ -816,7 +816,7 @@ with tabs[3]:
                     if numero_wpp:
                         mensaje_wpp = f"Hola, se ha generado o modificado la orden {id_elegido}. Por favor revise los documentos enviados."
                         link_wpp = generar_link_whatsapp(numero_wpp, mensaje_wpp)
-                        st.link_button("Ir a WhatsApp Web", link_wpp, target="_blank")
+                        whatsapp_button("Ir a WhatsApp Web", link_wpp, target="_blank")
                     else:
                         st.warning("Ingrese un número de celular válido.")
 
