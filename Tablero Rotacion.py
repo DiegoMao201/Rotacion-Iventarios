@@ -204,36 +204,42 @@ col4.metric("📦 SKUs en Quiebre", f"{skus_quiebre}")
 st.markdown("---")
 st.markdown('<p class="section-header">Navegación a Módulos de Gestión</p>', unsafe_allow_html=True)
 st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Compras y Traslados", icon="🚚")
-#... (otros page_links)
+# ... Puedes añadir otros page_links aquí si los tienes
 
+# --- INICIO DE LA SECCIÓN CORREGIDA ---
 st.markdown('<p class="section-header" style="margin-top: 20px;">Diagnóstico de la Selección Actual</p>', unsafe_allow_html=True)
 with st.container(border=True):
-    # ... (lógica del diagnóstico)
+    # Este es el bloque de código que faltaba y causaba el IndentationError
+    if not df_filtered.empty:
+        valor_excedente_total = valor_sobrestock + valor_baja_rotacion
+        porc_excedente = (valor_excedente_total / valor_total_inv) * 100 if valor_total_inv > 0 else 0
+        if skus_quiebre > 10:
+            st.error(f"🚨 **Alerta de Abastecimiento:** ¡Hay **{skus_quiebre} productos en quiebre de stock!**", icon="🚨")
+        elif porc_excedente > 30:
+            st.warning(f"💸 **Oportunidad de Capital:** Más del **{porc_excedente:.1f}%** del valor del inventario es excedente.", icon="💸")
+        else:
+            st.success("✅ **Inventario Saludable:** La selección actual mantiene un buen balance.", icon="✅")
+    else:
+        st.info("No hay datos disponibles para mostrar un diagnóstico.")
+# --- FIN DE LA SECCIÓN CORREGIDA ---
 
-# --- INICIO DE LA LÓGICA DE BÚSQUEDA CORREGIDA ---
 st.markdown("---")
 st.markdown('<p class="section-header">🔍 Consulta Inteligente de Stock por Producto</p>', unsafe_allow_html=True)
 search_term = st.text_input(
-    "Buscar producto con stock por SKU o palabras clave (ej: estuco acrilico galon):", 
+    "Buscar producto con stock por SKU o palabras clave (ej: estuco acrilico galon):",
     placeholder="Buscar solo en productos con inventario..."
 )
 
 if search_term:
-    # 1. Pre-filtrar el DataFrame para incluir solo productos con stock
     df_con_stock = df_analisis_completo[df_analisis_completo['Stock'] > 0].copy()
-
-    # 2. Crear un campo de búsqueda combinado para búsquedas inteligentes
     df_con_stock['Campo_Busqueda'] = (
-        df_con_stock['SKU'].astype(str) + ' ' + 
+        df_con_stock['SKU'].astype(str) + ' ' +
         df_con_stock['Descripcion'].astype(str)
     ).str.lower()
     
-    # 3. Dividir la consulta del usuario en palabras clave
     keywords = search_term.lower().split()
 
-    # 4. Filtrar el DataFrame: todas las palabras clave deben estar en el campo de búsqueda
     if keywords:
-        # Empezamos con una máscara que incluye todos los productos con stock
         final_mask = pd.Series(True, index=df_con_stock.index)
         for keyword in keywords:
             final_mask &= df_con_stock['Campo_Busqueda'].str.contains(keyword, na=False)
@@ -245,17 +251,13 @@ if search_term:
     if df_search_results.empty:
         st.warning("No se encontraron productos en stock que coincidan con todas las palabras clave.")
     else:
-        # 5. Mostrar la tabla pivotada con los resultados
         found_skus = df_search_results['SKU'].unique()
         df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
         
         pivot_stock = df_stock_completo.pivot_table(
-            index=['SKU', 'Descripcion', 'Marca_Nombre'], 
-            columns='Almacen_Nombre', 
-            values='Stock', 
+            index=['SKU', 'Descripcion', 'Marca_Nombre'],
+            columns='Almacen_Nombre',
+            values='Stock',
             fill_value=0
         )
-        
-        # Ocultar columnas (tiendas) donde la suma de stock para los productos encontrados es 0
         st.dataframe(pivot_stock.loc[:, pivot_stock.sum() > 0], use_container_width=True)
-# --- FIN DE LA LÓGICA DE BÚSQUEDA CORREGIDA ---
