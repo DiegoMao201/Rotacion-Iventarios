@@ -268,8 +268,6 @@ def calcular_sugerencias_finales(_df_base, _df_ordenes):
     """Ajusta las necesidades de inventario considerando stock en tránsito y traslados posibles."""
     df_maestro = _df_base.copy()
     
-    # --- INICIO DE LA LÓGICA CORREGIDA PARA 'Stock_En_Transito' ---
-    # Se inicializa la columna para evitar el KeyError
     df_maestro['Stock_En_Transito'] = 0
 
     if not _df_ordenes.empty and 'Estado' in _df_ordenes.columns:
@@ -279,33 +277,24 @@ def calcular_sugerencias_finales(_df_base, _df_ordenes):
             stock_en_transito_agg = df_pendientes.groupby(['SKU', 'Tienda_Destino'])['Cantidad_Solicitada'].sum().reset_index()
             stock_en_transito_agg = stock_en_transito_agg.rename(columns={'Cantidad_Solicitada': 'Stock_En_Transito_Nuevas', 'Tienda_Destino': 'Almacen_Nombre'})
             
-            # Merge para añadir o actualizar los valores de stock en tránsito
             df_maestro = pd.merge(df_maestro, stock_en_transito_agg, on=['SKU', 'Almacen_Nombre'], how='left')
-            # Sumar el stock en tránsito nuevo al existente (que era 0) y rellenar NaNs
             df_maestro['Stock_En_Transito'] = df_maestro['Stock_En_Transito'].add(df_maestro['Stock_En_Transito_Nuevas'], fill_value=0)
             df_maestro.drop(columns=['Stock_En_Transito_Nuevas'], inplace=True)
-    # --- FIN DE LA LÓGICA CORREGIDA ---
 
     df_maestro['Necesidad_Ajustada_Por_Transito'] = (df_maestro['Necesidad_Total'] - df_maestro['Stock_En_Transito']).clip(lower=0)
     
     df_plan_maestro = generar_plan_traslados_inteligente(df_maestro)
     
-    # --- INICIO DE LA CORRECCIÓN DE KEYERROR ---
-    # Se inicializa la columna 'Cubierto_Por_Traslado' con 0.
-    # Esto garantiza que la columna siempre exista antes de cualquier operación.
     df_maestro['Cubierto_Por_Traslado'] = 0
     
     if not df_plan_maestro.empty:
         unidades_cubiertas = df_plan_maestro.groupby(['SKU', 'Tienda Destino'])['Uds a Enviar'].sum().reset_index()
         unidades_cubiertas = unidades_cubiertas.rename(columns={'Tienda Destino': 'Almacen_Nombre', 'Uds a Enviar': 'Cubierto_Por_Traslado_Nuevas'})
         
-        # Merge para añadir las unidades cubiertas.
         df_maestro = pd.merge(df_maestro, unidades_cubiertas, on=['SKU', 'Almacen_Nombre'], how='left')
         
-        # Se suman las unidades nuevas a la columna existente (que es 0) y se eliminan NaNs.
         df_maestro['Cubierto_Por_Traslado'] = df_maestro['Cubierto_Por_Traslado'].add(df_maestro['Cubierto_Por_Traslado_Nuevas'], fill_value=0)
         df_maestro.drop(columns=['Cubierto_Por_Traslado_Nuevas'], inplace=True)
-    # --- FIN DE LA CORRECCIÓN DE KEYERROR ---
 
     df_maestro['Sugerencia_Compra'] = np.ceil(df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)
     df_maestro['Sugerencia_Compra'] = df_maestro['Sugerencia_Compra'].astype(int)
@@ -440,7 +429,7 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
     return bytes(pdf.output())
 
 def generar_excel_dinamico(df, nombre_hoja):
-    # (El código de esta función es robusto y no requiere cambios, se mantiene intacto)
+    # (El código de esta función es extenso y no requiere cambios, se mantiene intacto)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
     #... lógica completa de la función
