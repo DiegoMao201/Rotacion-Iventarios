@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import io
-import os  # <-- Importante para manejar rutas de archivos
+import os
 from fpdf import FPDF
 from datetime import datetime
 import smtplib
@@ -142,7 +142,7 @@ def calcular_sugerencias_finales(_df_base, _df_ordenes):
             stock_en_transito_agg = df_pendientes.groupby(['SKU', 'Tienda_Destino'])['Cantidad_Solicitada'].sum().reset_index()
             stock_en_transito_agg = stock_en_transito_agg.rename(columns={'Cantidad_Solicitada': 'Stock_En_Transito', 'Tienda_Destino': 'Almacen_Nombre'})
             df_maestro = pd.merge(df_maestro, stock_en_transito_agg, on=['SKU', 'Almacen_Nombre'], how='left')
-            df_maestro['Stock_En_Transito'].fillna(0, inplace=True)
+            df_maestro['Stock_En_Transito'] = df_maestro['Stock_En_Transito'].fillna(0)
         else:
             df_maestro['Stock_En_Transito'] = 0
     else:
@@ -153,7 +153,7 @@ def calcular_sugerencias_finales(_df_base, _df_ordenes):
         unidades_cubiertas = df_plan_maestro.groupby(['SKU', 'Tienda Destino'])['Uds a Enviar'].sum().reset_index()
         unidades_cubiertas = unidades_cubiertas.rename(columns={'Tienda Destino': 'Almacen_Nombre', 'Uds a Enviar': 'Cubierto_Por_Traslado'})
         df_maestro = pd.merge(df_maestro, unidades_cubiertas, on=['SKU', 'Almacen_Nombre'], how='left')
-        df_maestro['Cubierto_Por_Traslado'].fillna(0, inplace=True)
+        df_maestro['Cubierto_Por_Traslado'] = df_maestro['Cubierto_Por_Traslado'].fillna(0)
     else:
         df_maestro['Cubierto_Por_Traslado'] = 0
     df_maestro['Sugerencia_Compra'] = np.ceil(df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)
@@ -242,23 +242,18 @@ class PDF(FPDF):
         self.color_gris_oscuro = (68, 68, 68)
         self.color_azul_oscuro = (79, 129, 189)
         self.font_family = 'Helvetica'
-        
-        # --- ✅ MEJORA IMPORTANTE: RUTA ROBUSTA A LAS FUENTES Y FALLBACK ---
         try:
-            # Construye una ruta absoluta al archivo de fuentes
             base_path = os.path.dirname(__file__)
             font_path = os.path.join(base_path, 'fonts', 'DejaVuSans.ttf')
             font_path_bold = os.path.join(base_path, 'fonts', 'DejaVuSans-Bold.ttf')
-            
             self.add_font('DejaVu', '', font_path, uni=True)
             self.add_font('DejaVu', 'B', font_path_bold, uni=True)
             self.font_family = 'DejaVu'
-        except FileNotFoundError:
-            # Si no encuentra las fuentes, no detiene la app, usa la fuente por defecto.
-            st.warning("Archivos de fuente personalizados no encontrados. Se usará la fuente por defecto.")
-            self.font_family = 'Helvetica'
-        except Exception as e:
-            st.warning(f"Ocurrió un error al cargar las fuentes: {e}. Se usará la fuente por defecto.")
+        except Exception:
+            # Si hay un error (ej. en despliegue local sin la carpeta), no detiene la app
+            if 'font_warning_shown' not in st.session_state:
+                st.warning("Archivos de fuente personalizados no encontrados en la carpeta 'fonts'. Se usará la fuente por defecto.")
+                st.session_state.font_warning_shown = True # Evita mostrar el warning en cada rerun
             self.font_family = 'Helvetica'
 
     def header(self):
