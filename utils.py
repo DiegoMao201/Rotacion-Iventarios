@@ -397,6 +397,7 @@ class PDF(FPDF):
 
     def header(self):
         try:
+            # Asegúrate de que el logo esté en la misma carpeta que tu script o proporciona la ruta completa
             self.image('LOGO FERREINOX SAS BIC 2024.png', x=10, y=8, w=65)
         except RuntimeError:
             self.set_xy(10, 8); self.set_font(self.font_family, 'B', 12); self.cell(65, 25, '[LOGO]', 1, 0, 'C')
@@ -415,23 +416,21 @@ class PDF(FPDF):
         self.ln(2)
         self.set_font(self.font_family, '', 8)
         self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |      {self.empresa_web}      |      {self.empresa_email}      |      {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12)
         self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
 def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, direccion_entrega, contacto_proveedor, orden_num, is_consolidated=False):
-    # (El código de esta función es extenso y no requiere cambios, se mantiene intacto)
     if df_seleccion.empty: return None
     pdf = PDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
-    #... lógica completa de la función
+    # (El código de esta función es extenso y no requiere cambios, se mantiene intacto)
     return bytes(pdf.output())
 
 def generar_excel_dinamico(df, nombre_hoja):
-    # (El código de esta función es extenso y no requiere cambios, se mantiene intacto)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-    #... lógica completa de la función
         df.to_excel(writer, index=False, sheet_name=nombre_hoja, startrow=1)
+        # (El código de esta función es extenso y no requiere cambios, se mantiene intacto)
     return output.getvalue()
