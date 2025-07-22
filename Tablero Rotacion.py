@@ -1,4 +1,4 @@
-# Tablero_Principal.py (Reemplaza tu 'Tablero Rotacion.py')
+# Tablero_Principal.py
 
 import streamlit as st
 import pandas as pd
@@ -16,14 +16,13 @@ st.set_page_config(
 )
 
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
-# Se asegura que las claves necesarias existan desde el principio.
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.user_role = None
     st.session_state.almacen_nombre = None
-    st.session_state.df_analisis_maestro = pd.DataFrame() # Clave para compartir datos
+    st.session_state.df_analisis_maestro = pd.DataFrame()
 
-# --- 1. LÓGICA DE USUARIOS Y AUTENTICACIÓN (Sin cambios) ---
+# --- 1. LÓGICA DE USUARIOS Y AUTENTICACIÓN ---
 USUARIOS = {
     "gerente": {"password": "1234", "almacen": "Todas"},
     "opalo": {"password": "2345", "almacen": "Opalo"},
@@ -53,8 +52,6 @@ def login():
                 st.error("Usuario o contraseña incorrectos.")
 
 def logout():
-    # Limpia todo el estado de la sesión para un logout completo
-    keys_to_keep = ['logged_in', 'user_role', 'almacen_nombre'] # Puedes decidir mantener algunas claves si es necesario
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     st.rerun()
@@ -63,19 +60,16 @@ if not st.session_state.get('logged_in', False):
     login()
     st.stop()
 
-# --- ESTILOS VISUALES Y CSS (Sin cambios) ---
+# --- ESTILOS VISUALES Y CSS ---
 st.markdown("""
 <style>
     .section-header { color: #4F8BF9; font-weight: bold; border-bottom: 2px solid #4F8BF9; padding-bottom: 5px; margin-bottom: 15px; }
     .stAlert { border-radius: 10px; }
-    div[data-testid="stButton"] > button {
-        border-radius: 10px;
-    }
+    div[data-testid="stButton"] > button { border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# --- LÓGICA DE CARGA DE DATOS DESDE DROPBOX (Sin cambios) ---
+# --- LÓGICA DE CARGA DE DATOS DESDE DROPBOX ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
     info_message = st.empty()
@@ -113,7 +107,7 @@ def cargar_proveedores_desde_dropbox():
         info_message.error(f"No se pudo cargar '{proveedores_path}'. La info de proveedores no estará disponible.", icon="🔥")
         return pd.DataFrame(columns=['SKU', 'Proveedor', 'SKU_Proveedor'])
 
-# --- LÓGICA DE ANÁLISIS DE INVENTARIO (Sin cambios) ---
+# --- LÓGICA DE ANÁLISIS DE INVENTARIO ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, dias_objetivo=None):
     if _df_crudo is None or _df_crudo.empty:
@@ -141,13 +135,15 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     df['Historial_Ventas'] = df['Historial_Ventas'].fillna('').astype(str)
     df_ventas = df[df['Historial_Ventas'].str.contains(':')].copy()
     df_ventas = df_ventas.assign(Historial_Ventas=df_ventas['Historial_Ventas'].str.split(',')).explode('Historial_Ventas')
-    df_ventas[['Fecha_Venta', 'Unidades']] = df_ventas['Historial_Ventas'].str.split(':', expand=True)
-    df_ventas['Fecha_Venta'] = pd.to_datetime(df_ventas['Fecha_Venta'], errors='coerce')
-    df_ventas['Unidades'] = pd.to_numeric(df_ventas['Unidades'], errors='coerce')
-    df_ventas.dropna(subset=['Fecha_Venta', 'Unidades'], inplace=True)
-    df_ventas = df_ventas[(pd.Timestamp.now() - df_ventas['Fecha_Venta']).dt.days <= 60]
-    demanda_diaria = df_ventas.groupby('index')['Unidades'].sum() / 60
-    df = df.merge(demanda_diaria.rename('Demanda_Diaria_Promedio'), on='index', how='left').fillna({'Demanda_Diaria_Promedio': 0})
+    if not df_ventas.empty:
+        df_ventas[['Fecha_Venta', 'Unidades']] = df_ventas['Historial_Ventas'].str.split(':', expand=True)
+        df_ventas['Fecha_Venta'] = pd.to_datetime(df_ventas['Fecha_Venta'], errors='coerce')
+        df_ventas['Unidades'] = pd.to_numeric(df_ventas['Unidades'], errors='coerce')
+        df_ventas.dropna(subset=['Fecha_Venta', 'Unidades'], inplace=True)
+        df_ventas = df_ventas[(pd.Timestamp.now() - df_ventas['Fecha_Venta']).dt.days <= 60]
+        demanda_diaria = df_ventas.groupby('index')['Unidades'].sum() / 60
+        df = df.merge(demanda_diaria.rename('Demanda_Diaria_Promedio'), on='index', how='left')
+    df['Demanda_Diaria_Promedio'] = df.get('Demanda_Diaria_Promedio', 0).fillna(0)
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
@@ -166,15 +162,10 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     df['Excedente_Trasladable'] = np.where(df['Estado_Inventario'] == 'Excedente', np.maximum(0, df['Stock'] - df['Stock_Objetivo']), 0)
-
     if _df_proveedores is not None and not _df_proveedores.empty:
         df = pd.merge(df, _df_proveedores, on='SKU', how='left')
-        df['Proveedor'] = df['Proveedor'].fillna('No Asignado')
-        df['SKU_Proveedor'] = df['SKU_Proveedor'].fillna('N/A')
-    else:
-        df['Proveedor'] = 'No Asignado'
-        df['SKU_Proveedor'] = 'N/A'
-
+    df['Proveedor'] = df.get('Proveedor', 'No Asignado').fillna('No Asignado')
+    df['SKU_Proveedor'] = df.get('SKU_Proveedor', 'N/A').fillna('N/A')
     return df.set_index('index')
 
 # --- INICIO DE LA INTERFAZ DE USUARIO ---
@@ -187,15 +178,14 @@ st.markdown(f"###### Panel de control para la toma de decisiones. Última carga:
 
 if st.button("🔄 Actualizar Datos de Inventario", help="Vuelve a cargar los archivos más recientes desde Dropbox."):
     st.cache_data.clear()
-    toast_message = st.toast('Borrando caché y recargando datos...', icon='⏳')
+    st.toast('Borrando caché y recargando datos...', icon='⏳')
     time.sleep(2)
-    toast_message.toast('¡Datos actualizados! Recargando panel...', icon='✅')
+    st.toast('¡Datos actualizados! Recargando panel...', icon='✅')
     time.sleep(1)
     st.rerun()
 
 st.markdown("---")
 
-# Carga de datos
 df_crudo = cargar_datos_desde_dropbox()
 df_proveedores = cargar_proveedores_desde_dropbox()
 
@@ -216,10 +206,8 @@ if df_crudo is not None and not df_crudo.empty:
             dias_objetivo=dias_objetivo_dict
         ).reset_index()
 
-    # **CLAVE**: Guardamos el resultado del análisis en el estado de la sesión
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
 
-    # --- Filtros de la barra lateral (Sin cambios) ---
     if st.session_state.user_role == 'gerente':
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
         nombres_almacen = [opcion_consolidado] + sorted(df_analisis_completo['Almacen_Nombre'].unique().tolist())
@@ -233,8 +221,9 @@ if df_crudo is not None and not df_crudo.empty:
     marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
     selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, default=marcas_unicas)
     df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
+    st.session_state['df_filtered_global'] = df_filtered.copy()
+    st.session_state['selected_almacen_global'] = selected_almacen_nombre
 
-    # --- Visualización del Dashboard (Sin cambios) ---
     st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
     if not df_filtered.empty:
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
