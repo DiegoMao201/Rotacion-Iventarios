@@ -13,7 +13,6 @@ from email.mime.base import MIMEBase
 from email import encoders
 import gspread
 from google.oauth2.service_account import Credentials
-from streamlit_whatsapp import whatsapp_button
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 st.set_page_config(page_title="Gestión de Abastecimiento v3.2", layout="wide", page_icon="🚀")
