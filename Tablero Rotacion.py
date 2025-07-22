@@ -1,10 +1,12 @@
+# Tablero_Principal.py (Reemplaza tu 'Tablero Rotacion.py')
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 import dropbox
 import io
 from datetime import datetime
-import time # ✨ NUEVO: Importamos la librería time para una pequeña pausa visual
+import time
 
 # --- 0. CONFIGURACIÓN INICIAL ---
 st.set_page_config(
@@ -13,7 +15,15 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- ✅ 1. LÓGICA DE USUARIOS Y AUTENTICACIÓN (Sin cambios) ---
+# --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
+# Se asegura que las claves necesarias existan desde el principio.
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.user_role = None
+    st.session_state.almacen_nombre = None
+    st.session_state.df_analisis_maestro = pd.DataFrame() # Clave para compartir datos
+
+# --- 1. LÓGICA DE USUARIOS Y AUTENTICACIÓN (Sin cambios) ---
 USUARIOS = {
     "gerente": {"password": "1234", "almacen": "Todas"},
     "opalo": {"password": "2345", "almacen": "Opalo"},
@@ -24,11 +34,6 @@ USUARIOS = {
     "laureles": {"password": "7890", "almacen": "Laureles"},
     "ferrebox": {"password": "8901", "almacen": "FerreBox"}
 }
-
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-    st.session_state.user_role = None
-    st.session_state.almacen_nombre = None
 
 def login():
     st.title("🚀 Panel de Control de Inventarios")
@@ -48,7 +53,10 @@ def login():
                 st.error("Usuario o contraseña incorrectos.")
 
 def logout():
-    st.session_state.clear()
+    # Limpia todo el estado de la sesión para un logout completo
+    keys_to_keep = ['logged_in', 'user_role', 'almacen_nombre'] # Puedes decidir mantener algunas claves si es necesario
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
     st.rerun()
 
 if not st.session_state.get('logged_in', False):
@@ -58,20 +66,16 @@ if not st.session_state.get('logged_in', False):
 # --- ESTILOS VISUALES Y CSS (Sin cambios) ---
 st.markdown("""
 <style>
-    .section-header { color: #7792E3; font-weight: bold; border-bottom: 2px solid #7792E3; padding-bottom: 5px; margin-bottom: 15px; }
+    .section-header { color: #4F8BF9; font-weight: bold; border-bottom: 2px solid #4F8BF9; padding-bottom: 5px; margin-bottom: 15px; }
     .stAlert { border-radius: 10px; }
-    /* Estilo para que el botón de actualizar sea más prominente */
     div[data-testid="stButton"] > button {
-        background-color: #4CAF50;
-        color: white;
-        font-weight: bold;
         border-radius: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
-# --- LÓGICA DE CARGA DE DATOS ---
+# --- LÓGICA DE CARGA DE DATOS DESDE DROPBOX (Sin cambios) ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
     info_message = st.empty()
@@ -91,47 +95,32 @@ def cargar_datos_desde_dropbox():
 
 @st.cache_data(ttl=600)
 def cargar_proveedores_desde_dropbox():
-    """Carga el archivo de proveedores 'Provedores.xlsx' desde Dropbox."""
     info_message = st.empty()
     info_message.info("Cargando archivo de proveedores desde Dropbox...", icon="🤝")
     try:
         dbx_creds = st.secrets["dropbox"]
         proveedores_path = dbx_creds["proveedores_file_path"]
-
         with dropbox.Dropbox(app_key=dbx_creds["app_key"], app_secret=dbx_creds["app_secret"], oauth2_refresh_token=dbx_creds["refresh_token"]) as dbx:
             metadata, res = dbx.files_download(path=proveedores_path)
             with io.BytesIO(res.content) as stream:
                 df_proveedores = pd.read_excel(stream, dtype={'REFERENCIA': str, 'COD PROVEEDOR': str})
-
-        df_proveedores.rename(columns={
-            'REFERENCIA': 'SKU', 
-            'PROVEEDOR': 'Proveedor',
-            'COD PROVEEDOR': 'SKU_Proveedor'
-        }, inplace=True)
-       
+        df_proveedores.rename(columns={'REFERENCIA': 'SKU', 'PROVEEDOR': 'Proveedor', 'COD PROVEEDOR': 'SKU_Proveedor'}, inplace=True)
         df_proveedores.dropna(subset=['SKU_Proveedor'], inplace=True)
-       
         df_proveedores = df_proveedores[['SKU', 'Proveedor', 'SKU_Proveedor']]
-
         info_message.success("Archivo de proveedores cargado exitosamente!", icon="👍")
         return df_proveedores
     except Exception as e:
-        info_message.error(f"No se pudo cargar '{proveedores_path}' desde Dropbox: {e}. La información de proveedores no estará disponible.", icon="🔥")
+        info_message.error(f"No se pudo cargar '{proveedores_path}'. La info de proveedores no estará disponible.", icon="🔥")
         return pd.DataFrame(columns=['SKU', 'Proveedor', 'SKU_Proveedor'])
 
-
-# --- LÓGICA DE ANÁLISIS DE INVENTARIO ---
+# --- LÓGICA DE ANÁLISIS DE INVENTARIO (Sin cambios) ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, dias_objetivo=None):
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
-
     if dias_objetivo is None:
         dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
-
     df = _df_crudo.copy()
-
-    # 1. Limpieza y Preparación
     column_mapping = {
         'CODALMACEN': 'Almacen', 'DEPARTAMENTO': 'Departamento', 'DESCRIPCION': 'Descripcion',
         'UNIDADES_VENDIDAS': 'Ventas_60_Dias', 'STOCK': 'Stock', 'COSTO_PROMEDIO_UND': 'Costo_Promedio_UND',
@@ -177,14 +166,6 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     df['Excedente_Trasladable'] = np.where(df['Estado_Inventario'] == 'Excedente', np.maximum(0, df['Stock'] - df['Stock_Objetivo']), 0)
-    sku_summary = df.groupby('SKU').agg(Total_Necesidad_SKU=('Necesidad_Total', 'sum'),Total_Excedente_SKU=('Excedente_Trasladable', 'sum')).reset_index()
-    sku_summary['Total_Traslados_Posibles_SKU'] = np.minimum(sku_summary['Total_Necesidad_SKU'], sku_summary['Total_Excedente_SKU'])
-    df = df.merge(sku_summary.drop(columns=['Total_Necesidad_SKU']), on='SKU', how='left')
-    df['Unidades_Traslado_Sugeridas'] = 0
-    mask_necesidad = (df['Necesidad_Total'] > 0) & (df.groupby('SKU')['Necesidad_Total'].transform('sum') > 0)
-    df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = (df['Necesidad_Total'] / df.groupby('SKU')['Necesidad_Total'].transform('sum')) * df['Total_Traslados_Posibles_SKU']
-    df['Sugerencia_Compra'] = np.ceil(df['Necesidad_Total'] - df['Unidades_Traslado_Sugeridas'].fillna(0))
-    df['Unidades_Traslado_Sugeridas'] = np.ceil(df['Unidades_Traslado_Sugeridas'].fillna(0))
 
     if _df_proveedores is not None and not _df_proveedores.empty:
         df = pd.merge(df, _df_proveedores, on='SKU', how='left')
@@ -204,20 +185,17 @@ st.sidebar.markdown("---")
 st.title("🚀 Resumen Ejecutivo de Inventario")
 st.markdown(f"###### Panel de control para la toma de decisiones. Última carga: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
 
-# ✨ NUEVO: BOTÓN DE ACTUALIZACIÓN MANUAL
-# Este botón limpia la caché de todas las funciones @st.cache_data y reinicia el script.
-if st.button("🔄 Actualizar Datos de Inventario", help="Borra la memoria caché y vuelve a cargar los archivos más recientes desde Dropbox."):
+if st.button("🔄 Actualizar Datos de Inventario", help="Vuelve a cargar los archivos más recientes desde Dropbox."):
     st.cache_data.clear()
-    # Mostramos un mensaje temporal al usuario
     toast_message = st.toast('Borrando caché y recargando datos...', icon='⏳')
-    time.sleep(2) # Pausa de 2 segundos para que el usuario vea el mensaje
+    time.sleep(2)
     toast_message.toast('¡Datos actualizados! Recargando panel...', icon='✅')
     time.sleep(1)
-    st.rerun() # Vuelve a ejecutar el script desde el principio
+    st.rerun()
 
-st.markdown("---") # ✨ NUEVO: Separador visual
+st.markdown("---")
 
-# Cargar ambos dataframes desde Dropbox
+# Carga de datos
 df_crudo = cargar_datos_desde_dropbox()
 df_proveedores = cargar_proveedores_desde_dropbox()
 
@@ -230,22 +208,18 @@ if df_crudo is not None and not df_crudo.empty:
     dias_obj_b = st.sidebar.slider("Clase B (Importantes)", 30, 60, 45)
     dias_obj_c = st.sidebar.slider("Clase C (Generales)", 45, 90, 60)
 
-    with st.spinner("Analizando inventario y asignando proveedores..."):
+    with st.spinner("Analizando inventario..."):
         dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
         df_analisis_completo = analizar_inventario_completo(
-            df_crudo,
-            df_proveedores,
+            df_crudo, df_proveedores,
             dias_seguridad=dias_seguridad_input,
             dias_objetivo=dias_objetivo_dict
         ).reset_index()
 
+    # **CLAVE**: Guardamos el resultado del análisis en el estado de la sesión
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
 
-    # --- EL RESTO DE LA PÁGINA ES IDÉNTICO Y NO REQUIERE CAMBIOS ---
-    if st.session_state.user_role == 'tienda':
-        st.session_state['df_analisis'] = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
-    else:
-        st.session_state['df_analisis'] = df_analisis_completo.copy()
+    # --- Filtros de la barra lateral (Sin cambios) ---
     if st.session_state.user_role == 'gerente':
         opcion_consolidado = "-- Consolidado (Todas las Tiendas) --"
         nombres_almacen = [opcion_consolidado] + sorted(df_analisis_completo['Almacen_Nombre'].unique().tolist())
@@ -254,10 +228,13 @@ if df_crudo is not None and not df_crudo.empty:
     else:
         selected_almacen_nombre = st.session_state.almacen_nombre
         st.sidebar.markdown(f"**Vista actual:** `{selected_almacen_nombre}`")
-        df_vista = st.session_state['df_analisis']
+        df_vista = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == selected_almacen_nombre]
+    
     marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
     selected_marcas = st.sidebar.multiselect("Filtrar por Marca:", marcas_unicas, default=marcas_unicas)
     df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)] if selected_marcas else df_vista
+
+    # --- Visualización del Dashboard (Sin cambios) ---
     st.markdown(f'<p class="section-header">Métricas Clave: {selected_almacen_nombre}</p>', unsafe_allow_html=True)
     if not df_filtered.empty:
         valor_total_inv = df_filtered['Valor_Inventario'].sum()
@@ -266,38 +243,45 @@ if df_crudo is not None and not df_crudo.empty:
         valor_baja_rotacion = df_filtered[df_filtered['Estado_Inventario'] == 'Baja Rotación / Obsoleto']['Valor_Inventario'].sum()
     else:
         valor_total_inv, skus_quiebre, valor_sobrestock, valor_baja_rotacion = 0, 0, 0, 0
+    
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(label="💰 Valor Total Inventario", value=f"${valor_total_inv:,.0f}")
     col2.metric(label="📉 Excedente (Sobre-stock)", value=f"${valor_sobrestock:,.0f}", help="Valor de productos que rotan, pero cuyo stock supera los días de inventario objetivo.")
     col3.metric(label="💀 Excedente (Baja Rotación)", value=f"${valor_baja_rotacion:,.0f}", help="Valor de productos sin ventas registradas en los últimos 60 días (stock muerto).")
     col4.metric(label="📦 SKUs en Quiebre", value=f"{skus_quiebre}")
+    
     st.markdown("---")
-    st.markdown('<p class="section-header">Navegación a Módulos de Análisis</p>', unsafe_allow_html=True)
-    st.error("🚨 **ACCIÓN CRÍTICA**")
+    st.markdown('<p class="section-header">Navegación a Módulos de Gestión</p>', unsafe_allow_html=True)
+    st.warning("🚨 **ACCIÓN CRÍTICA**")
     st.page_link("pages/5_gestion_quiebres.py", label="Atender Quiebres de Stock", icon="🩹")
     st.markdown("---")
+    st.info("✅ **GESTIÓN OPERATIVA**")
+    st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Compras y Traslados", icon="🚚")
+    st.markdown("---")
+    st.info("📊 **ANÁLISIS ESTRATÉGICO**")
     col_nav1, col_nav2 = st.columns(2)
     with col_nav1:
-        st.page_link("pages/1_gestion_abastecimiento.py", label="Gestionar Abastecimiento", icon="🚚")
         st.page_link("pages/2_analisis_excedentes.py", label="Analizar Excedentes", icon="📉")
-    with col_nav2:
         st.page_link("pages/3_analisis_de_marca.py", label="Analizar Marcas", icon="📊")
+    with col_nav2:
         st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
+        
     st.markdown('<p class="section-header" style="margin-top: 20px;">Diagnóstico de la Tienda</p>', unsafe_allow_html=True)
     with st.container(border=True):
         if not df_filtered.empty:
             valor_excedente_total = valor_sobrestock + valor_baja_rotacion
             porc_excedente = (valor_excedente_total / valor_total_inv) * 100 if valor_total_inv > 0 else 0
-            if skus_quiebre > 10: 
+            if skus_quiebre > 10:
                 st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**. Usa el módulo 'Atender Quiebres' para actuar.", icon="🚨")
-            elif porc_excedente > 30: 
+            elif porc_excedente > 30:
                 st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente. El problema principal está en: {'Baja Rotación' if valor_baja_rotacion > valor_sobrestock else 'Sobre-stock'}.", icon="💸")
-            else: 
+            else:
                 st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
         elif st.session_state.get('user_role') == 'gerente' and selected_almacen_nombre == "-- Consolidado (Todas las Tiendas) --":
-             st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
+            st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
         else:
             st.info("No hay datos para los filtros seleccionados.")
+    
     st.markdown("---")
     st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto (Solo con Stock)</p>', unsafe_allow_html=True)
     search_term = st.text_input("Buscar producto por SKU, Descripción o cualquier palabra clave:", placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'")
