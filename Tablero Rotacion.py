@@ -8,9 +8,9 @@ import io
 import time
 from datetime import datetime
 from utils import (
-    analizar_inventario_completo, 
-    validate_dataframe, 
-    EXPECTED_INVENTORY_COLS, 
+    analizar_inventario_completo,
+    validate_dataframe,
+    EXPECTED_INVENTORY_COLS,
     EXPECTED_PROVIDERS_COLS
 )
 
@@ -21,7 +21,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Inicializar el estado de la sesión de forma robusta
 def init_session_state():
     """Inicializa todas las claves necesarias en el estado de la sesión."""
     defaults = {
@@ -39,11 +38,15 @@ def init_session_state():
 init_session_state()
 
 # --- 1. LÓGICA DE AUTENTICACIÓN ---
-# Es más seguro obtener usuarios desde st.secrets si es posible
 USUARIOS = st.secrets.get("usuarios", {
     "gerente": {"password": "1234", "almacen": "Todas"},
     "opalo": {"password": "2345", "almacen": "Opalo"},
-    # ... (el resto de usuarios)
+    "armenia": {"password": "3456", "almacen": "Armenia"},
+    "cedi": {"password": "4567", "almacen": "Cedi"},
+    "manizales": {"password": "5678", "almacen": "Manizales"},
+    "olaya": {"password": "6789", "almacen": "Olaya"},
+    "laureles": {"password": "7890", "almacen": "Laureles"},
+    "ferrebox": {"password": "8901", "almacen": "FerreBox"}
 })
 
 def login():
@@ -56,7 +59,6 @@ def login():
         submitted = st.form_submit_button("Iniciar Sesión")
         if submitted:
             user_data = USUARIOS.get(username)
-            # Usar una comparación segura para contraseñas en un entorno real
             if user_data and user_data["password"] == password:
                 st.session_state.logged_in = True
                 st.session_state.almacen_nombre = user_data["almacen"]
@@ -69,7 +71,7 @@ def logout():
     """Limpia el estado de la sesión y redirige al login."""
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-    init_session_state() # Reinicializa para un estado limpio
+    init_session_state()
     st.rerun()
 
 # --- CONTROL DE ACCESO ---
@@ -89,10 +91,7 @@ st.markdown("""
 # --- 3. LÓGICA DE CARGA DE DATOS ---
 @st.cache_data(ttl=600)
 def cargar_datos_desde_dropbox():
-    """
-    Carga el archivo principal de inventario desde Dropbox.
-    Valida que el archivo y las columnas sean correctos.
-    """
+    """Carga el archivo principal de inventario desde Dropbox."""
     info_message = st.empty()
     info_message.info("Conectando a Dropbox por el archivo de inventario...", icon="☁️")
     try:
@@ -102,9 +101,8 @@ def cargar_datos_desde_dropbox():
             with io.BytesIO(res.content) as stream:
                 df_crudo = pd.read_csv(stream, encoding='latin1', sep='|', header=None, names=EXPECTED_INVENTORY_COLS)
         
-        # Validar el DataFrame cargado
         if not validate_dataframe(df_crudo, EXPECTED_INVENTORY_COLS, "inventario de Dropbox"):
-            return pd.DataFrame() # Devuelve DF vacío si no es válido
+            return pd.DataFrame()
 
         info_message.success("Datos de inventario cargados y validados!", icon="✅")
         return df_crudo
@@ -143,7 +141,6 @@ def cargar_proveedores_desde_dropbox():
         info_message.error(f"Error inesperado al cargar proveedores: {e}", icon="🔥")
         return pd.DataFrame(columns=['SKU', 'Proveedor', 'SKU_Proveedor'])
 
-
 # --- 4. INTERFAZ DE USUARIO PRINCIPAL ---
 st.sidebar.title(f"Usuario: {st.session_state.almacen_nombre}")
 st.sidebar.button("Cerrar Sesión", on_click=logout, use_container_width=True)
@@ -161,7 +158,6 @@ if st.button("🔄 Actualizar Datos", help="Borra la caché y vuelve a cargar lo
 
 st.markdown("---")
 
-# Carga de datos
 df_crudo = cargar_datos_desde_dropbox()
 df_proveedores = cargar_proveedores_desde_dropbox()
 
@@ -177,7 +173,6 @@ dias_obj_a = st.sidebar.slider("Clase A (VIPs)", 15, 45, 30)
 dias_obj_b = st.sidebar.slider("Clase B (Importantes)", 30, 60, 45)
 dias_obj_c = st.sidebar.slider("Clase C (Generales)", 45, 90, 60)
 
-# Análisis principal (llamando a la función centralizada)
 with st.spinner("Analizando inventario con los parámetros seleccionados..."):
     dias_objetivo_dict = {'A': dias_obj_a, 'B': dias_obj_b, 'C': dias_obj_c}
     df_analisis_completo = analizar_inventario_completo(
@@ -186,10 +181,8 @@ with st.spinner("Analizando inventario con los parámetros seleccionados..."):
         dias_objetivo=dias_objetivo_dict
     ).reset_index()
 
-# Guardar el resultado maestro en el estado de la sesión
 st.session_state.df_analisis_maestro = df_analisis_completo.copy()
 
-# --- Filtros Globales ---
 st.sidebar.markdown("---")
 st.sidebar.header("🎯 Filtros Globales de Gestión")
 
@@ -203,28 +196,26 @@ else:
 
 df_vista = df_analisis_completo[df_analisis_completo['Almacen_Nombre'].isin(selected_stores)]
 
-# Filtros Jerárquicos dependientes
+# --- INICIO DE LA LÓGICA DE FILTROS CORREGIDA ---
+# El filtro de Departamento fue ELIMINADO como se solicitó.
+# La cadena de filtros ahora es Tienda -> Marca -> Proveedor.
+
 df_filtered = df_vista
 if not df_vista.empty:
-    all_departments = sorted(df_vista['Departamento'].unique().tolist())
-    selected_departments = st.sidebar.multiselect("Dpto(s):", all_departments, default=all_departments, placeholder="Filtrar Departamentos")
-    df_filtered = df_vista[df_vista['Departamento'].isin(selected_departments)]
-
-if not df_filtered.empty:
-    all_brands = sorted(df_filtered['Marca_Nombre'].unique().tolist())
-    selected_brands = st.sidebar.multiselect("Marca(s):", all_brands, default=all_brands, placeholder="Filtrar Marcas")
-    df_filtered = df_filtered[df_filtered['Marca_Nombre'].isin(selected_brands)]
+    all_brands = sorted(df_vista['Marca_Nombre'].unique().tolist())
+    selected_brands = st.sidebar.multiselect("Filtrar por Marca(s):", all_brands, default=all_brands, placeholder="Seleccionar marcas")
+    df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_brands)]
 
 if not df_filtered.empty:
     all_providers = sorted(df_filtered['Proveedor'].unique().tolist())
-    selected_providers = st.sidebar.multiselect("Proveedor(es):", all_providers, default=all_providers, placeholder="Filtrar Proveedores")
+    selected_providers = st.sidebar.multiselect("Filtrar por Proveedor(es):", all_providers, default=all_providers, placeholder="Seleccionar proveedores")
     df_filtered = df_filtered[df_filtered['Proveedor'].isin(selected_providers)]
+# --- FIN DE LA LÓGICA DE FILTROS CORREGIDA ---
 
-# Guardar estado filtrado para las otras páginas
+
 st.session_state.df_filtered_global = df_filtered.copy()
 st.session_state.selected_almacen_global = "Varias Tiendas" if len(selected_stores) > 1 else (selected_stores[0] if selected_stores else "Ninguna")
 
-# --- KPIs dinámicos en Sidebar ---
 st.sidebar.markdown("---")
 st.sidebar.header("📊 Resumen del Filtro")
 if not df_filtered.empty:
@@ -253,7 +244,6 @@ col2.metric("📉 Excedente (Sobre-stock)", f"${valor_sobrestock:,.0f}", help="V
 col3.metric("💀 Excedente (Baja Rotación)", f"${valor_baja_rotacion:,.0f}", help="Valor de productos sin ventas en 60 días.")
 col4.metric("📦 SKUs en Quiebre", f"{skus_quiebre}")
 
-# --- Navegación a Módulos ---
 st.markdown("---")
 st.markdown('<p class="section-header">Navegación a Módulos de Gestión</p>', unsafe_allow_html=True)
 st.warning("🚨 **ACCIÓN CRÍTICA**")
@@ -268,7 +258,6 @@ with col_nav1:
 with col_nav2:
     st.page_link("pages/4_analisis_de_tendencias.py", label="Analizar Tendencias", icon="📈")
 
-# --- Diagnóstico ---
 st.markdown('<p class="section-header" style="margin-top: 20px;">Diagnóstico de la Selección Actual</p>', unsafe_allow_html=True)
 with st.container(border=True):
     if not df_filtered.empty:
@@ -283,7 +272,6 @@ with st.container(border=True):
     else:
         st.info("No hay datos disponibles para mostrar un diagnóstico.")
 
-# --- Búsqueda de Inventario ---
 st.markdown("---")
 st.markdown('<p class="section-header">🔍 Consulta de Stock por Producto</p>', unsafe_allow_html=True)
 search_term = st.text_input("Buscar producto por SKU o Descripción:", placeholder="Ej: 'ESTUCO', '102030'")
@@ -307,5 +295,4 @@ if search_term:
                 values='Stock',
                 fill_value=0
             )
-            # Mostrar solo columnas (tiendas) con stock total > 0 para ese producto
             st.dataframe(pivot_stock.loc[:, pivot_stock.sum() > 0], use_container_width=True)
