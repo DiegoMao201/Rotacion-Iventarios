@@ -15,10 +15,10 @@ from email import encoders
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- 0. PAGE CONFIGURATION AND SESSION STATE ---
-st.set_page_config(page_title="Gestión de Abastecimiento v3.1", layout="wide", page_icon="🚀")
+# --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
+st.set_page_config(page_title="Gestión de Abastecimiento v3.2", layout="wide", page_icon="🚀")
 
-# --- SESSION STATE INITIALIZATION ---
+# --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
 keys_to_initialize = {
     'df_analisis_maestro': pd.DataFrame(),
     'user_role': None,
@@ -33,23 +33,23 @@ for key, default_value in keys_to_initialize.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
 
-# --- 1. GOOGLE SHEETS CONNECTION AND MANAGEMENT FUNCTIONS ---
+# --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 @st.cache_resource(ttl=3600)
 def connect_to_gsheets():
-    """Connects to the Google Sheets API using Streamlit Secrets."""
+    """Se conecta a la API de Google Sheets usando las credenciales de Streamlit Secrets."""
     try:
         creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        st.error(f"Error connecting to Google Sheets: {e}. Check your 'secrets'.")
+        st.error(f"Error de conexión con Google Sheets: {e}. Revisa tus 'secrets'.")
         return None
 
 @st.cache_data(ttl=60)
 def load_data_from_sheets(_client, sheet_name):
-    """Loads a full worksheet from Google Sheets by name."""
+    """Carga una hoja de cálculo completa desde Google Sheets por su nombre."""
     if _client is None: return pd.DataFrame()
     try:
         spreadsheet = _client.open_by_key(st.secrets["gsheets"]["spreadsheet_key"])
@@ -59,26 +59,26 @@ def load_data_from_sheets(_client, sheet_name):
             df['SKU'] = df['SKU'].astype(str)
         return df
     except gspread.exceptions.WorksheetNotFound:
-        st.error(f"Error: The sheet '{sheet_name}' was not found. Please create it in your Google Sheets.")
+        st.error(f"Error: La hoja de cálculo '{sheet_name}' no fue encontrada. Por favor, créala en tu Google Sheets.")
         return pd.DataFrame()
     except Exception as e:
-        st.error(f"An error occurred while loading the sheet '{sheet_name}': {e}")
+        st.error(f"Ocurrió un error al cargar la hoja '{sheet_name}': {e}")
         return pd.DataFrame()
 
 def update_sheet(client, sheet_name, df_to_write):
-    """Overwrites an entire sheet with a Pandas DataFrame."""
+    """Sobrescribe una hoja completa con un DataFrame de Pandas."""
     try:
         spreadsheet = client.open_by_key(st.secrets["gsheets"]["spreadsheet_key"])
         worksheet = spreadsheet.worksheet(sheet_name)
         worksheet.clear()
         df_str = df_to_write.astype(str)
         worksheet.update([df_str.columns.values.tolist()] + df_str.values.tolist())
-        return True, f"Sheet '{sheet_name}' updated successfully."
+        return True, f"Hoja '{sheet_name}' actualizada exitosamente."
     except Exception as e:
-        return False, f"Error updating sheet '{sheet_name}': {e}"
+        return False, f"Error al actualizar la hoja '{sheet_name}': {e}"
 
 def append_to_sheet(client, sheet_name, df_to_append):
-    """Appends rows to a sheet without overwriting and returns the added DataFrame with IDs."""
+    """Añade filas a una hoja sin sobreescribir y devuelve el DataFrame añadido con IDs."""
     try:
         spreadsheet = client.open_by_key(st.secrets["gsheets"]["spreadsheet_key"])
         worksheet = spreadsheet.worksheet(sheet_name)
@@ -88,22 +88,22 @@ def append_to_sheet(client, sheet_name, df_to_append):
             df_to_append_ordered = df_to_append.reindex(columns=headers).fillna('')
         else:
             worksheet.update([df_to_append.columns.values.tolist()] + df_to_append.astype(str).values.tolist())
-            return True, "New records and headers added.", df_to_append
+            return True, "Nuevos registros y cabeceras añadidos.", df_to_append
 
         worksheet.append_rows(df_to_append_ordered.astype(str).values.tolist(), value_input_option='USER_ENTERED')
-        return True, f"New records added to '{sheet_name}'.", df_to_append_ordered
+        return True, f"Nuevos registros añadidos a '{sheet_name}'.", df_to_append_ordered
     except Exception as e:
-        return False, f"Error adding records to sheet '{sheet_name}': {e}", pd.DataFrame()
+        return False, f"Error al añadir registros en la hoja '{sheet_name}': {e}", pd.DataFrame()
 
 def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=None, tienda_destino=None):
-    """Prepares and registers an order DataFrame, returning the df with generated IDs."""
+    """Prepara y registra un DataFrame de órdenes, devolviendo el df con los IDs generados."""
     if df_orden.empty or client is None:
-        return False, "No data to register.", pd.DataFrame()
+        return False, "No hay datos para registrar.", pd.DataFrame()
 
     timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     df_registro = df_orden.copy()
 
-    # Dynamically identify the correct quantity column
+    # Identificar la columna de cantidad correcta
     if 'Uds a Comprar' in df_orden.columns:
         cantidad_col = 'Uds a Comprar'
     elif 'Uds a Enviar' in df_orden.columns:
@@ -111,17 +111,16 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     elif 'Cantidad_Solicitada' in df_orden.columns:
         cantidad_col = 'Cantidad_Solicitada'
     else:
-        return False, "Could not find a valid quantity column.", pd.DataFrame()
+        return False, "No se encontró una columna de cantidad válida.", pd.DataFrame()
 
-    # Dynamically identify the correct cost column
+    # Identificar la columna de costo correcta
     if 'Costo_Promedio_UND' in df_orden.columns:
         costo_col = 'Costo_Promedio_UND'
     elif 'Costo_Unitario' in df_orden.columns:
         costo_col = 'Costo_Unitario'
     else:
-        # Fallback for special purchases where cost might be entered manually or absent
-        df_orden[ 'Costo_Unitario' ] = 0
-        costo_col = 'Costo_Unitario'
+        return False, "No se encontró una columna de costo válida.", pd.DataFrame()
+
 
     df_registro['Cantidad_Solicitada'] = df_registro[cantidad_col]
     df_registro['Costo_Unitario'] = df_registro.get(costo_col, 0)
@@ -147,7 +146,7 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
         df_registro['Proveedor'] = "TRASLADO INTERNO: " + df_registro['Tienda Origen']
         df_registro['Tienda_Destino'] = tienda_destino
     else:
-        return False, "Unrecognized order type.", pd.DataFrame()
+        return False, "Tipo de orden no reconocido.", pd.DataFrame()
 
     df_registro['ID_Orden'] = [f"{base_id}-{i}" for i in range(len(df_registro))]
 
@@ -156,9 +155,9 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
 
     return append_to_sheet(client, "Registro_Ordenes", df_final_para_gsheets)
 
-# --- 2. AUXILIARY FUNCTIONS ---
+# --- 2. FUNCIONES AUXILIARES ---
 def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adjuntos):
-    """Sends an email to a LIST of recipients with one or more attachments."""
+    """Envía un correo a una LISTA de destinatarios con uno o más archivos adjuntos."""
     try:
         remitente = st.secrets["gmail"]["email"]
         password = st.secrets["gmail"]["password"]
@@ -180,18 +179,18 @@ def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adju
             server.starttls()
             server.login(remitente, password)
             server.sendmail(remitente, destinatarios, msg.as_string())
-        return True, "Email sent successfully."
+        return True, "Correo enviado exitosamente."
     except Exception as e:
-        return False, f"Error sending email: '{e}'. Check the 'secrets' configuration."
+        return False, f"Error al enviar el correo: '{e}'. Revisa la configuración de 'secrets'."
 
 def generar_link_whatsapp(numero, mensaje):
-    """Generates a pre-filled and encoded WhatsApp link."""
+    """Genera un link de WhatsApp pre-llenado y codificado."""
     mensaje_codificado = urllib.parse.quote(mensaje)
     return f"https://wa.me/{numero}?text={mensaje_codificado}"
 
 @st.cache_data
 def generar_plan_traslados_inteligente(_df_analisis):
-    """Generates an optimal transfer plan based on need and surplus."""
+    """Genera un plan de traslados óptimo basado en la necesidad y excedente."""
     if _df_analisis is None or _df_analisis.empty: return pd.DataFrame()
 
     df_origen = _df_analisis[_df_analisis['Excedente_Trasladable'] > 0].sort_values(by='Excedente_Trasladable', ascending=False).copy()
@@ -249,7 +248,7 @@ class PDF(FPDF):
             self.add_font('DejaVu', 'B', 'fonts/DejaVuSans-Bold.ttf', uni=True)
             self.font_family = 'DejaVu'
         except RuntimeError:
-            st.warning("Could not find 'DejaVu' font. Using Helvetica. Some special characters (e.g., '€') may not display correctly.")
+            st.warning("Fuente 'DejaVu' no encontrada. Se usará Helvetica. Algunos caracteres especiales (ej. '€') podrían no mostrarse.")
 
     def header(self):
         font_name = self.font_family
@@ -385,13 +384,13 @@ def generar_excel_dinamico(df, nombre_hoja):
             worksheet.set_column(i, i, min(max_len, 45))
     return output.getvalue()
 
-# --- 3. MAIN LOGIC AND APPLICATION FLOW ---
-st.title("🚀 Supply Control Panel v3.1")
-st.markdown("Analyze, prioritize, and act. Your real-time management system connected to Google Sheets.")
+# --- 3. LÓGICA PRINCIPAL Y FLUJO DE LA APLICACIÓN ---
+st.title("🚀 Tablero de Control de Abastecimiento v3.2")
+st.markdown("Analiza, prioriza y actúa. Tu sistema de gestión en tiempo real conectado a Google Sheets.")
 
 if 'df_analisis_maestro' not in st.session_state or st.session_state.df_analisis_maestro.empty:
-    st.warning("⚠️ Please log in on the main page to load the base inventory data.")
-    if st.button("Go to the main page 🏠"):
+    st.warning("⚠️ Por favor, inicia sesión en la página principal para cargar los datos base de inventario.")
+    if st.button("Ir a la página principal 🏠"):
         st.switch_page("app.py")
     st.stop()
 
@@ -453,39 +452,49 @@ CONTACTOS_TIENDAS = {
 }
 
 with st.sidebar:
-    st.header("⚙️ Management Filters")
-    opcion_consolidado = '-- Consolidated (All Stores) --'
+    st.header("⚙️ Filtros de Gestión")
+    opcion_consolidado = '-- Consolidado (Todas las Tiendas) --'
     if st.session_state.get('user_role') == 'gerente':
         almacen_options = [opcion_consolidado] + sorted(df_maestro['Almacen_Nombre'].unique().tolist())
     else:
         almacen_options = [st.session_state.get('almacen_nombre')] if st.session_state.get('almacen_nombre') else []
-    selected_almacen_nombre = st.selectbox("Select Store View:", almacen_options)
+    selected_almacen_nombre = st.selectbox("Selecciona la Vista de Tienda:", almacen_options)
     if selected_almacen_nombre == opcion_consolidado:
         df_vista = df_maestro.copy()
     else:
         df_vista = df_maestro[df_maestro['Almacen_Nombre'] == selected_almacen_nombre]
     marcas_unicas = sorted(df_vista['Marca_Nombre'].unique().tolist())
-    selected_marcas = st.multiselect("Filter by Brand:", marcas_unicas, default=marcas_unicas)
+    selected_marcas = st.multiselect("Filtrar por Marca:", marcas_unicas, default=marcas_unicas)
     if selected_marcas:
         df_filtered = df_vista[df_vista['Marca_Nombre'].isin(selected_marcas)]
     else:
         df_filtered = df_vista
     st.markdown("---")
-    st.subheader("Manual Synchronization")
-    if st.button("🔄 Update 'Estado_Inventario' in GSheets"):
-        with st.spinner("Synchronizing..."):
+    st.subheader("Sincronización Manual")
+    if st.button("🔄 Actualizar 'Estado_Inventario' en GSheets"):
+        with st.spinner("Sincronizando..."):
             columnas_a_sincronizar = ['SKU', 'Almacen_Nombre', 'Stock', 'Costo_Promedio_UND', 'Sugerencia_Compra', 'Necesidad_Total', 'Excedente_Trasladable', 'Estado_Inventario']
             df_para_sincronizar = df_maestro_base[[col for col in columnas_a_sincronizar if col in df_maestro_base.columns]].copy()
             exito, msg = update_sheet(client, "Estado_Inventario", df_para_sincronizar)
             if exito: st.success(msg)
             else: st.error(msg)
 
-# --- 4. USER INTERFACE WITH TABS ---
-tab_titles = ["📊 Diagnostics", "🔄 Transfers", "🛒 Purchases", "✅ Tracking"]
-tabs = st.tabs(tab_titles)
+# --- 4. INTERFAZ DE USUARIO CON PESTAÑAS ---
+tab_titles = ["📊 Diagnóstico", "🔄 Traslados", "🛒 Compras", "✅ Seguimiento"]
 
-with tabs[0]:
-    st.subheader(f"Diagnostics for: {selected_almacen_nombre}")
+# Corrección para mantener la pestaña activa
+if 'active_tab_name' not in st.session_state:
+    st.session_state.active_tab_name = tab_titles[0]
+
+# Usamos un callback para actualizar el estado de la pestaña activa
+def on_tab_change():
+    st.session_state.active_tab_name = st.session_state.tabs
+
+active_tab = st.tabs(tab_titles, key="tabs", on_change=on_tab_change)
+
+# Mapeamos el nombre de la pestaña a su contenido
+with active_tab[0]:
+    st.subheader(f"Diagnóstico para: {selected_almacen_nombre}")
     necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
     oportunidad_ahorro = 0
     if not df_plan_maestro.empty:
@@ -496,20 +505,20 @@ with tabs[0]:
     df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
     venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
     kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric(label="💰 Required Purchase Value (Post-Transfers)", value=f"${necesidad_compra_total:,.0f}")
-    kpi2.metric(label="💸 Savings from Transfers", value=f"${oportunidad_ahorro:,.0f}")
-    kpi3.metric(label="📉 Potential Lost Sales (30 days)", value=f"${venta_perdida:,.0f}")
-    st.markdown("##### Key Analysis and Recommendations")
+    kpi1.metric(label="💰 Valor Compra Requerida (Post-Traslados)", value=f"${necesidad_compra_total:,.0f}")
+    kpi2.metric(label="💸 Ahorro por Traslados", value=f"${oportunidad_ahorro:,.0f}")
+    kpi3.metric(label="📉 Venta Potencial Perdida (30 días)", value=f"${venta_perdida:,.0f}")
+    st.markdown("##### Análisis y Recomendaciones Clave")
     with st.container(border=True):
-        if venta_perdida > 0: st.markdown(f"**🚨 Alert:** An estimated sales loss of **${venta_perdida:,.0f}** for **{len(df_quiebre)}** products out of stock.")
-        if oportunidad_ahorro > 0: st.markdown(f"**💸 Opportunity:** You can save **${oportunidad_ahorro:,.0f}** by requesting transfers. Check the 'Transfers' tab.")
+        if venta_perdida > 0: st.markdown(f"**🚨 Alerta:** Se estima una pérdida de venta de **${venta_perdida:,.0f}** por **{len(df_quiebre)}** productos en quiebre.")
+        if oportunidad_ahorro > 0: st.markdown(f"**💸 Oportunidad:** Puedes ahorrar **${oportunidad_ahorro:,.0f}** solicitando traslados. Revisa la pestaña 'Traslados'.")
         if necesidad_compra_total > 0:
             df_compras_prioridad = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
             df_compras_prioridad['Valor_Compra'] = df_compras_prioridad['Sugerencia_Compra'] * df_compras_prioridad['Costo_Promedio_UND']
             if not df_compras_prioridad.empty:
                 top_categoria = df_compras_prioridad.groupby('Segmento_ABC')['Valor_Compra'].sum().idxmax()
-                st.markdown(f"**🎯 Focus:** Your main investment need is concentrated in **Class '{top_categoria}'** products.")
-        if venta_perdida == 0 and oportunidad_ahorro == 0 and necesidad_compra_total == 0: st.success("✅ Inventory Optimized! No urgent needs detected with the current filters.")
+                st.markdown(f"**🎯 Enfoque:** Tu principal necesidad de inversión se concentra en productos de **Clase '{top_categoria}'**.")
+        if venta_perdida == 0 and oportunidad_ahorro == 0 and necesidad_compra_total == 0: st.success("✅ ¡Inventario Optimizado! No se detectan necesidades urgentes con los filtros actuales.")
     st.markdown("---")
     col_g1, col_g2 = st.columns(2)
     with col_g1:
@@ -517,41 +526,41 @@ with tabs[0]:
         if not df_compras_chart.empty:
             df_compras_chart['Valor_Compra'] = df_compras_chart['Sugerencia_Compra'] * df_compras_chart['Costo_Promedio_UND']
             data_chart = df_compras_chart.groupby('Almacen_Nombre')['Valor_Compra'].sum().sort_values(ascending=False).reset_index()
-            fig = px.bar(data_chart, x='Almacen_Nombre', y='Valor_Compra', text_auto='.2s', title="Required Investment per Store (Post-Transfers)")
+            fig = px.bar(data_chart, x='Almacen_Nombre', y='Valor_Compra', text_auto='.2s', title="Inversión Requerida por Tienda (Post-Traslados)")
             st.plotly_chart(fig, use_container_width=True)
     with col_g2:
         df_compras_chart = df_maestro[df_maestro['Sugerencia_Compra'] > 0].copy()
         if not df_compras_chart.empty:
             df_compras_chart['Valor_Compra'] = df_compras_chart['Sugerencia_Compra'] * df_compras_chart['Costo_Promedio_UND']
-            fig = px.sunburst(df_compras_chart, path=['Segmento_ABC', 'Marca_Nombre'], values='Valor_Compra', title="In which categories and brands to buy?")
+            fig = px.sunburst(df_compras_chart, path=['Segmento_ABC', 'Marca_Nombre'], values='Valor_Compra', title="¿En qué categorías y marcas comprar?")
             st.plotly_chart(fig, use_container_width=True)
 
-with tabs[1]:
-    st.subheader("🚚 Inter-Store Transfer Plan")
-    with st.expander("🔄 **Automatic Transfer Plan**", expanded=True):
+with active_tab[1]:
+    st.subheader("🚚 Plan de Traslados entre Tiendas")
+    with st.expander("🔄 **Plan de Traslados Automático**", expanded=True):
         if df_plan_maestro.empty:
-            st.success("✅ No automatic transfers are suggested at this time!")
+            st.success("✅ ¡No se sugieren traslados automáticos en este momento!")
         else:
-            st.markdown("##### Advanced Transfer Filters")
+            st.markdown("##### Filtros Avanzados de Traslados")
             f_col1, f_col2, f_col3 = st.columns(3)
-            lista_origenes = ["All"] + sorted(df_plan_maestro['Tienda Origen'].unique().tolist())
-            filtro_origen = f_col1.selectbox("Filter by Origin Store:", lista_origenes, key="filtro_origen")
-            lista_destinos = ["All"] + sorted(df_plan_maestro['Tienda Destino'].unique().tolist())
-            filtro_destino = f_col2.selectbox("Filter by Destination Store:", lista_destinos, key="filtro_destino")
-            lista_proveedores_traslado = ["All"] + sorted(df_plan_maestro['Proveedor'].unique().tolist())
-            filtro_proveedor_traslado = f_col3.selectbox("Filter by Supplier:", lista_proveedores_traslado, key="filtro_proveedor_traslado")
+            lista_origenes = ["Todas"] + sorted(df_plan_maestro['Tienda Origen'].unique().tolist())
+            filtro_origen = f_col1.selectbox("Filtrar por Tienda Origen:", lista_origenes, key="filtro_origen")
+            lista_destinos = ["Todas"] + sorted(df_plan_maestro['Tienda Destino'].unique().tolist())
+            filtro_destino = f_col2.selectbox("Filtrar por Tienda Destino:", lista_destinos, key="filtro_destino")
+            lista_proveedores_traslado = ["Todos"] + sorted(df_plan_maestro['Proveedor'].unique().tolist())
+            filtro_proveedor_traslado = f_col3.selectbox("Filtrar por Proveedor:", lista_proveedores_traslado, key="filtro_proveedor_traslado")
             df_aplicar_filtros = df_plan_maestro.copy()
-            if filtro_origen != "All": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Origen'] == filtro_origen]
-            if filtro_destino != "All": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Destino'] == filtro_destino]
-            if filtro_proveedor_traslado != "All": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
-            search_term_traslado = st.text_input("Search for product to transfer by SKU or Description:", key="search_transfers")
+            if filtro_origen != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Origen'] == filtro_origen]
+            if filtro_destino != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Destino'] == filtro_destino]
+            if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
+            search_term_traslado = st.text_input("Buscar producto a trasladar por SKU o Descripción:", key="search_traslados")
             df_traslados_filtrado = df_aplicar_filtros
             if search_term_traslado:
                 mask_traslado = (df_traslados_filtrado['SKU'].astype(str).str.contains(search_term_traslado, case=False, na=False) |
                                  df_traslados_filtrado['Descripcion'].astype(str).str.contains(search_term_traslado, case=False, na=False))
                 df_traslados_filtrado = df_traslados_filtrado[mask_traslado]
             if df_traslados_filtrado.empty:
-                st.warning("No transfers found matching the filters and search.")
+                st.warning("No se encontraron traslados que coincidan con los filtros y la búsqueda.")
             else:
                 df_para_editar = pd.merge(df_traslados_filtrado, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
                                           left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
@@ -560,8 +569,8 @@ with tabs[1]:
                 columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Stock_En_Transito', 'Necesidad en Destino', 'Uds a Enviar']
                 edited_df_traslados = st.data_editor(
                     df_para_editar[columnas_traslado], hide_index=True, use_container_width=True,
-                    column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Qty to Send", min_value=0, step=1, format="%d"),
-                                   "Stock_En_Transito": st.column_config.NumberColumn(label="In Transit", format="%d"),
+                    column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
+                                   "Stock_En_Transito": st.column_config.NumberColumn(label="En Tránsito", format="%d"),
                                    "Seleccionar": st.column_config.CheckboxColumn(required=True)},
                     disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']], key="editor_traslados")
                 df_seleccionados_traslado = edited_df_traslados[(edited_df_traslados['Seleccionar']) & (edited_df_traslados['Uds a Enviar'] > 0)]
@@ -572,19 +581,19 @@ with tabs[1]:
                     st.markdown("---")
                     total_unidades = df_seleccionados_traslado_full['Uds a Enviar'].sum()
                     total_peso = df_seleccionados_traslado_full['Peso del Traslado (kg)'].sum()
-                    st.info(f"**Summary of Selected Load:** {total_unidades} Total Units | **{total_peso:,.2f} kg** Total Weight")
+                    st.info(f"**Resumen de la Carga Seleccionada:** {total_unidades} Unidades Totales | **{total_peso:,.2f} kg** de Peso Total")
                     destinos_implicados = df_seleccionados_traslado_full['Tienda Destino'].unique().tolist()
                     emails_predefinidos = [CONTACTOS_TIENDAS.get(d, {}).get('email', '') for d in destinos_implicados]
-                    email_dest_traslado = st.text_input("📧 Recipient email(s) for the transfer plan:", value=", ".join(filter(None, emails_predefinidos)), key="email_traslado", help="Can be one or more emails separated by a comma.")
-                    if st.button("✅ Send and Register Transfer", use_container_width=True, key="btn_registrar_traslado", type="primary"):
-                        with st.spinner("Registering transfer and sending notifications..."):
+                    email_dest_traslado = st.text_input("📧 Correo(s) de destinatario(s) para el plan de traslado:", value=", ".join(filter(None, emails_predefinidos)), key="email_traslado", help="Puede ser uno o varios correos separados por coma.")
+                    if st.button("✅ Enviar y Registrar Traslado", use_container_width=True, key="btn_registrar_traslado", type="primary"):
+                        with st.spinner("Registrando traslado y enviando notificaciones..."):
                             exito_registro, msg_registro, df_registrado = registrar_ordenes_en_sheets(client, df_seleccionados_traslado_full, "Traslado Automático")
                             if exito_registro:
-                                st.success(f"✅ Transfer registered successfully! {msg_registro}")
+                                st.success(f"✅ ¡Traslado registrado exitosamente! {msg_registro}")
                                 if email_dest_traslado:
                                     excel_bytes = generar_excel_dinamico(df_registrado, "Plan_de_Traslados")
-                                    asunto = f"New Internal Transfer Plan - {datetime.now().strftime('%d/%m/%Y')}"
-                                    cuerpo_html = f"<html><body><p>Hello team,</p><p>A new transfer plan has been registered for execution. Please coordinate the movement of goods as specified in the attached file.</p><p><b>Generated Transfer IDs:</b> {', '.join(df_registrado['ID_Orden'].unique())}</p><p>Thank you for your management.</p><p>--<br><b>Inventory Management System</b></p></body></html>"
+                                    asunto = f"Nuevo Plan de Traslado Interno - {datetime.now().strftime('%d/%m/%Y')}"
+                                    cuerpo_html = f"<html><body><p>Hola equipo,</p><p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p><p><b>IDs de Traslado generados:</b> {', '.join(df_registrado['ID_Orden'].unique())}</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"
                                     adjunto_traslado = [{'datos': excel_bytes, 'nombre_archivo': f"Plan_Traslado_{datetime.now().strftime('%Y%m%d')}.xlsx", 'tipo_mime': 'application', 'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'}]
                                     lista_destinatarios = [email.strip() for email in email_dest_traslado.replace(';', ',').split(',') if email.strip()]
                                     enviado, mensaje = enviar_correo_con_adjuntos(lista_destinatarios, asunto, cuerpo_html, adjunto_traslado)
@@ -597,18 +606,18 @@ with tabs[1]:
                                         numero_wpp = info_tienda['celular']
                                         ordenes_destino = df_registrado[df_registrado['Tienda_Destino'] == destino]
                                         ids_orden_tienda = ", ".join(ordenes_destino['ID_Orden'].unique())
-                                        mensaje_wpp = f"Hello {destino} team, a new transfer order has been generated to your store (ID: {ids_orden_tienda}). Please be attentive to the reception. Thanks!"
+                                        mensaje_wpp = f"Hola equipo de {destino}, se ha generado una nueva orden de traslado hacia su tienda (ID: {ids_orden_tienda}). Por favor, estar atentos a la recepción. ¡Gracias!"
                                         link_wpp = generar_link_whatsapp(numero_wpp, mensaje_wpp)
-                                        st.link_button(f"📲 Notify {destino} via WhatsApp", link_wpp, target="_blank")
-                                st.success("Process completed. The page will reload to update the data.")
+                                        st.link_button(f"📲 Notificar a {destino} por WhatsApp", link_wpp, target="_blank")
+                                st.success("Proceso completado. La página se recargará para actualizar los datos.")
                                 st.cache_data.clear()
+                                st.rerun()
                             else:
-                                st.error(f"❌ Error registering transfer in Google Sheets: {msg_registro}")
-
+                                st.error(f"❌ Error al registrar el traslado en Google Sheets: {msg_registro}")
     st.markdown("---")
-    with st.expander("🚚 **Special Transfers (Manual Search and Request)**", expanded=False):
-        st.markdown("##### 1. Search and add products to the request")
-        search_term_especial = st.text_input("Search for a product by SKU or Description for a special transfer:", key="search_traslado_especial")
+    with st.expander("🚚 **Traslados Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
+        st.markdown("##### 1. Buscar y añadir productos a la solicitud")
+        search_term_especial = st.text_input("Buscar producto por SKU o Descripción para traslado especial:", key="search_traslado_especial")
         if search_term_especial:
             mask_especial = (df_maestro['Stock'] > 0) & \
                             (df_maestro['SKU'].astype(str).str.contains(search_term_especial, case=False, na=False) |
@@ -618,14 +627,14 @@ with tabs[1]:
                 df_resultados_especial['Uds a Enviar'] = 1
                 df_resultados_especial['Seleccionar'] = False
                 columnas_busqueda = ['Seleccionar', 'SKU', 'Descripcion', 'Almacen_Nombre', 'Stock', 'Uds a Enviar']
-                st.write("Search results (only products with stock are shown):")
+                st.write("Resultados de la búsqueda (solo se muestran productos con stock):")
                 edited_df_especial = st.data_editor(
                     df_resultados_especial[columnas_busqueda], key="editor_traslados_especiales", hide_index=True, use_container_width=True,
-                    column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Qty to Send", min_value=1, step=1),
+                    column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=1, step=1),
                                    "Seleccionar": st.column_config.CheckboxColumn(required=True)},
                     disabled=['SKU', 'Descripcion', 'Almacen_Nombre', 'Stock'])
                 df_para_anadir = edited_df_especial[edited_df_especial['Seleccionar']]
-                if st.button("➕ Add selected to the request", key="btn_anadir_especial"):
+                if st.button("➕ Añadir seleccionados a la solicitud", key="btn_anadir_especial"):
                     for _, row in df_para_anadir.iterrows():
                         item_id = f"{row['SKU']}_{row['Almacen_Nombre']}"
                         if not any(item['id'] == item_id for item in st.session_state.solicitud_traslado_especial):
@@ -636,59 +645,62 @@ with tabs[1]:
                                 'Tienda Origen': row['Almacen_Nombre'], 'Uds a Enviar': row['Uds a Enviar'],
                                 'Costo_Promedio_UND': costo
                             })
-                    st.success(f"{len(df_para_anadir)} product(s) added to the request.")
+                    st.success(f"{len(df_para_anadir)} producto(s) añadidos a la solicitud.")
+                    st.rerun()
             else:
-                st.warning("No products with stock were found for that search criteria.")
+                st.warning("No se encontraron productos con stock para ese criterio de búsqueda.")
         if st.session_state.solicitud_traslado_especial:
             st.markdown("---")
-            st.markdown("##### 2. Review and manage the transfer request")
+            st.markdown("##### 2. Revisar y gestionar la solicitud de traslado")
             df_solicitud = pd.DataFrame(st.session_state.solicitud_traslado_especial)
             tiendas_destino_validas = sorted(df_maestro['Almacen_Nombre'].unique().tolist())
-            tienda_destino_especial = st.selectbox("Select Destination Store for this request:", tiendas_destino_validas, key="destino_especial")
+            tienda_destino_especial = st.selectbox("Seleccionar Tienda Destino para esta solicitud:", tiendas_destino_validas, key="destino_especial")
             st.dataframe(df_solicitud[['SKU', 'Descripcion', 'Tienda Origen', 'Uds a Enviar']], use_container_width=True)
-            if st.button("🗑️ Clear Request", key="btn_limpiar_especial"):
+            if st.button("🗑️ Limpiar Solicitud", key="btn_limpiar_especial"):
                 st.session_state.solicitud_traslado_especial = []
-            st.markdown("##### 3. Finalize and send the request")
+                st.rerun()
+            st.markdown("##### 3. Finalizar y enviar la solicitud")
             email_predefinido_especial = CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('email', '')
-            email_dest_especial = st.text_input("📧 Recipient email(s) for the special request:", value=email_predefinido_especial, key="email_traslado_especial", help="Separated by comma.")
-            if st.button("✅ Send and Register Special Request", use_container_width=True, key="btn_enviar_traslado_especial", type="primary"):
+            email_dest_especial = st.text_input("📧 Correo(s) del destinatario para la solicitud especial:", value=email_predefinido_especial, key="email_traslado_especial", help="Separados por coma.")
+            if st.button("✅ Enviar y Registrar Solicitud Especial", use_container_width=True, key="btn_enviar_traslado_especial", type="primary"):
                 if not df_solicitud.empty:
-                    with st.spinner("Registering and sending special request..."):
+                    with st.spinner("Registrando y enviando solicitud especial..."):
                         exito_registro, msg_registro, df_registrado_especial = registrar_ordenes_en_sheets(client, df_solicitud, "Traslado Especial", tienda_destino=tienda_destino_especial)
                         if exito_registro:
-                            st.success(f"✅ Special request registered. {msg_registro}")
+                            st.success(f"✅ Solicitud especial registrada. {msg_registro}")
                             st.session_state.solicitud_traslado_especial = []
                             st.cache_data.clear()
+                            st.rerun()
                         else:
-                            st.error(f"❌ Error registering: {msg_registro}")
+                            st.error(f"❌ Error al registrar: {msg_registro}")
                 else:
-                    st.warning("The request is empty.")
+                    st.warning("La solicitud está vacía.")
 
-with tabs[2]:
-    st.header("🛒 Purchase Plan")
-    with st.expander("✅ **Generate Purchase Orders by Suggestion**", expanded=True):
+with active_tab[2]:
+    st.header("🛒 Plan de Compras")
+    with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
         if df_plan_compras.empty:
-            st.info("No purchase suggestions with the current filters. Inventory seems to be optimized!")
+            st.info("No hay sugerencias de compra con los filtros actuales. ¡El inventario parece estar optimizado!")
         else:
             df_plan_compras['Proveedor'] = df_plan_compras['Proveedor'].astype(str).str.upper()
-            proveedores_disponibles = ["All"] + sorted(df_plan_compras['Proveedor'].unique().tolist())
-            selected_proveedor = st.selectbox("Filter by Supplier:", proveedores_disponibles, key="sb_proveedores")
+            proveedores_disponibles = ["Todos"] + sorted(df_plan_compras['Proveedor'].unique().tolist())
+            selected_proveedor = st.selectbox("Filtrar por Proveedor:", proveedores_disponibles, key="sb_proveedores")
             df_a_mostrar = df_plan_compras.copy()
-            if selected_proveedor != 'All':
+            if selected_proveedor != 'Todos':
                 df_a_mostrar = df_a_mostrar[df_a_mostrar['Proveedor'] == selected_proveedor]
             df_a_mostrar['Uds a Comprar'] = df_a_mostrar['Sugerencia_Compra'].astype(int)
-            select_all_suggested = st.checkbox("Select / Deselect All Visible Products", key="select_all_suggested", value=True)
+            select_all_suggested = st.checkbox("Seleccionar / Deseleccionar Todos los Productos Visibles", key="select_all_suggested", value=True)
             df_a_mostrar['Seleccionar'] = select_all_suggested
             columnas = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND']
             df_a_mostrar_final = df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'})
             columnas_existentes = [col for col in columnas if col in df_a_mostrar_final.columns]
             df_a_mostrar_final = df_a_mostrar_final[columnas_existentes]
-            st.markdown("Check the items and **adjust the quantities** you want to include in the purchase order:")
+            st.markdown("Marque los artículos y **ajuste las cantidades** que desea incluir en la orden de compra:")
             edited_df = st.data_editor(df_a_mostrar_final, hide_index=True, use_container_width=True,
-                column_config={"Uds a Comprar": st.column_config.NumberColumn(label="Qty to Buy", min_value=0, step=1),
+                column_config={"Uds a Comprar": st.column_config.NumberColumn(label="Cant. a Comprar", min_value=0, step=1),
                                "Seleccionar": st.column_config.CheckboxColumn(required=True),
-                               "Stock_En_Transito": st.column_config.NumberColumn(label="In Transit", format="%d")},
+                               "Stock_En_Transito": st.column_config.NumberColumn(label="En Tránsito", format="%d")},
                 disabled=[col for col in df_a_mostrar_final.columns if col not in ['Seleccionar', 'Uds a Comprar']], key="editor_principal")
             df_seleccionados = edited_df[(edited_df['Seleccionar']) & (edited_df['Uds a Comprar'] > 0)]
             if not df_seleccionados.empty:
@@ -703,32 +715,32 @@ with tabs[2]:
                 info_proveedor = CONTACTOS_PROVEEDOR.get(proveedor_actual, {}) if is_single_provider else {}
                 contacto_proveedor_nombre = info_proveedor.get('nombre', '')
                 celular_proveedor_num = info_proveedor.get('celular', '')
-                st.markdown(f"#### Options for the Order to **{proveedor_actual}**")
-                email_dest_placeholder = "e.g., email1@example.com, email2@example.com"
-                email_dest = st.text_input("📧 Recipient emails (separated by comma):", key="email_principal", help=email_dest_placeholder, placeholder=email_dest_placeholder)
-                whatsapp_dest = st.text_input("📱 WhatsApp number for notification (e.g., 573001234567):", value=celular_proveedor_num, key="wpp_principal", placeholder="573001234567")
+                st.markdown(f"#### Opciones para la Orden a **{proveedor_actual}**")
+                email_dest_placeholder = "ej: correo1@ejemplo.com, correo2@ejemplo.com"
+                email_dest = st.text_input("📧 Correos del destinatario (separados por coma):", key="email_principal", help=email_dest_placeholder, placeholder=email_dest_placeholder)
+                whatsapp_dest = st.text_input("📱 Número de WhatsApp para notificación (ej: 573001234567):", value=celular_proveedor_num, key="wpp_principal", placeholder="573001234567")
                 c1, c2, c3 = st.columns([2,1,1])
                 orden_num = f"OC-{datetime.now().strftime('%Y%m%d-%H%M')}"
-                direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_actual, "Verify with each store")
+                direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_actual, "Verificar con cada tienda")
                 pdf_bytes = generar_pdf_orden_compra(df_seleccionados, proveedor_actual, tienda_actual, direccion_entrega, contacto_proveedor_nombre, orden_num, is_consolidated=(not is_single_provider))
                 excel_bytes = generar_excel_dinamico(df_seleccionados, f"Compra_{proveedor_actual}")
                 with c1:
-                    if st.button("✅ Send and Register Order", use_container_width=True, key="btn_enviar_principal", type="primary"):
+                    if st.button("✅ Enviar y Registrar Orden", use_container_width=True, key="btn_enviar_principal", type="primary"):
                         if not email_dest:
-                            st.warning("Please enter at least one recipient email address to send the order.")
+                            st.warning("Por favor, ingrese al menos un correo electrónico de destinatario para enviar la orden.")
                         else:
-                            with st.spinner("Sending email and registering order..."):
+                            with st.spinner("Enviando correo y registrando orden..."):
                                 exito_registro, msg_registro, df_registrado = registrar_ordenes_en_sheets(client, df_seleccionados, "Compra Sugerencia")
                                 if exito_registro:
-                                    st.success(f"Order registered! {msg_registro}")
+                                    st.success(f"¡Orden registrada! {msg_registro}")
                                     orden_id_real = df_registrado['ID_Orden'].iloc[0] if not df_registrado.empty else orden_num
                                     lista_destinatarios = [email.strip() for email in email_dest.replace(';', ',').split(',') if email.strip()]
                                     if is_single_provider:
-                                        asunto = f"New Purchase Order {orden_id_real} from Ferreinox SAS BIC - {proveedor_actual}"
-                                        cuerpo_html = f"<html><body><p>Dear Sirs {proveedor_actual},</p><p>Attached to this email you will find our <b>purchase order No. {orden_id_real}</b> in PDF and Excel formats.</p><p>Please dispatch to the following address:</p><p><b>Delivery Site:</b> {tienda_actual}<br><b>Address:</b> {direccion_entrega}<br><b>Warehouse Contact:</b> Leivyn Gabriel Garcia</p><p>We appreciate your prompt management.</p><p>Sincerely,</p><p>--<br><b>Purchasing Department</b><br>Ferreinox SAS BIC</p></body></html>"
+                                        asunto = f"Nueva Orden de Compra {orden_id_real} de Ferreinox SAS BIC - {proveedor_actual}"
+                                        cuerpo_html = f"<html><body><p>Estimados Sres. {proveedor_actual},</p><p>Adjunto a este correo encontrarán nuestra <b>orden de compra N° {orden_id_real}</b> en formatos PDF y Excel.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_actual}<br><b>Dirección:</b> {direccion_entrega}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC</p></body></html>"
                                     else:
-                                        asunto = f"New Consolidated Purchase Requirement {orden_id_real} from Ferreinox SAS BIC"
-                                        cuerpo_html = f"<html><body><p>Dear suppliers,</p><p>Attached to this email you will find a <b>consolidated purchase requirement No. {orden_id_real}</b> in PDF and Excel formats. Please review the items corresponding to your company.</p><p>Deliveries must be coordinated with each destination store as specified.</p><p>We appreciate your prompt management.</p><p>Sincerely,</p><p>--<br><b>Purchasing Department</b><br>Ferreinox SAS BIC</p></body></html>"
+                                        asunto = f"Nuevo Requerimiento Consolidado de Compra {orden_id_real} de Ferreinox SAS BIC"
+                                        cuerpo_html = f"<html><body><p>Estimados proveedores,</p><p>Adjunto a este correo encontrarán un <b>requerimiento de compra consolidado N° {orden_id_real}</b> en formatos PDF y Excel. Por favor, revisar los items que corresponden a su empresa.</p><p>Las entregas deben coordinarse con cada tienda de destino según se especifica.</p><p>Agradecemos su pronta gestión.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC</p></body></html>"
                                     adjuntos = [{'datos': pdf_bytes, 'nombre_archivo': f"OC_{orden_id_real}_{proveedor_actual.replace(' ','_')}.pdf", 'tipo_mime': 'application', 'subtipo_mime': 'pdf'},
                                                 {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_{orden_id_real}.xlsx", 'tipo_mime': 'application', 'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'}]
                                     enviado, mensaje = enviar_correo_con_adjuntos(lista_destinatarios, asunto, cuerpo_html, adjuntos)
@@ -736,23 +748,23 @@ with tabs[2]:
                                     else: st.error(mensaje)
                                     if whatsapp_dest:
                                         numero_completo = whatsapp_dest.strip().replace(" ", "")
-                                        mensaje_wpp = f"Hello {contacto_proveedor_nombre or ''}, we have just sent you Purchase Order No. {orden_id_real} by email. We look forward to hearing from you. Thanks!"
+                                        mensaje_wpp = f"Hola {contacto_proveedor_nombre or ''}, le acabamos de enviar la Orden de Compra N° {orden_id_real} al correo. Quedamos atentos. ¡Gracias!"
                                         link_wpp = generar_link_whatsapp(numero_completo, mensaje_wpp)
-                                        st.link_button("📲 Send Confirmation via WhatsApp", link_wpp, target="_blank")
-                                    st.success("Process completed. The data will be updated.")
+                                        st.link_button("📲 Enviar Confirmación por WhatsApp", link_wpp, target="_blank")
+                                    st.success("Proceso completado. Los datos se actualizarán.")
                                     st.cache_data.clear()
+                                    st.rerun()
                                 else:
-                                    st.error(f"Error registering in Google Sheets: {msg_registro}")
+                                    st.error(f"Error al registrar en Google Sheets: {msg_registro}")
                 with c2:
-                    st.download_button("📥 Download Excel", data=excel_bytes, file_name=f"Compra_{proveedor_actual}.xlsx", use_container_width=True)
+                    st.download_button("📥 Descargar Excel", data=excel_bytes, file_name=f"Compra_{proveedor_actual}.xlsx", use_container_width=True)
                 with c3:
-                    st.download_button("📄 Download PDF", data=pdf_bytes, file_name=f"OC_{orden_num}.pdf", use_container_width=True, disabled=(pdf_bytes is None))
-                st.info(f"Total selection: ${df_seleccionados['Valor de la Compra'].sum():,.2f}")
-
+                    st.download_button("📄 Descargar PDF", data=pdf_bytes, file_name=f"OC_{orden_num}.pdf", use_container_width=True, disabled=(pdf_bytes is None))
+                st.info(f"Total de la selección: ${df_seleccionados['Valor de la Compra'].sum():,.2f}")
     st.markdown("---")
-    with st.expander("🆕 **Special Purchases (Manual Search and Creation)**", expanded=False):
-        st.markdown("##### 1. Search and add products to the special purchase")
-        search_term_compra_especial = st.text_input("Search any product by SKU or Description:", key="search_compra_especial")
+    with st.expander("🆕 **Compras Especiales (Búsqueda y Creación Manual)**", expanded=False):
+        st.markdown("##### 1. Buscar y añadir productos a la compra especial")
+        search_term_compra_especial = st.text_input("Buscar cualquier producto por SKU o Descripción:", key="search_compra_especial")
         if search_term_compra_especial:
             mask_compra = (df_maestro['SKU'].astype(str).str.contains(search_term_compra_especial, case=False, na=False) |
                            df_maestro['Descripcion'].astype(str).str.contains(search_term_compra_especial, case=False, na=False))
@@ -760,140 +772,177 @@ with tabs[2]:
             if not df_resultados_compra.empty:
                 df_resultados_compra['Uds a Comprar'] = 1
                 df_resultados_compra['Seleccionar'] = False
-                columnas_busqueda_compra = ['Seleccionar', 'SKU', 'Descripcion', 'Proveedor', 'Uds a Comprar']
-                st.write("Search results:")
+                # MEJORA: Asegurar que la columna de costo esté presente
+                columnas_busqueda_compra = ['Seleccionar', 'SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND', 'Uds a Comprar']
+                columnas_existentes_compra = [col for col in columnas_busqueda_compra if col in df_resultados_compra.columns]
+                
+                st.write("Resultados de la búsqueda:")
                 edited_df_compra_especial = st.data_editor(
-                    df_resultados_compra[columnas_busqueda_compra], key="editor_compra_especial", hide_index=True, use_container_width=True,
-                    column_config={"Uds a Comprar": st.column_config.NumberColumn(min_value=1, step=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
-                    disabled=['SKU', 'Descripcion', 'Proveedor'])
+                    df_resultados_compra[columnas_existentes_compra], key="editor_compra_especial", hide_index=True, use_container_width=True,
+                    column_config={
+                        "Uds a Comprar": st.column_config.NumberColumn(min_value=1, step=1, required=True), 
+                        "Seleccionar": st.column_config.CheckboxColumn(required=True),
+                        "Costo_Promedio_UND": st.column_config.NumberColumn(label="Costo Unitario", disabled=True)
+                    },
+                    disabled=['SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND'])
+                
                 df_para_anadir_compra = edited_df_compra_especial[edited_df_compra_especial['Seleccionar']]
-                if st.button("➕ Add selected to Special Purchase", key="btn_anadir_compra_especial"):
+                if st.button("➕ Añadir seleccionados a la Compra Especial", key="btn_anadir_compra_especial"):
                     for _, row in df_para_anadir_compra.iterrows():
                         if not any(item['SKU'] == row['SKU'] for item in st.session_state.compra_especial_items):
                             st.session_state.compra_especial_items.append(row.to_dict())
-                    st.success(f"{len(df_para_anadir_compra)} product(s) added to the purchase.")
+                    st.success(f"{len(df_para_anadir_compra)} producto(s) añadidos a la compra.")
+                    st.rerun()
             else:
-                st.warning("No products were found for that search criteria.")
+                st.warning("No se encontraron productos para ese criterio de búsqueda.")
+        
         if st.session_state.compra_especial_items:
             st.markdown("---")
-            st.markdown("##### 2. Review and manage the Special Purchase")
+            st.markdown("##### 2. Revisar y gestionar la Compra Especial")
             df_solicitud_compra = pd.DataFrame(st.session_state.compra_especial_items)
-
+            
             col_compra1, col_compra2 = st.columns(2)
-            proveedor_especial = col_compra1.text_input("Enter Supplier Name:", key="proveedor_especial_nombre")
-            contacto_proveedor_especial = col_compra2.text_input("Enter Supplier Contact Name (optional):", key="proveedor_especial_contacto")
+            proveedor_especial = col_compra1.text_input("Ingrese el nombre del proveedor:", key="proveedor_especial_nombre")
+            contacto_proveedor_especial = col_compra2.text_input("Ingrese el contacto del proveedor (opcional):", key="proveedor_especial_contacto")
             
             tiendas_destino_validas = sorted(df_maestro['Almacen_Nombre'].unique().tolist())
-            tienda_destino_especial = st.selectbox("Select Destination Store for this purchase:", tiendas_destino_validas, key="destino_compra_especial")
+            tienda_destino_especial = st.selectbox("Seleccionar Tienda Destino para esta compra:", tiendas_destino_validas, key="destino_compra_especial")
+            
+            # Renombrar 'Costo_Promedio_UND' a 'Costo_Unitario' para consistencia
+            if 'Costo_Promedio_UND' in df_solicitud_compra.columns:
+                df_solicitud_compra.rename(columns={'Costo_Promedio_UND': 'Costo_Unitario'}, inplace=True)
 
-            st.dataframe(df_solicitud_compra[['SKU', 'Descripcion', 'Proveedor', 'Uds a Comprar']], use_container_width=True)
-            if st.button("🗑️ Clear Special Purchase", key="btn_limpiar_compra_especial"):
+            st.dataframe(df_solicitud_compra[['SKU', 'Descripcion', 'Proveedor', 'Uds a Comprar', 'Costo_Unitario']], use_container_width=True)
+            
+            if st.button("🗑️ Limpiar Compra Especial", key="btn_limpiar_compra_especial"):
                 st.session_state.compra_especial_items = []
-
-            st.markdown("##### 3. Finalize and send the Special Purchase")
-            email_dest_compra_especial = st.text_input("📧 Recipient email(s) for the special purchase:", key="email_compra_especial", help="Separated by comma.")
-
-            if st.button("✅ Send and Register Special Purchase", use_container_width=True, key="btn_enviar_compra_especial", type="primary"):
+                st.rerun()
+            
+            st.markdown("##### 3. Finalizar y enviar la Compra Especial")
+            email_dest_compra_especial = st.text_input("📧 Correo(s) del destinatario para la compra especial:", key="email_compra_especial", help="Separados por coma.")
+            
+            if st.button("✅ Enviar y Registrar Compra Especial", use_container_width=True, key="btn_enviar_compra_especial", type="primary"):
                 if not df_solicitud_compra.empty and proveedor_especial:
-                    with st.spinner("Registering and sending special purchase..."):
+                    with st.spinner("Registrando y enviando compra especial..."):
                         exito_registro, msg_registro, df_registrado = registrar_ordenes_en_sheets(client, df_solicitud_compra, "Compra Especial", proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial)
                         if exito_registro:
-                            st.success(f"✅ Special purchase registered. {msg_registro}")
+                            st.success(f"✅ Compra especial registrada. {msg_registro}")
+                            # Lógica de envío de correo
+                            if email_dest_compra_especial:
+                                orden_id_real = df_registrado['ID_Orden'].iloc[0] if not df_registrado.empty else f"OC-SP-{datetime.now().strftime('%Y%m%d')}"
+                                pdf_bytes = generar_pdf_orden_compra(df_registrado, proveedor_especial, tienda_destino_especial, DIRECCIONES_TIENDAS.get(tienda_destino_especial, ""), contacto_proveedor_especial, orden_id_real)
+                                excel_bytes = generar_excel_dinamico(df_registrado, f"CompraEspecial_{proveedor_especial}")
+                                
+                                asunto = f"Nueva Orden de Compra Especial {orden_id_real} de Ferreinox"
+                                cuerpo_html = f"<html><body><p>Estimado(a) {proveedor_especial},</p><p>Adjuntamos una orden de compra especial con ID <b>{orden_id_real}</b>. Por favor, revise los detalles en los archivos adjuntos.</p><p>Gracias.</p></body></html>"
+                                adjuntos = [
+                                    {'datos': pdf_bytes, 'nombre_archivo': f"OC_Especial_{orden_id_real}.pdf", 'tipo_mime': 'application', 'subtipo_mime': 'pdf'},
+                                    {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_Especial_{orden_id_real}.xlsx", 'tipo_mime': 'application', 'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'}
+                                ]
+                                lista_destinatarios = [email.strip() for email in email_dest_compra_especial.split(',') if email.strip()]
+                                enviado, msg = enviar_correo_con_adjuntos(lista_destinatarios, asunto, cuerpo_html, adjuntos)
+                                if enviado: st.success(msg)
+                                else: st.error(msg)
+
                             st.session_state.compra_especial_items = []
                             st.cache_data.clear()
+                            st.rerun()
                         else:
-                            st.error(f"❌ Error registering: {msg_registro}")
+                            st.error(f"❌ Error al registrar: {msg_registro}")
                 else:
-                    st.warning("The purchase list is empty or the supplier name is missing.")
+                    st.warning("La lista de compra está vacía o falta el nombre del proveedor.")
 
-with tabs[3]:
-    st.subheader("✅ Order Tracking and Reception")
+
+with active_tab[3]:
+    st.subheader("✅ Seguimiento y Recepción de Órdenes")
     if df_ordenes_historico.empty:
-        st.warning("Could not load the order history from Google Sheets or no orders have been registered yet.")
+        st.warning("No se pudo cargar el historial de órdenes desde Google Sheets o aún no hay órdenes registradas.")
     else:
         df_ordenes_vista_original = df_ordenes_historico.copy().sort_values(by="Fecha_Emision", ascending=False)
-        with st.expander("Change Status of Multiple Orders (Batch)", expanded=False):
-            st.markdown("##### Filter Orders")
+        with st.expander("Cambiar Estado de Múltiples Órdenes (En Lote)", expanded=False):
+            st.markdown("##### Filtrar Órdenes")
             track_c1, track_c2, track_c3 = st.columns(3)
-            estados_disponibles = ["All"] + df_ordenes_vista_original['Estado'].unique().tolist()
-            filtro_estado = track_c1.selectbox("Status:", estados_disponibles, index=0, key="filtro_estado_seguimiento")
+            estados_disponibles = ["Todos"] + df_ordenes_vista_original['Estado'].unique().tolist()
+            filtro_estado = track_c1.selectbox("Estado:", estados_disponibles, index=0, key="filtro_estado_seguimiento")
             df_ordenes_vista = df_ordenes_vista_original.copy()
-            if filtro_estado != "All": df_ordenes_vista = df_ordenes_vista[df_ordenes_vista['Estado'] == filtro_estado]
-            proveedores_ordenes = ["All"] + sorted(df_ordenes_vista['Proveedor'].unique().tolist())
-            filtro_proveedor_orden = track_c2.selectbox("Supplier/Origin:", proveedores_ordenes, key="filtro_proveedor_seguimiento")
-            if filtro_proveedor_orden != "All": df_ordenes_vista = df_ordenes_vista[df_ordenes_vista['Proveedor'] == filtro_proveedor_orden]
-            tiendas_ordenes = ["All"] + sorted(df_ordenes_vista['Tienda_Destino'].unique().tolist())
-            filtro_tienda_orden = track_c3.selectbox("Destination Store:", tiendas_ordenes, key="filtro_tienda_seguimiento")
-            if filtro_tienda_orden != "All": df_ordenes_vista = df_ordenes_vista[df_ordenes_vista['Tienda_Destino'] == filtro_tienda_orden]
+            if filtro_estado != "Todos": df_ordenes_vista = df_ordenes_vista[df_ordenes_vista['Estado'] == filtro_estado]
+            proveedores_ordenes = ["Todos"] + sorted(df_ordenes_vista['Proveedor'].unique().tolist())
+            filtro_proveedor_orden = track_c2.selectbox("Proveedor/Origen:", proveedores_ordenes, key="filtro_proveedor_seguimiento")
+            if filtro_proveedor_orden != "Todos": df_ordenes_vista = df_ordenes_vista[df_ordenes_vista['Proveedor'] == filtro_proveedor_orden]
+            tiendas_ordenes = ["Todos"] + sorted(df_ordenes_vista['Tienda_Destino'].unique().tolist())
+            filtro_tienda_orden = track_c3.selectbox("Tienda Destino:", tiendas_ordenes, key="filtro_tienda_seguimiento")
+            if filtro_tienda_orden != "Todos": df_ordenes_vista = df_ordenes_vista[df_ordenes_vista['Tienda_Destino'] == filtro_tienda_orden]
             if df_ordenes_vista.empty:
-                st.info("No orders match the selected filters.")
+                st.info("No hay órdenes que coincidan con los filtros seleccionados.")
             else:
-                select_all_seguimiento = st.checkbox("Select / Deselect All Visible Orders", value=False, key="select_all_seguimiento")
+                select_all_seguimiento = st.checkbox("Seleccionar / Deseleccionar Todas las Órdenes Visibles", value=False, key="select_all_seguimiento")
                 df_ordenes_vista['Seleccionar'] = select_all_seguimiento
                 columnas_seguimiento = ['Seleccionar', 'ID_Orden', 'Fecha_Emision', 'Proveedor', 'SKU', 'Descripcion', 'Cantidad_Solicitada', 'Tienda_Destino', 'Estado']
-                st.info("Select the orders and then choose the new status to update them in batch.")
+                st.info("Selecciona las órdenes y luego elige el nuevo estado para actualizarlas en lote.")
                 edited_df_seguimiento = st.data_editor(
                     df_ordenes_vista[columnas_seguimiento], hide_index=True, use_container_width=True,
                     key="editor_seguimiento", disabled=[col for col in columnas_seguimiento if col != 'Seleccionar'])
                 df_seleccion_seguimiento = edited_df_seguimiento[edited_df_seguimiento['Seleccionar']]
                 if not df_seleccion_seguimiento.empty:
-                    st.markdown("##### Batch Actions for Selected Orders")
-                    nuevo_estado = st.selectbox("Select new status:", ["Received", "Canceled", "Pending"], key="nuevo_estado_lote")
-                    if st.button(f"➡️ Update {len(df_seleccion_seguimiento)} SKUs to '{nuevo_estado}'", key="btn_actualizar_estado"):
+                    st.markdown("##### Acciones en Lote para Órdenes Seleccionadas")
+                    nuevo_estado = st.selectbox("Seleccionar nuevo estado:", ["Recibido", "Cancelado", "Pendiente"], key="nuevo_estado_lote")
+                    if st.button(f"➡️ Actualizar {len(df_seleccion_seguimiento)} SKUs a '{nuevo_estado}'", key="btn_actualizar_estado"):
                         df_historico_modificado = df_ordenes_historico.copy()
                         df_historico_modificado['ID_unico_fila'] = df_historico_modificado['ID_Orden'] + "_" + df_historico_modificado['SKU'].astype(str)
                         df_seleccion_seguimiento['ID_unico_fila'] = df_seleccion_seguimiento['ID_Orden'] + "_" + df_seleccion_seguimiento['SKU'].astype(str)
                         ids_unicos_a_actualizar = df_seleccion_seguimiento['ID_unico_fila'].tolist()
                         df_historico_modificado.loc[df_historico_modificado['ID_unico_fila'].isin(ids_unicos_a_actualizar), 'Estado'] = nuevo_estado
                         df_historico_modificado.drop(columns=['ID_unico_fila'], inplace=True)
-                        with st.spinner("Updating statuses in Google Sheets..."):
+                        with st.spinner("Actualizando estados en Google Sheets..."):
                             exito, msg = update_sheet(client, "Registro_Ordenes", df_historico_modificado)
                             if exito:
-                                st.success(f"Success! {len(ids_unicos_a_actualizar)} order lines updated. Reloading...")
+                                st.success(f"¡Éxito! {len(ids_unicos_a_actualizar)} líneas de orden actualizadas. Recargando...")
                                 st.cache_data.clear()
+                                st.rerun()
                             else:
-                                st.error(f"Error updating Google Sheets: {msg}")
+                                st.error(f"Error al actualizar Google Sheets: {msg}")
         st.markdown("---")
-        with st.expander("🔍 Manage, Modify, or Resend a Specific Order", expanded=True):
-            orden_a_buscar = st.text_input("Search for Order ID to modify (e.g., OC-2024..., TR-2024...):", key="search_orden_id")
-            if st.button("Load Order", key="btn_load_order"):
+        with st.expander("🔍 Gestionar, Modificar o Reenviar una Orden Específica", expanded=True):
+            orden_a_buscar = st.text_input("Buscar ID de Orden para modificar (ej: OC-2024..., TR-2024...):", key="search_orden_id")
+            if st.button("Cargar Orden", key="btn_load_order"):
                 if orden_a_buscar:
                     df_orden_cargada = df_ordenes_historico[df_ordenes_historico['ID_Orden'].str.startswith(orden_a_buscar.strip(), na=False)].copy()
                     if not df_orden_cargada.empty:
                         st.session_state.orden_modificada_df = df_orden_cargada
                         st.session_state.orden_cargada_id = orden_a_buscar.strip()
-                        st.success(f"Order '{st.session_state.orden_cargada_id}' loaded with {len(df_orden_cargada)} items.")
+                        st.success(f"Orden '{st.session_state.orden_cargada_id}' cargada con {len(df_orden_cargada)} items.")
                     else:
-                        st.error(f"No order found with the ID starting with '{orden_a_buscar}'.")
+                        st.error(f"No se encontró ninguna orden con el ID que comience por '{orden_a_buscar}'.")
                         st.session_state.orden_modificada_df = pd.DataFrame()
                         st.session_state.orden_cargada_id = None
                 else:
-                    st.warning("Please enter an order ID to search.")
+                    st.warning("Por favor, ingrese un ID de orden para buscar.")
             if not st.session_state.orden_modificada_df.empty and st.session_state.orden_cargada_id:
-                st.markdown(f"#### Editing Order: **{st.session_state.orden_cargada_id}**")
+                st.markdown(f"#### Editando Orden: **{st.session_state.orden_cargada_id}**")
                 editor_key = f"editor_orden_{st.session_state.orden_cargada_id}"
                 edited_orden_df = st.data_editor(
                     st.session_state.orden_modificada_df, key=editor_key, hide_index=True, use_container_width=True,
-                    column_config={"Cantidad_Solicitada": st.column_config.NumberColumn(label="Quantity", min_value=0, step=1),
-                                   "Costo_Unitario": st.column_config.NumberColumn(label="Unit Cost", format="$ %.2f")},
+                    column_config={"Cantidad_Solicitada": st.column_config.NumberColumn(label="Cantidad", min_value=0, step=1),
+                                   "Costo_Unitario": st.column_config.NumberColumn(label="Costo Unit.", format="$ %.2f")},
                     disabled=['ID_Orden', 'Fecha_Emision', 'Proveedor', 'SKU', 'Descripcion', 'Tienda_Destino', 'Estado', 'Costo_Total'])
-                if st.button("💾 Save Changes", key="btn_save_changes"):
+                if st.button("💾 Guardar Cambios", key="btn_save_changes"):
                     df_ordenes_historico['temp_id'] = df_ordenes_historico['ID_Orden'] + df_ordenes_historico['SKU'].astype(str)
                     edited_orden_df['temp_id'] = edited_orden_df['ID_Orden'] + edited_orden_df['SKU'].astype(str)
                     df_actualizado = df_ordenes_historico.set_index('temp_id')
                     df_cambios = edited_orden_df.set_index('temp_id')
                     df_actualizado.update(df_cambios)
                     df_actualizado.reset_index(drop=True, inplace=True)
-                    with st.spinner("Saving changes to Google Sheets..."):
+                    with st.spinner("Guardando cambios en Google Sheets..."):
                         exito, msg = update_sheet(client, "Registro_Ordenes", df_actualizado)
                         if exito:
-                            st.success("Changes saved successfully!")
+                            st.success("¡Cambios guardados exitosamente!")
                             st.cache_data.clear()
                             st.session_state.orden_modificada_df = edited_orden_df
+                            st.rerun()
                         else:
-                            st.error(f"Error saving: {msg}")
+                            st.error(f"Error al guardar: {msg}")
                 st.markdown("---")
-                st.markdown("##### Resend Order Notifications (with changes if any)")
+                st.markdown("##### Reenviar Notificaciones de la Orden (con cambios si los hay)")
                 es_traslado = "TRASLADO" in edited_orden_df.iloc[0]['Proveedor']
                 destinatario = edited_orden_df.iloc[0]['Tienda_Destino'] if es_traslado else edited_orden_df.iloc[0]['Proveedor']
                 email_contacto, celular_contacto, nombre_contacto = "", "", ""
@@ -903,16 +952,16 @@ with tabs[3]:
                 else:
                     info = CONTACTOS_PROVEEDOR.get(destinatario, {})
                     celular_contacto, nombre_contacto = info.get('celular', ''), info.get('nombre', '')
-                email_mod_dest = st.text_input("Email(s) for change notification:", value=email_contacto, key="email_modificacion")
+                email_mod_dest = st.text_input("Correo(s) para notificación de cambio:", value=email_contacto, key="email_modificacion")
                 pdf_mod_bytes = generar_pdf_orden_compra(edited_orden_df, destinatario, edited_orden_df.iloc[0]['Tienda_Destino'], "N/A", nombre_contacto, st.session_state.orden_cargada_id)
                 excel_mod_bytes = generar_excel_dinamico(edited_orden_df, f"Orden_{st.session_state.orden_cargada_id}")
                 mod_c1, mod_c2 = st.columns(2)
                 with mod_c1:
-                    if st.button("✉️ Send Email with Correction", key="btn_email_mod"):
+                    if st.button("✉️ Enviar Correo con Corrección", key="btn_email_mod"):
                         if email_mod_dest:
-                            with st.spinner("Sending email..."):
-                                asunto = f"CORRECTION: Order {st.session_state.orden_cargada_id} from Ferreinox"
-                                cuerpo_html = f"<html><body><p>Hello,</p><p>A correction has been made to order <b>{st.session_state.orden_cargada_id}</b>. Please consider the attached version as the final one.</p><p>Thank you.</p><p>--<br>Ferreinox SAS BIC</p></body></html>"
+                            with st.spinner("Enviando correo..."):
+                                asunto = f"CORRECCIÓN: Orden {st.session_state.orden_cargada_id} de Ferreinox"
+                                cuerpo_html = f"<html><body><p>Hola,</p><p>Se ha realizado una corrección en la orden <b>{st.session_state.orden_cargada_id}</b>. Por favor, tomar en cuenta la versión adjunta como la definitiva.</p><p>Gracias.</p><p>--<br>Ferreinox SAS BIC</p></body></html>"
                                 adjuntos = [{'datos': pdf_mod_bytes, 'nombre_archivo': f"CORRECCION_OC_{st.session_state.orden_cargada_id}.pdf", 'tipo_mime': 'application', 'subtipo_mime': 'pdf'},
                                             {'datos': excel_mod_bytes, 'nombre_archivo': f"CORRECCION_Detalle_{st.session_state.orden_cargada_id}.xlsx", 'tipo_mime': 'application', 'subtipo_mime': 'vnd.openxmlformats-officedocument.spreadsheetml.sheet'}]
                                 lista_destinatarios = [email.strip() for email in email_mod_dest.split(',') if email.strip()]
@@ -920,9 +969,9 @@ with tabs[3]:
                                 if enviado: st.success(msg)
                                 else: st.error(msg)
                         else:
-                            st.warning("Enter an email to send the notification.")
+                            st.warning("Ingrese un correo para enviar la notificación.")
                 with mod_c2:
                     if celular_contacto:
-                        mensaje_wpp = f"Hello, a CORRECTION for order {st.session_state.orden_cargada_id} has been sent to the email. Please review. Thanks."
+                        mensaje_wpp = f"Hola, se ha enviado una CORRECCIÓN de la orden {st.session_state.orden_cargada_id} al correo. Por favor revisar. Gracias."
                         link_wpp = generar_link_whatsapp(celular_contacto, mensaje_wpp)
-                        st.link_button("📲 Notify Correction via WhatsApp", link_wpp, target="_blank", use_container_width=True)
+                        st.link_button("📲 Notificar Corrección por WhatsApp", link_wpp, target="_blank", use_container_width=True)
