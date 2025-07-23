@@ -18,6 +18,8 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(page_title="Gestión de Abastecimiento v3.2", layout="wide", page_icon="🚀")
 
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
+# Se inicializan todas las claves necesarias para la aplicación.
+# 'active_tab' ahora se gestionará con el st.radio para una navegación persistente.
 keys_to_initialize = {
     'df_analisis_maestro': pd.DataFrame(),
     'user_role': None,
@@ -25,7 +27,6 @@ keys_to_initialize = {
     'solicitud_traslado_especial': [],
     'compra_especial_items': [],
     'orden_modificada_df': pd.DataFrame(),
-    'active_tab': "📊 Diagnóstico",
     'order_to_edit': None,
     'contacto_manual': {},
 }
@@ -155,10 +156,27 @@ def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adju
 def generar_link_whatsapp(numero, mensaje):
     mensaje_codificado = urllib.parse.quote(mensaje)
     return f"https://wa.me/{numero}?text={mensaje_codificado}"
-def whatsapp_button(label, url, target="_blank", use_container_width=True):
+
+def whatsapp_button(label, url, target="_blank"):
+    # Esta función crea un botón HTML estilizado que funciona como un enlace.
+    # Es una forma efectiva de crear botones de acción personalizados en Streamlit.
     st.markdown(
-        f'<a href="{url}" target="{target}"><button style="background-color:#25d366;color:white;border:none;border-radius:5px;padding:0.5em 1em;font-size:1em;cursor:pointer;">{label}</button></a>',
-        unsafe_allow_html=True,
+        f"""
+        <a href="{url}" target="{target}" style="text-decoration: none;">
+            <div style="
+                display: inline-block;
+                padding: 8px 16px;
+                background-color: #25D366;
+                color: white;
+                border-radius: 5px;
+                text-align: center;
+                font-weight: bold;
+                cursor: pointer;">
+                {label}
+            </div>
+        </a>
+        """,
+        unsafe_allow_html=True
     )
 
 @st.cache_data
@@ -388,6 +406,9 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
 
 df_maestro, df_plan_maestro = calcular_estado_inventario_completo(df_maestro_base, df_ordenes_historico)
 
+# --- 4. NAVEGACIÓN Y FILTROS EN SIDEBAR ---
+tab_titles = ["📊 Diagnóstico", "🔄 Traslados", "🛒 Compras", "✅ Seguimiento"]
+
 with st.sidebar:
     st.header("⚙️ Filtros de Gestión")
     opcion_consolidado = '-- Consolidado (Todas las Tiendas) --'
@@ -418,6 +439,17 @@ with st.sidebar:
         df_filtered = df_vista
         
     st.markdown("---")
+    
+    # CAMBIO CLAVE: Se usa st.radio para la navegación principal. Esto mantiene el estado entre reruns.
+    st.header("Menú Principal")
+    active_tab = st.radio(
+        "Navegación", 
+        tab_titles, 
+        key='active_tab',  # La clave asegura que el estado se guarde en st.session_state.active_tab
+        label_visibility="collapsed"
+    )
+
+    st.markdown("---")
     st.subheader("Sincronización Manual")
     if st.button("🔄 Actualizar 'Estado_Inventario' en GSheets"):
         with st.spinner("Sincronizando..."):
@@ -426,14 +458,19 @@ with st.sidebar:
             exito, msg = update_sheet(client, "Estado_Inventario", df_para_sincronizar)
             if exito: st.success(msg)
             else: st.error(msg)
+    
+    # Botón para forzar recarga de datos si es necesario
+    if st.button("🔄 Forzar Recarga de Datos"):
+        st.cache_data.clear()
+        st.rerun()
 
-# --- 4. PESTAÑAS Y NAVEGACIÓN ---
-tab_titles = ["📊 Diagnóstico", "🔄 Traslados", "🛒 Compras", "✅ Seguimiento"]
-tab1, tab2, tab3, tab4 = st.tabs(tab_titles)
+
+# --- 5. CONTENIDO DE LAS PESTAÑAS ---
+# CAMBIO CLAVE: Se reemplaza la estructura `with st.tabs:` por condicionales `if`
+# que revisan el valor de `st.session_state.active_tab` definido por el `st.radio`.
 
 # --- PESTAÑA 1: DIAGNÓSTICO GENERAL ---
-with tab1:
-    st.session_state["active_tab"] = tab_titles[0]
+if active_tab == tab_titles[0]:
     st.subheader(f"Diagnóstico para: {selected_almacen_nombre}")
     necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
     oportunidad_ahorro = 0
@@ -476,8 +513,7 @@ with tab1:
             st.plotly_chart(fig, use_container_width=True)
 
 # --- PESTAÑA 2: PLAN DE TRASLADOS ---
-with tab2:
-    st.session_state["active_tab"] = tab_titles[1]
+if active_tab == tab_titles[1]:
     st.subheader("🚚 Plan de Traslados entre Tiendas")
     with st.expander("🔄 **Plan de Traslados Automático**", expanded=True):
         if df_plan_maestro.empty:
@@ -509,7 +545,7 @@ with tab2:
             else:
                 df_para_editar = pd.merge(df_traslados_filtrado, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
                                           left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                         ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                          ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Stock_En_Transito', 'Necesidad en Destino', 'Uds a Enviar']
                 edited_df_traslados = st.data_editor(
@@ -541,10 +577,10 @@ with tab2:
                     
                     for dest in destinos_implicados:
                         if dest not in st.session_state.contacto_manual:
-                             st.session_state.contacto_manual[dest] = {
-                                 "nombre": CONTACTOS_TIENDAS.get(dest, {}).get('nombre', ''),
-                                 "celular": CONTACTOS_TIENDAS.get(dest, {}).get('celular', '')
-                             }
+                                 st.session_state.contacto_manual[dest] = {
+                                     "nombre": CONTACTOS_TIENDAS.get(dest, {}).get('nombre', ''),
+                                     "celular": CONTACTOS_TIENDAS.get(dest, {}).get('celular', '')
+                                 }
                         nombre_actual = st.text_input(f"Nombre contacto {dest}", value=st.session_state.contacto_manual[dest]["nombre"], key=f"nombre_contacto_aut_{dest}")
                         celular_actual = st.text_input(f"Celular {dest}", value=st.session_state.contacto_manual[dest]["celular"], key=f"celular_contacto_aut_{dest}")
                         st.session_state.contacto_manual[dest]["nombre"] = nombre_actual
@@ -611,7 +647,7 @@ with tab2:
                                 'Costo_Promedio_UND': costo
                             })
                     st.success(f"{len(df_para_anadir)} producto(s) añadidos a la solicitud.")
-                    st.rerun()
+                    # CAMBIO CLAVE: Se elimina st.rerun(). La actualización del session_state es suficiente.
             else:
                 st.warning("No se encontraron productos con stock para ese criterio de búsqueda.")
         
@@ -624,13 +660,13 @@ with tab2:
             st.dataframe(df_solicitud[['SKU', 'Descripcion', 'Tienda Origen', 'Uds a Enviar']], use_container_width=True)
             if st.button("🗑️ Limpiar Solicitud", key="btn_limpiar_especial"):
                 st.session_state.solicitud_traslado_especial = []
-                st.rerun()
-
+                # CAMBIO CLAVE: Se elimina st.rerun().
+            
             st.markdown("##### 3. Finalizar y enviar la solicitud")
             email_predefinido_especial = CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('email', '')
             email_dest_especial = st.text_input("📧 Correo(s) del destinatario para la solicitud especial:", value=email_predefinido_especial, key="email_traslado_especial", help="Separados por coma.")
             nombre_contacto_especial = st.text_input("Nombre contacto destino", value=CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('nombre', ''), key="nombre_especial")
-            celular_contacto_especial = st.text_input("Celular destino", value=CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('celular', ''), key="celular_especial")
+            celular_contacto_especial = st.text_input("Celular destino", value=CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('celular', ''), key="celular_especial", help="Formato: 573... sin espacios ni símbolos.")
             
             if st.button("✅ Enviar y Registrar Solicitud Especial", use_container_width=True, key="btn_enviar_traslado_especial", type="primary"):
                 if not df_solicitud.empty:
@@ -645,15 +681,14 @@ with tab2:
                                 whatsapp_button("📲 Notificar por WhatsApp", link_wpp, target="_blank")
                             st.session_state.solicitud_traslado_especial = []
                             st.cache_data.clear()
-                            st.rerun()
+                            st.rerun() # Se mantiene el rerun para recargar todo después de la acción final.
                         else:
                             st.error(f"❌ Error al registrar: {msg_registro}")
                 else:
                     st.warning("La solicitud está vacía.")
 
 # --- PESTAÑA 3: PLAN DE COMPRAS ---
-with tab3:
-    st.session_state["active_tab"] = tab_titles[2]
+if active_tab == tab_titles[2]:
     st.header("🛒 Plan de Compras")
     with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
         df_plan_compras = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
@@ -698,7 +733,7 @@ with tab3:
                 if es_proveedor_unico:
                     email_dest = st.text_input("📧 Correos del destinatario (separados por coma):", key="email_principal", help="Ej: correo1@ejemplo.com")
                     nombre_contacto = st.text_input("Nombre contacto proveedor", value=CONTACTOS_PROVEEDOR.get(selected_proveedor, {}).get("nombre", ""), key="nombre_contacto_prov")
-                    celular_proveedor = st.text_input("Celular proveedor", value=CONTACTOS_PROVEEDOR.get(selected_proveedor, {}).get("celular", ""), key="celular_contacto_prov")
+                    celular_proveedor = st.text_input("Celular proveedor", value=CONTACTOS_PROVEEDOR.get(selected_proveedor, {}).get("celular", ""), key="celular_contacto_prov", help="Formato: 573... sin espacios ni símbolos.")
                 else:
                     st.info("Para generar un PDF o enviar una orden por correo, seleccione un proveedor específico.")
                 
@@ -755,8 +790,7 @@ with tab3:
                 st.info(f"Total de la selección para **{selected_proveedor if es_proveedor_unico else 'Múltiples Proveedores'}**: ${df_seleccionados['Valor de la Compra'].sum():,.2f}")
 
 # --- PESTAÑA 4: SEGUIMIENTO Y RECEPCIÓN ---
-with tab4:
-    st.session_state["active_tab"] = tab_titles[3]
+if active_tab == tab_titles[3]:
     st.subheader("✅ Seguimiento y Recepción de Órdenes")
     if df_ordenes_historico.empty:
         st.warning("No se pudo cargar el historial de órdenes o aún no hay órdenes registradas.")
@@ -832,19 +866,16 @@ with tab4:
                     
                     if st.button("💾 Guardar Cambios de Esta Orden", key="btn_save_edit"):
                         df_ordenes_updated = df_ordenes_historico.copy()
-                        for idx, edit_row in edited_detalle.iterrows():
-                            original_row_index = edited_detalle.index[idx]
-                            mask = (df_ordenes_updated.index == original_row_index)
+                        # Usar el índice original para mapear los cambios de vuelta
+                        original_indices = df_orden_detalle.index
+                        edited_detalle.index = original_indices
+                        
+                        df_ordenes_updated.update(edited_detalle)
 
-                            df_ordenes_updated.loc[mask, 'Cantidad_Solicitada'] = edit_row['Cantidad_Solicitada']
-                            df_ordenes_updated.loc[mask, 'Costo_Unitario'] = edit_row['Costo_Unitario']
-                            
-                            # Recalcular Costo_Total
-                            cantidad_num = pd.to_numeric(edit_row['Cantidad_Solicitada'], errors='coerce')
-                            costo_num = pd.to_numeric(edit_row['Costo_Unitario'], errors='coerce')
-                            df_ordenes_updated.loc[mask, 'Costo_Total'] = cantidad_num * costo_num
-                            
-                            df_ordenes_updated.loc[mask, 'Estado'] = edit_row['Estado']
+                        # Recalcular Costo_Total para las filas modificadas
+                        cantidad_num = pd.to_numeric(df_ordenes_updated.loc[original_indices, 'Cantidad_Solicitada'], errors='coerce').fillna(0)
+                        costo_num = pd.to_numeric(df_ordenes_updated.loc[original_indices, 'Costo_Unitario'], errors='coerce').fillna(0)
+                        df_ordenes_updated.loc[original_indices, 'Costo_Total'] = cantidad_num * costo_num
 
                         with st.spinner("Guardando cambios en Google Sheets..."):
                             exito, msg = update_sheet(client, "Registro_Ordenes", df_ordenes_updated)
@@ -893,6 +924,6 @@ with tab4:
                         if numero_wpp:
                             mensaje_wpp = f"Hola, se ha generado o modificado la orden {id_elegido}. Por favor revise los documentos enviados a su correo. ¡Gracias!"
                             link_wpp = generar_link_whatsapp(numero_wpp, mensaje_wpp)
-                            whatsapp_button("Abrir Chat en WhatsApp", url=link_wpp, use_container_width=True)
+                            whatsapp_button("Abrir Chat en WhatsApp", url=link_wpp)
                         else:
                             st.warning("Ingrese un número de celular válido.")
