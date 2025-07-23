@@ -298,7 +298,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}     |      {self.empresa_web}      |      {self.empresa_email}      |      {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -623,7 +623,7 @@ if active_tab == tab_titles[1]:
             df_traslados_filtrado = df_aplicar_filtros
             if search_term_traslado:
                 mask_traslado = (df_traslados_filtrado['SKU'].str.contains(search_term_traslado, case=False, na=False) |
-                                   df_traslados_filtrado['Descripcion'].str.contains(search_term_traslado, case=False, na=False))
+                                     df_traslados_filtrado['Descripcion'].str.contains(search_term_traslado, case=False, na=False))
                 df_traslados_filtrado = df_traslados_filtrado[mask_traslado]
 
             if df_traslados_filtrado.empty:
@@ -933,7 +933,35 @@ if active_tab == tab_titles[2]:
                             exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_compra_especial, "Compra Especial", proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial)
                             if exito:
                                 st.success(f"✅ Compra especial registrada. {msg}")
+
+                                # <<< FIX: ADDED NOTIFICATION LOGIC FOR SPECIAL PURCHASES >>>
+                                orden_id = df_reg['ID_Orden'].iloc[0] if not df_reg.empty else f"OC-SP-{datetime.now().strftime('%f')}"
+                                direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_destino_especial, "N/A")
+                                
+                                # Use df_reg which contains the final data for the PDF
+                                pdf_bytes = generar_pdf_orden_compra(df_reg, proveedor_especial, tienda_destino_especial, direccion_entrega, nombre_contacto_esp, orden_id)
+                                excel_bytes = generar_excel_dinamico(df_reg, f"Compra_Especial_{proveedor_especial}")
+
+                                asunto = f"Nueva Orden de Compra Especial {orden_id} de Ferreinox SAS BIC - {proveedor_especial}"
+                                cuerpo_html = f"<html><body><p>Estimados Sres. {proveedor_especial},</p><p>Adjunto a este correo encontrarán nuestra <b>orden de compra especial N° {orden_id}</b> en formatos PDF y Excel.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda_destino_especial}<br><b>Dirección:</b> {direccion_entrega}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC</p></body></html>"
+                                adjuntos = [ {'datos': pdf_bytes, 'nombre_archivo': f"OC_{orden_id}.pdf"}, {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_Especial_{orden_id}.xlsx"} ]
+                                
+                                if email_dest_esp:
+                                    enviado, msg_envio = enviar_correo_con_adjuntos([e.strip() for e in email_dest_esp.split(',')], asunto, cuerpo_html, adjuntos)
+                                    if enviado: st.success(msg_envio)
+                                    else: st.error(msg_envio)
+                                else:
+                                    st.warning("Orden registrada pero no enviada (falta correo electrónico).")
+
+                                if celular_proveedor_esp:
+                                    msg_wpp = f"Hola {nombre_contacto_esp}, te acabamos de enviar la Orden de Compra Especial N° {orden_id} al correo. Quedamos atentos. ¡Gracias!"
+                                    st.session_state.notificaciones_pendientes.append({
+                                        "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"
+                                    })
+
                                 st.session_state.compra_especial_items = []
+                                # <<< END FIX >>>
+
                             else:
                                 st.error(f"❌ Error al registrar: {msg}")
                     else:
@@ -949,6 +977,11 @@ if active_tab == tab_titles[3]:
         st.warning("No se pudo cargar el historial de órdenes o aún no hay órdenes registradas.")
     else:
         df_ordenes_vista_original = df_ordenes_historico.copy().sort_values(by="Fecha_Emision", ascending=False)
+        
+        # <<< FIX: CONVERT PROVEEDOR COLUMN TO STRING TO PREVENT SORTING ERROR >>>
+        # This prevents a TypeError if the column contains mixed types (e.g., strings and None/NaN)
+        df_ordenes_vista_original['Proveedor'] = df_ordenes_vista_original['Proveedor'].astype(str).fillna('N/A')
+        # <<< END FIX >>>
 
         with st.expander("Cambiar Estado de Múltiples Órdenes (En Lote)", expanded=True):
             st.markdown("##### Filtrar Órdenes")
