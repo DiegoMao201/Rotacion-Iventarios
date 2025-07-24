@@ -167,9 +167,9 @@ def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adju
             with io.BytesIO(adj_info['datos']) as attachment_stream:
                 part = MIMEBase(adj_info.get('tipo_mime', 'application'), adj_info.get('subtipo_mime', 'octet-stream'))
                 part.set_payload(attachment_stream.read())
-            encoders.encode_base64(part)
-            part.add_header('Content-Disposition', 'attachment', filename=adj_info['nombre_archivo'])
-            msg.attach(part)
+                encoders.encode_base64(part)
+                part.add_header('Content-Disposition', 'attachment', filename=adj_info['nombre_archivo'])
+                msg.attach(part)
 
         # Usar SMTP_SSL para una conexión segura desde el principio
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
@@ -283,7 +283,7 @@ class PDF(FPDF):
             if os.path.exists(logo_path):
                 self.image(logo_path, x=10, y=8, w=65)
             else:
-                 self.set_xy(10, 8); self.set_font(font_name, 'B', 12); self.cell(65, 25, '[LOGO]', 1, 0, 'C')
+                self.set_xy(10, 8); self.set_font(font_name, 'B', 12); self.cell(65, 25, '[LOGO]', 1, 0, 'C')
         except RuntimeError:
             self.set_xy(10, 8); self.set_font(font_name, 'B', 12); self.cell(65, 25, '[LOGO]', 1, 0, 'C')
 
@@ -298,7 +298,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |      {self.empresa_web}      |      {self.empresa_email}      |      {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -702,7 +702,7 @@ if active_tab == tab_titles[1]:
                                                 "url": generar_link_whatsapp(numero_wpp, mensaje_wpp),
                                                 "key": f"wpp_traslado_aut_{dest}"
                                             })
-                                    # NO st.rerun() aquí, dejar que el flujo continúe para mostrar los botones
+                                    # No se fuerza un rerun, la interfaz se actualizará al mostrar las notificaciones pendientes.
                                 else:
                                     st.error(f"❌ Error al registrar el traslado en Google Sheets: {msg_registro}")
 
@@ -762,7 +762,7 @@ if active_tab == tab_titles[1]:
                                     "label": f"📲 Notificar a {tienda_destino_especial}", "url": generar_link_whatsapp(celular_contacto_especial, mensaje_wpp), "key": "wpp_traslado_esp"
                                 })
                             st.session_state.solicitud_traslado_especial = [] # Limpiar la cesta
-                            # No st.rerun(), dejar que el flujo muestre el botón de notificación si existe
+                            # No se fuerza un rerun
                         else:
                             st.error(f"❌ Error al registrar: {msg}")
                 if c2.form_submit_button("🗑️ Limpiar Solicitud", use_container_width=True):
@@ -1022,8 +1022,8 @@ if active_tab == tab_titles[3]:
                         with st.spinner("Actualizando estados en Google Sheets..."):
                             exito, msg = update_sheet(client, "Registro_Ordenes", df_historico_modificado)
                             if exito:
-                                st.success(f"¡Éxito! {len(ids_a_actualizar)} líneas de orden actualizadas.")
-                                st.cache_data.clear(); st.rerun() # Un rerun aquí es justificable para recargar el estado.
+                                st.success(f"¡Éxito! {len(ids_a_actualizar)} líneas de orden actualizadas en Google Sheets. La vista se actualizará en la próxima recarga manual.")
+                                # MODIFICACIÓN: Se eliminó st.cache_data.clear() y st.rerun() para dar control manual al usuario.
                             else:
                                 st.error(f"Error al actualizar Google Sheets: {msg}")
 
@@ -1139,5 +1139,6 @@ if st.session_state.notificaciones_pendientes:
 
     if st.button("✅ Hecho, Limpiar Notificaciones", key="finalizar_proceso_completo", type="primary"):
         st.session_state.notificaciones_pendientes = []
-        st.cache_data.clear()
-        st.rerun()
+        st.success("Notificaciones limpiadas. La app no se recargará automáticamente. Pulse 'Forzar Recarga de Datos' para ver los cambios.")
+        # MODIFICACIÓN: Se eliminó st.cache_data.clear() y st.rerun() para dar control manual al usuario.
+        # El bloque de notificaciones desaparecerá en la siguiente interacción del usuario (clic en cualquier otro widget).
