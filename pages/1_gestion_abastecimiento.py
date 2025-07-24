@@ -18,7 +18,7 @@ import logging
 import os
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
-st.set_page_config(page_title="Gestión de Abastecimiento v5.2", layout="wide", page_icon="⚙️")
+st.set_page_config(page_title="Gestión de Abastecimiento v5.3", layout="wide", page_icon="⚙️")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
@@ -67,7 +67,6 @@ def load_data_from_sheets(_client, sheet_name):
         df = pd.DataFrame(worksheet.get_all_records())
         if not df.empty and 'SKU' in df.columns:
             df['SKU'] = df['SKU'].astype(str)
-        # **MEJORA**: Asegurar que ID_Grupo exista para la lógica de seguimiento
         if 'ID_Orden' in df.columns and 'ID_Grupo' not in df.columns:
             df['ID_Grupo'] = df['ID_Orden'].apply(lambda x: '-'.join(str(x).split('-')[:-1]))
         logging.info(f"Hoja '{sheet_name}' cargada correctamente con {len(df)} filas.")
@@ -125,7 +124,6 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     df_registro['Estado'] = 'Pendiente'
     df_registro['Fecha_Emision'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # **MEJORA**: Generación de ID de Grupo claro y consistente
     id_grupo = ""
     if tipo_orden == "Compra Sugerencia":
         id_grupo = f"OC-{timestamp}"
@@ -145,7 +143,6 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
         df_registro['Tienda_Destino'] = tienda_destino
 
     df_registro['ID_Grupo'] = id_grupo
-    # ID de Orden es ahora el ID de línea, único para cada artículo
     df_registro['ID_Orden'] = [f"{id_grupo}-{i+1}" for i in range(len(df_registro))]
 
     columnas_finales = ['ID_Grupo', 'ID_Orden', 'Fecha_Emision', 'Proveedor', 'SKU', 'Descripcion', 'Cantidad_Solicitada', 'Tienda_Destino', 'Estado', 'Costo_Unitario', 'Costo_Total']
@@ -255,10 +252,8 @@ class PDF(FPDF):
         self.color_rojo_ferreinox = (212, 32, 39); self.color_gris_oscuro = (68, 68, 68); self.color_azul_oscuro = (79, 129, 189)
         self.font_family = 'Helvetica'
 
-        # **CORRECCIÓN**: Rutas ajustadas a la carpeta 'fonts' y manejo de errores mejorado.
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            # Asume que la carpeta 'fonts' está en el mismo directorio que el script
             font_path_regular = os.path.join(script_dir, 'fonts', 'DejaVuSans.ttf')
             font_path_bold = os.path.join(script_dir, 'fonts', 'DejaVuSans-Bold.ttf')
             
@@ -267,14 +262,14 @@ class PDF(FPDF):
                 self.add_font('DejaVu', 'B', font_path_bold, uni=True)
                 self.font_family = 'DejaVu'
             else:
-                st.warning("Archivos de fuente 'DejaVu' no encontrados en la carpeta 'fonts'. Se usará Helvetica. Algunos caracteres podrían no mostrarse.")
+                # No mostrar advertencia en producción, solo log.
+                logging.warning("Archivos de fuente 'DejaVu' no encontrados. Se usará Helvetica.")
         except Exception as e:
-            st.warning(f"No se pudo cargar la fuente 'DejaVu' (Error: {e}). Se usará Helvetica. Algunos caracteres podrían no mostrarse.")
+            logging.warning(f"No se pudo cargar la fuente 'DejaVu' (Error: {e}). Se usará Helvetica.")
 
     def header(self):
         font_name = self.font_family
         try:
-            # **CORRECCIÓN**: Ruta del logo ajustada para estar en la carpeta principal.
             script_dir = os.path.dirname(os.path.abspath(__file__))
             logo_path = os.path.join(script_dir, 'Logo Ferreinox SAS BIC 2024.png')
             
@@ -282,11 +277,11 @@ class PDF(FPDF):
                 self.image(logo_path, x=10, y=8, w=65)
             else:
                 self.set_xy(10, 8); self.set_font(font_name, 'B', 12); self.cell(65, 25, '[LOGO NO ENCONTRADO]', 1, 0, 'C')
-                #logging.warning(f"No se encontró el archivo del logo en la ruta: {logo_path}")
+                logging.warning(f"No se encontró el archivo del logo en la ruta: {logo_path}")
 
         except Exception as e:
             self.set_xy(10, 8); self.set_font(font_name, 'B', 12); self.cell(65, 25, '[LOGO ERROR]', 1, 0, 'C')
-            #logging.error(f"Error al cargar el logo: {e}")
+            logging.error(f"Error al cargar el logo: {e}")
 
         self.set_y(12); self.set_x(80); self.set_font(font_name, 'B', 22); self.set_text_color(*self.color_gris_oscuro)
         self.cell(120, 10, 'ORDEN DE COMPRA', 0, 1, 'R')
@@ -354,19 +349,25 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
         subtotal += costo_total_item
 
         x_start, y_start = pdf.get_x(), pdf.get_y()
-        max_h = 0
-        
-        pdf.multi_cell(widths[0], 5, str(row.get('SKU', '')), 1, 'L'); max_h = max(max_h, pdf.get_y() - y_start)
-        pdf.set_xy(x_start + widths[0], y_start)
-        pdf.multi_cell(widths[1], 5, str(row.get('SKU_Proveedor', 'N/A')), 1, 'L'); max_h = max(max_h, pdf.get_y() - y_start)
-        pdf.set_xy(x_start + sum(widths[:2]), y_start)
-        pdf.multi_cell(widths[2], 5, str(row.get('Descripcion', '')), 1, 'L'); max_h = max(max_h, pdf.get_y() - y_start)
-        pdf.set_y(y_start)
+        # Caluclar la altura necesaria para el texto más largo (descripción)
+        pdf.set_font(font_name, '', 8)
+        initial_y = pdf.get_y()
+        pdf.multi_cell(widths[2], 5, str(row.get('Descripcion', '')), 0, 'L')
+        final_y = pdf.get_y()
+        max_h = final_y - initial_y
+        pdf.set_y(initial_y) # Reset Y
 
-        pdf.set_x(x_start + sum(widths[:3])); pdf.cell(widths[3], max_h, str(int(row[cantidad_col])), 1, 0, 'C')
-        pdf.set_x(x_start + sum(widths[:4])); pdf.cell(widths[4], max_h, f"${row[costo_col]:,.2f}", 1, 0, 'R')
-        pdf.set_x(x_start + sum(widths[:5])); pdf.cell(widths[5], max_h, f"${costo_total_item:,.2f}", 1, 0, 'R')
-        pdf.ln(max_h)
+        pdf.cell(widths[0], max_h, str(row.get('SKU', '')), 1, 0, 'L')
+        pdf.cell(widths[1], max_h, str(row.get('SKU_Proveedor', 'N/A')), 1, 0, 'L')
+        # Usar la posición actual para dibujar la multi-cell real
+        current_x = pdf.get_x()
+        pdf.multi_cell(widths[2], 5, str(row.get('Descripcion', '')), 1, 'L')
+        pdf.set_y(initial_y) # Reset Y para las celdas de una sola línea
+
+        pdf.set_x(current_x + widths[2])
+        pdf.cell(widths[3], max_h, str(int(row[cantidad_col])), 1, 0, 'C')
+        pdf.cell(widths[4], max_h, f"${row[costo_col]:,.2f}", 1, 0, 'R')
+        pdf.cell(widths[5], max_h, f"${costo_total_item:,.2f}", 1, 1, 'R')
 
     iva_porcentaje, iva_valor = 0.19, subtotal * 0.19
     total_general = subtotal + iva_valor
@@ -395,7 +396,7 @@ def generar_excel_dinamico(df, nombre_hoja):
         for i, col in enumerate(df.columns):
             column_len = df[col].astype(str).map(len).max()
             max_len = max(column_len if pd.notna(column_len) else 0, len(col)) + 2
-            worksheet.set_column(i, i, min(max_len, 45))
+            worksheet.set_column(i, i, min(max_len, 50))
 
     return output.getvalue()
 
@@ -421,7 +422,7 @@ CONTACTOS_TIENDAS = {
 }
 
 # --- 3. LÓGICA PRINCIPAL Y FLUJO DE LA APP ---
-st.title("🚀 Tablero de Control de Abastecimiento v5.2")
+st.title("🚀 Tablero de Control de Abastecimiento v5.3")
 st.markdown("Analiza, prioriza y actúa. Tu sistema de gestión en tiempo real conectado a Google Sheets.")
 
 if 'df_analisis_maestro' not in st.session_state or st.session_state.df_analisis_maestro.empty:
@@ -580,7 +581,7 @@ if active_tab == tab_titles[1]:
     st.subheader("🚚 Plan de Traslados entre Tiendas")
     with st.expander("🔄 **Plan de Traslados Automático**", expanded=True):
         if df_plan_maestro.empty:
-            st.success("✅ ¡No se sugieren traslados automáticos en este momento! No hay necesidades que puedan ser cubiertas por excedentes de otras tiendas.")
+            st.success("✅ ¡No se sugieren traslados automáticos en este momento!")
         else:
             st.markdown("##### Filtros Avanzados de Traslados")
             f_col1, f_col2, f_col3 = st.columns(3)
@@ -593,7 +594,6 @@ if active_tab == tab_titles[1]:
             lista_proveedores_traslado = ["Todos"] + sorted(df_plan_maestro['Proveedor'].unique().tolist())
             filtro_proveedor_traslado = f_col3.selectbox("Filtrar por Proveedor:", lista_proveedores_traslado, key="filtro_proveedor_traslado")
             
-            # **LÓGICA ANTI-SALTO**
             current_filters = f"{filtro_origen}-{filtro_destino}-{filtro_proveedor_traslado}"
             if st.session_state.last_filters_traslados != current_filters:
                 df_aplicar_filtros = df_plan_maestro.copy()
@@ -605,28 +605,39 @@ if active_tab == tab_titles[1]:
                                             left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
                                             ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
-                st.session_state.df_traslados_editor = df_para_editar
+                st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
 
             if st.session_state.df_traslados_editor.empty:
                 st.warning("No se encontraron traslados que coincidan con los filtros.")
             else:
-                columnas_traslado = ['Seleccionar', 'SKU', 'Descripcion', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Stock_En_Transito', 'Necesidad en Destino', 'Uds a Enviar']
+                # FIX: Wrap the data editor in a form to prevent reruns on every edit
+                with st.form(key="traslados_automatico_form"):
+                    st.markdown("Seleccione y/o ajuste las cantidades a enviar. **Haga clic en 'Confirmar Cambios' para procesar.**")
+                    
+                    # Store the edited data in a temporary variable inside the form
+                    edited_df_traslados = st.data_editor(
+                        st.session_state.df_traslados_editor, 
+                        hide_index=True, use_container_width=True,
+                        column_config={
+                            "Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
+                            "Stock_En_Transito": st.column_config.NumberColumn(label="En Tránsito", format="%d"),
+                            "Seleccionar": st.column_config.CheckboxColumn(required=True),
+                        },
+                        disabled=['SKU', 'Descripcion', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Stock_En_Transito', 'Necesidad en Destino'],
+                        key="editor_traslados")
+                    
+                    submitted = st.form_submit_button("⚙️ Confirmar Cambios en la Selección", use_container_width=True)
+                    if submitted:
+                        # On form submission, update the session state with the edited data
+                        st.session_state.df_traslados_editor = edited_df_traslados
+                        st.success("Cambios confirmados. Proceda a registrar el traslado a continuación.")
                 
-                edited_df_traslados = st.data_editor(
-                    st.session_state.df_traslados_editor[columnas_traslado], hide_index=True, use_container_width=True,
-                    column_config={
-                        "Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
-                        "Stock_En_Transito": st.column_config.NumberColumn(label="En Tránsito", format="%d"),
-                        "Seleccionar": st.column_config.CheckboxColumn(required=True),
-                    },
-                    disabled=[col for col in columnas_traslado if col not in ['Seleccionar', 'Uds a Enviar']],
-                    key="editor_traslados")
-                
-                # Actualiza el estado de la sesión con las ediciones del usuario para persistencia
-                st.session_state.df_traslados_editor = edited_df_traslados
-
-                df_seleccionados_traslado = edited_df_traslados[(edited_df_traslados['Seleccionar']) & (edited_df_traslados['Uds a Enviar'] > 0)]
+                # Logic to process the selection now happens outside and after the form is submitted
+                df_seleccionados_traslado = st.session_state.df_traslados_editor[
+                    (st.session_state.df_traslados_editor['Seleccionar']) & 
+                    (st.session_state.df_traslados_editor['Uds a Enviar'] > 0)
+                ]
 
                 if not df_seleccionados_traslado.empty:
                     df_seleccionados_traslado_full = pd.merge(
@@ -640,10 +651,10 @@ if active_tab == tab_titles[1]:
                     total_peso = df_seleccionados_traslado_full['Peso del Traslado (kg)'].sum()
                     st.info(f"**Resumen de la Carga Seleccionada:** {total_unidades} Unidades Totales | **{total_peso:,.2f} kg** de Peso Total")
 
-                    with st.form("form_traslado_auto"):
+                    with st.form("form_traslado_auto_enviar"):
                         destinos_implicados = df_seleccionados_traslado_full['Tienda Destino'].unique().tolist()
                         emails_predefinidos = [CONTACTOS_TIENDAS.get(d, {}).get('email', '') for d in destinos_implicados]
-                        email_dest_traslado = st.text_input("📧 Correo(s) de destinatario(s) para el plan de traslado:", value=", ".join(filter(None, emails_predefinidos)), key="email_traslado")
+                        email_dest_traslado = st.text_input("📧 Correo(s) de destinatario(s):", value=", ".join(filter(None, emails_predefinidos)), key="email_traslado")
 
                         st.markdown("##### Contactos para Notificación WhatsApp")
                         for dest in destinos_implicados:
@@ -686,6 +697,7 @@ if active_tab == tab_titles[1]:
                                     st.error(f"❌ Error al registrar el traslado en Google Sheets: {msg_registro}")
 
     with st.expander("🚚 **Traslados Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
+        # This section is less prone to "jumping" as it's a one-by-one process, form wrapping not as critical.
         st.markdown("##### 1. Buscar y añadir productos a la solicitud")
         search_term_especial = st.text_input("Buscar producto por SKU o Descripción para traslado especial:", key="search_traslado_especial")
         if search_term_especial:
@@ -741,7 +753,6 @@ if active_tab == tab_titles[1]:
                                     "label": f"📲 Notificar a {tienda_destino_especial}", "url": generar_link_whatsapp(celular_contacto_especial, mensaje_wpp), "key": "wpp_traslado_esp"
                                 })
                             st.session_state.solicitud_traslado_especial = []
-                            # FIX: No llamar a rerun para mostrar notificaciones. Se limpiará con el botón final.
                         else:
                             st.error(f"❌ Error al registrar: {msg}")
                 if c2.form_submit_button("🗑️ Limpiar Solicitud", use_container_width=True):
@@ -764,7 +775,6 @@ if active_tab == tab_titles[2]:
         proveedores_disponibles = ["Todos"] + sorted([p for p in df_plan_compras_base['Proveedor'].unique() if p and p != 'NAN'])
         selected_proveedor = f_c2.selectbox("Filtrar por Proveedor:", proveedores_disponibles, key="sb_proveedores")
         
-        # **LÓGICA ANTI-SALTO**
         current_filters = f"{filtro_tienda_compra}-{selected_proveedor}"
         if st.session_state.last_filters_compras != current_filters:
             df_temp = df_plan_compras_base.copy()
@@ -775,34 +785,46 @@ if active_tab == tab_titles[2]:
             
             df_a_mostrar = df_temp.copy()
             df_a_mostrar['Uds a Comprar'] = df_a_mostrar['Sugerencia_Compra'].apply(np.ceil).astype(int)
-            df_a_mostrar['Seleccionar'] = False # Iniciar siempre deseleccionado
+            df_a_mostrar['Seleccionar'] = False 
             df_a_mostrar_final = df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'})
-            st.session_state.df_compras_editor = df_a_mostrar_final
+            st.session_state.df_compras_editor = df_a_mostrar_final.copy()
             st.session_state.last_filters_compras = current_filters
         
         if st.session_state.df_compras_editor.empty:
-            st.info("No hay sugerencias de compra con los filtros actuales. ¡El inventario parece estar optimizado!")
+            st.info("No hay sugerencias de compra con los filtros actuales.")
         else:
-            st.markdown("Marque los artículos y **ajuste las cantidades** que desea incluir en la orden de compra:")
-            col_b1, col_b2, _ = st.columns([1,1,5])
-            if col_b1.button("Seleccionar Todos", key="select_all_compras"):
-                st.session_state.df_compras_editor['Seleccionar'] = True
-                # FIX: Rerun eliminado para una experiencia más fluida.
-            if col_b2.button("Deseleccionar Todos", key="deselect_all_compras"):
-                st.session_state.df_compras_editor['Seleccionar'] = False
-                # FIX: Rerun eliminado.
+            # FIX: Wrap the data editor in a form to prevent reruns on every edit
+            with st.form(key="compras_sugerencia_form"):
+                st.markdown("Marque los artículos y ajuste las cantidades. **Haga clic en 'Confirmar Cambios' para procesar.**")
+                
+                cols = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND']
+                cols_existentes = [c for c in cols if c in st.session_state.df_compras_editor.columns]
 
-            cols = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND']
-            cols_existentes = [c for c in cols if c in st.session_state.df_compras_editor.columns]
-            
-            edited_df = st.data_editor(st.session_state.df_compras_editor[cols_existentes], hide_index=True, use_container_width=True,
-                column_config={"Uds a Comprar": st.column_config.NumberColumn(min_value=0), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
-                disabled=[c for c in cols_existentes if c not in ['Seleccionar', 'Uds a Comprar']], key="editor_principal")
-            
-            # Actualiza el estado de la sesión con las ediciones para persistencia
-            st.session_state.df_compras_editor = edited_df
-            
-            df_seleccionados = edited_df[(edited_df['Seleccionar']) & (edited_df['Uds a Comprar'] > 0)]
+                edited_df = st.data_editor(st.session_state.df_compras_editor[cols_existentes], hide_index=True, use_container_width=True,
+                    column_config={"Uds a Comprar": st.column_config.NumberColumn(min_value=0), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
+                    disabled=[c for c in cols_existentes if c not in ['Seleccionar', 'Uds a Comprar']], key="editor_principal")
+                
+                form_c1, form_c2, form_c3 = st.columns([1,1,4])
+                select_all = form_c1.form_submit_button("Seleccionar Todos")
+                deselect_all = form_c2.form_submit_button("Deseleccionar Todos")
+                confirm_changes = form_c3.form_submit_button("⚙️ Confirmar Cambios en la Selección", type="primary")
+
+                if select_all:
+                    edited_df['Seleccionar'] = True
+                if deselect_all:
+                    edited_df['Seleccionar'] = False
+
+                if select_all or deselect_all or confirm_changes:
+                    st.session_state.df_compras_editor = edited_df
+                    if select_all or deselect_all:
+                        st.rerun() # Rerun is acceptable here as it's an explicit mass-action
+                    else:
+                        st.success("Cambios confirmados. Proceda a generar las órdenes a continuación.")
+
+            df_seleccionados = st.session_state.df_compras_editor[
+                (st.session_state.df_compras_editor['Seleccionar']) & 
+                (st.session_state.df_compras_editor['Uds a Comprar'] > 0)
+            ]
 
             if not df_seleccionados.empty:
                 df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
@@ -858,6 +880,7 @@ if active_tab == tab_titles[2]:
                                             st.error(f"Error al registrar: {msg}")
 
     with st.expander("🆕 **Compras Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
+        # This section is less prone to "jumping" as it's a one-by-one process.
         st.markdown("##### 1. Buscar y añadir productos a la solicitud de compra")
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
@@ -917,7 +940,6 @@ if active_tab == tab_titles[2]:
                                     msg_wpp = f"Hola {nombre_contacto_esp}, te acabamos de enviar la Orden de Compra Especial N° {orden_id_grupo} al correo. ¡Gracias!"
                                     st.session_state.notificaciones_pendientes.append({ "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"})
                                 st.session_state.compra_especial_items = []
-                                # FIX: Rerun eliminado para permitir que el bloque de notificaciones se muestre.
                             else:
                                 st.error(f"❌ Error al registrar: {msg}")
                     else:
@@ -977,7 +999,6 @@ if active_tab == tab_titles[3]:
                                 st.error(f"Error al actualizar Google Sheets: {msg}")
 
         st.markdown("---")
-        # **MEJORA**: Nueva sección para gestionar por ID_Grupo
         with st.expander("🔍 Gestionar, Modificar o Reenviar una Orden Específica por Grupo", expanded=False):
             ordenes_id_unicas = sorted(df_ordenes_vista_original['ID_Grupo'].unique().tolist(), reverse=True)
             id_grupo_elegido = st.selectbox("Seleccione el GRUPO de la Orden para gestionar:", [""] + ordenes_id_unicas, key="select_grupo_id_to_edit")
@@ -1006,63 +1027,80 @@ if active_tab == tab_titles[3]:
                     tienda_orden = edited_orden_df['Tienda_Destino'].iloc[0]
                     
                     is_traslado = "TRASLADO INTERNO" in proveedor_orden
+                    # FIX: Define contact info regardless of order type to use in inputs
                     if is_traslado:
-                        contacto_info = CONTACTOS_TIENDAS.get(tienda_orden, {})
-                        email_label, nombre_label, celular_label = f"📧 Correo {tienda_orden}:", f"Nombre {tienda_orden}:", f"Celular {tienda_orden}:"
+                        tienda_origen_nombre = proveedor_orden.replace("TRASLADO INTERNO: ", "").strip()
+                        contacto_info = CONTACTOS_TIENDAS.get(tienda_origen_nombre, {}) # Email del origen
+                        contacto_info_destino = CONTACTOS_TIENDAS.get(tienda_orden, {}) # Celular del destino
+                        email_label, nombre_label, celular_label = f"📧 Correo Origen ({tienda_origen_nombre}):", f"Nombre Origen:", f"Celular Destino ({tienda_orden}):"
+                        email_val = contacto_info.get('email','')
+                        nombre_val = contacto_info.get('nombre','')
+                        celular_val = contacto_info_destino.get('celular','')
                     else:
                         contacto_info = CONTACTOS_PROVEEDOR.get(proveedor_orden.upper(), {})
                         email_label, nombre_label, celular_label = f"📧 Correo ({proveedor_orden}):", "Nombre proveedor:", "Celular proveedor:"
+                        email_val = contacto_info.get('email','')
+                        nombre_val = contacto_info.get('nombre','')
+                        celular_val = contacto_info.get('celular','')
+                        
+                    email_dest = st.text_input(email_label, value=email_val)
+                    nombre_contacto = st.text_input(nombre_label, value=nombre_val)
+                    celular_contacto = st.text_input(celular_label, value=celular_val)
 
-                    email_dest = st.text_input(email_label, value=contacto_info.get('email', ''))
-                    nombre_contacto = st.text_input(nombre_label, value=contacto_info.get('nombre', ''))
-                    celular_contacto = st.text_input(celular_label, value=contacto_info.get('celular', ''))
-
-                    submitted = st.form_submit_button("💾 Guardar Cambios y Reenviar Orden", type="primary", use_container_width=True)
+                    submitted = st.form_submit_button("💾 Guardar Cambios y Reenviar Notificaciones", type="primary", use_container_width=True)
                     if submitted:
-                        with st.spinner("Guardando cambios y reenviando orden..."):
+                        with st.spinner("Guardando cambios y reenviando..."):
                             df_historico_actualizado = df_ordenes_historico.copy()
                             for _, row in edited_orden_df.iterrows():
                                 mask = df_historico_actualizado['ID_Orden'] == row['ID_Orden']
                                 df_historico_actualizado.loc[mask, 'Cantidad_Solicitada'] = row['Cantidad_Solicitada']
                                 df_historico_actualizado.loc[mask, 'Costo_Unitario'] = row['Costo_Unitario']
-                                costo_total_recalculado = row['Cantidad_Solicitada'] * row['Costo_Unitario']
-                                df_historico_actualizado.loc[mask, 'Costo_Total'] = costo_total_recalculado
+                                df_historico_actualizado.loc[mask, 'Costo_Total'] = row['Cantidad_Solicitada'] * row['Costo_Unitario']
                             
                             exito, msg = update_sheet(client, "Registro_Ordenes", df_historico_actualizado)
                             if exito:
                                 st.success(f"✅ Orden {id_grupo_elegido} actualizada correctamente en Google Sheets.")
-                                # Preparar DF para PDF/correo
                                 df_reenvio = edited_orden_df[edited_orden_df['Cantidad_Solicitada'] > 0].copy()
-                                if is_traslado:
-                                    # Lógica específica si es un traslado (ej. no generar PDF o email diferente)
-                                    st.info("La orden de traslado ha sido actualizada. Notifique manualmente si es necesario.")
+
+                                if df_reenvio.empty:
+                                    st.warning("La orden está vacía o cancelada. No se enviaron notificaciones.")
                                 else:
-                                    # Lógica para orden de compra
-                                    if df_reenvio.empty:
-                                        st.warning("La orden está vacía después de los cambios. No se envió ningún correo.")
-                                    else:
+                                    # FIX: Logic to send notifications for BOTH transfer and purchase orders
+                                    if is_traslado:
+                                        asunto = f"**TRASLADO ACTUALIZADO** {id_grupo_elegido} de Ferreinox SAS BIC"
+                                        cuerpo_html = f"<html><body><p>Hola Equipo,</p><p>Se ha actualizado el <b>plan de traslado N° {id_grupo_elegido}</b>.</p><p>Por favor, revisar el archivo adjunto para ver los detalles finales.</p><p>Gracias,</p><p>--<br><b>Logística Ferreinox</b></p></body></html>"
+                                        excel_bytes = generar_excel_dinamico(df_reenvio, f"Traslado_ACT_{id_grupo_elegido}")
+                                        adjuntos = [{'datos': excel_bytes, 'nombre_archivo': f"Detalle_Traslado_ACT_{id_grupo_elegido}.xlsx"}]
+                                        msg_wpp = f"Hola equipo de {tienda_orden}, se ha ACTUALIZADO la orden de traslado N° {id_grupo_elegido}. Por favor, estar atentos a la recepción con los nuevos detalles. ¡Gracias!"
+                                        notif_label = f"📲 Notificar a {tienda_orden}"
+                                    else: # Es una orden de compra
                                         direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_orden, "N/A")
                                         pdf_bytes = generar_pdf_orden_compra(df_reenvio, proveedor_orden, tienda_orden, direccion_entrega, nombre_contacto, id_grupo_elegido)
-                                        excel_bytes = generar_excel_dinamico(df_reenvio, f"Orden_{id_grupo_elegido}")
+                                        excel_bytes = generar_excel_dinamico(df_reenvio, f"Orden_ACT_{id_grupo_elegido}")
                                         asunto = f"**ORDEN ACTUALIZADA** {id_grupo_elegido} de Ferreinox SAS BIC"
-                                        cuerpo_html = f"<html><body><p>Estimados,</p><p>Adjunto encontrarán la <b>versión actualizada de la orden N° {id_grupo_elegido}</b>.</p><p>Por favor, considerar esta como la versión final y anular cualquier versión anterior.</p><p><b>Sede de Entrega:</b> {tienda_orden}<br><b>Dirección:</b> {direccion_entrega}</p><p>Gracias,</p><p>--<br><b>Departamento de Compras</b></p></body></html>"
+                                        cuerpo_html = f"<html><body><p>Estimados {proveedor_orden},</p><p>Adjunto encontrarán la <b>versión actualizada de la orden N° {id_grupo_elegido}</b>.</p><p>Por favor, considerar esta como la versión final y anular cualquier versión anterior.</p><p><b>Sede de Entrega:</b> {tienda_orden}<br><b>Dirección:</b> {direccion_entrega}</p><p>Gracias,</p><p>--<br><b>Departamento de Compras</b></p></body></html>"
                                         adjuntos = [ {'datos': pdf_bytes, 'nombre_archivo': f"OC_ACTUALIZADA_{id_grupo_elegido}.pdf"}, {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_ACTUALIZADA_{id_grupo_elegido}.xlsx"} ]
-                                        if email_dest:
-                                            enviado, msg_envio = enviar_correo_con_adjuntos([e.strip() for e in email_dest.split(',')], asunto, cuerpo_html, adjuntos)
-                                            if enviado: st.success(msg_envio)
-                                            else: st.error(msg_envio)
-                                        else: st.warning("Orden actualizada pero no enviada (falta correo).")
+                                        msg_wpp = f"Hola {nombre_contacto}, te acabamos de reenviar la Orden de Compra ACTUALIZADA N° {id_grupo_elegido} al correo. Por favor, tomar esta como la versión final. ¡Gracias!"
+                                        notif_label = f"📲 Notificar a {proveedor_orden}"
+                                    
+                                    # Send email
+                                    if email_dest:
+                                        enviado, msg_envio = enviar_correo_con_adjuntos([e.strip() for e in email_dest.split(',')], asunto, cuerpo_html, adjuntos)
+                                        if enviado: st.success(msg_envio)
+                                        else: st.error(msg_envio)
+                                    else:
+                                        st.warning("Orden actualizada pero no enviada por correo (falta email).")
 
-                                        if celular_contacto:
-                                            msg_wpp = f"Hola {nombre_contacto}, te acabamos de reenviar la Orden de Compra ACTUALIZADA N° {id_grupo_elegido} al correo. Por favor, tomar esta como la versión final. ¡Gracias!"
-                                            st.session_state.notificaciones_pendientes.append({
-                                                "label": f"📲 Notificar actualización a {nombre_contacto}", "url": generar_link_whatsapp(celular_contacto, msg_wpp), "key": f"wpp_update_{id_grupo_elegido}"
-                                            })
+                                    # Prepare WhatsApp notification
+                                    if celular_contacto:
+                                        st.session_state.notificaciones_pendientes.append({
+                                            "label": notif_label, 
+                                            "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
+                                            "key": f"wpp_update_{id_grupo_elegido}"
+                                        })
                                 
-                                # Limpiar estado para la próxima edición
                                 st.session_state.orden_a_editar_df = pd.DataFrame()
                                 st.session_state.order_to_edit = None
-                                # FIX: No llamar a rerun para que las notificaciones se muestren.
                             else:
                                 st.error(f"Error al actualizar la orden en Google Sheets: {msg}")
 
@@ -1070,7 +1108,7 @@ if active_tab == tab_titles[3]:
 if st.session_state.notificaciones_pendientes:
     st.markdown("---")
     st.subheader("🔔 Notificaciones Pendientes de Envío")
-    st.info("La orden ha sido registrada/actualizada y el correo enviado. Haz clic en los botones para enviar las notificaciones por WhatsApp.")
+    st.info("La orden ha sido registrada/actualizada. Haz clic en los botones para enviar las notificaciones por WhatsApp.")
 
     for notif in st.session_state.notificaciones_pendientes:
         whatsapp_button(notif["label"], notif["url"], notif["key"])
