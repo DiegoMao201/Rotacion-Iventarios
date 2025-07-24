@@ -299,7 +299,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}     |      {self.empresa_web}     |      {self.empresa_email}     |      {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}      |       {self.empresa_email}      |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -602,8 +602,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                          left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                          ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                            left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                            ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar
                 st.session_state.last_filters_traslados = current_filters
@@ -741,7 +741,7 @@ if active_tab == tab_titles[1]:
                                     "label": f"📲 Notificar a {tienda_destino_especial}", "url": generar_link_whatsapp(celular_contacto_especial, mensaje_wpp), "key": "wpp_traslado_esp"
                                 })
                             st.session_state.solicitud_traslado_especial = []
-                            st.rerun()
+                            # FIX: No llamar a rerun para mostrar notificaciones. Se limpiará con el botón final.
                         else:
                             st.error(f"❌ Error al registrar: {msg}")
                 if c2.form_submit_button("🗑️ Limpiar Solicitud", use_container_width=True):
@@ -787,10 +787,10 @@ if active_tab == tab_titles[2]:
             col_b1, col_b2, _ = st.columns([1,1,5])
             if col_b1.button("Seleccionar Todos", key="select_all_compras"):
                 st.session_state.df_compras_editor['Seleccionar'] = True
-                st.rerun() # Forzar rerun para que el editor se actualice
+                # FIX: Rerun eliminado para una experiencia más fluida.
             if col_b2.button("Deseleccionar Todos", key="deselect_all_compras"):
                 st.session_state.df_compras_editor['Seleccionar'] = False
-                st.rerun() # Forzar rerun
+                # FIX: Rerun eliminado.
 
             cols = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND']
             cols_existentes = [c for c in cols if c in st.session_state.df_compras_editor.columns]
@@ -858,12 +858,11 @@ if active_tab == tab_titles[2]:
                                             st.error(f"Error al registrar: {msg}")
 
     with st.expander("🆕 **Compras Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
-        # La lógica de esta sección se mantiene similar ya que no utiliza un editor persistente
         st.markdown("##### 1. Buscar y añadir productos a la solicitud de compra")
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                             df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
@@ -918,7 +917,7 @@ if active_tab == tab_titles[2]:
                                     msg_wpp = f"Hola {nombre_contacto_esp}, te acabamos de enviar la Orden de Compra Especial N° {orden_id_grupo} al correo. ¡Gracias!"
                                     st.session_state.notificaciones_pendientes.append({ "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"})
                                 st.session_state.compra_especial_items = []
-                                st.rerun()
+                                # FIX: Rerun eliminado para permitir que el bloque de notificaciones se muestre.
                             else:
                                 st.error(f"❌ Error al registrar: {msg}")
                     else:
@@ -1063,7 +1062,7 @@ if active_tab == tab_titles[3]:
                                 # Limpiar estado para la próxima edición
                                 st.session_state.orden_a_editar_df = pd.DataFrame()
                                 st.session_state.order_to_edit = None
-                                st.rerun() # Recargar para reflejar cambios y limpiar la vista de edición
+                                # FIX: No llamar a rerun para que las notificaciones se muestren.
                             else:
                                 st.error(f"Error al actualizar la orden en Google Sheets: {msg}")
 
