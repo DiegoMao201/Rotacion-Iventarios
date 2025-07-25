@@ -294,7 +294,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}      |       {self.empresa_email}      |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}     |       {self.empresa_email}     |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -602,8 +602,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                            left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                            ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                          left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                          ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -611,20 +611,40 @@ if active_tab == tab_titles[1]:
             if st.session_state.df_traslados_editor.empty:
                 st.warning("No se encontraron traslados que coincidan con los filtros.")
             else:
-                # FIX: Wrap the data editor in a form to prevent reruns on every edit
                 with st.form(key="traslados_automatico_form"):
                     st.markdown("Seleccione y/o ajuste las cantidades a enviar. **Haga clic en 'Confirmar Cambios' para procesar.**")
                     
+                    # --- FIX START: Column Reordering ---
+                    # Define the desired column order for the editor
+                    column_order = [
+                        "Seleccionar", "SKU", "Descripcion", "Stock en Origen", "Stock en Destino",
+                        "Uds a Enviar", "Stock_En_Transito", "Tienda Origen", "Tienda Destino",
+                        "Necesidad en Destino", "Proveedor", "Marca_Nombre", "Segmento_ABC",
+                        "Valor del Traslado", "Peso del Traslado (kg)"
+                    ]
+                    # Get the list of columns that actually exist, in the desired order
+                    display_columns = [col for col in column_order if col in st.session_state.df_traslados_editor.columns]
+                    # Append any remaining columns that weren't in the ordered list to ensure nothing is lost
+                    for col in st.session_state.df_traslados_editor.columns:
+                        if col not in display_columns:
+                            display_columns.append(col)
+                    # --- FIX END: Column Reordering ---
+
                     # Store the edited data in a temporary variable inside the form
                     edited_df_traslados = st.data_editor(
-                        st.session_state.df_traslados_editor, 
+                        st.session_state.df_traslados_editor[display_columns], # Use the reordered df
                         hide_index=True, use_container_width=True,
                         column_config={
                             "Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
                             "Stock_En_Transito": st.column_config.NumberColumn(label="En Tránsito", format="%d"),
+                            "Stock en Origen": st.column_config.NumberColumn(format="%d"),
+                            "Stock en Destino": st.column_config.NumberColumn(format="%d"),
+                            "Necesidad en Destino": st.column_config.NumberColumn(format="%.1f"),
+                            "Valor del Traslado": st.column_config.NumberColumn(format="$ {:,.0f}"),
+                            "Peso del Traslado (kg)": st.column_config.NumberColumn(format="%.2f kg"),
                             "Seleccionar": st.column_config.CheckboxColumn(required=True),
                         },
-                        disabled=['SKU', 'Descripcion', 'Tienda Origen', 'Stock en Origen', 'Tienda Destino', 'Stock en Destino', 'Stock_En_Transito', 'Necesidad en Destino'],
+                        disabled=[c for c in display_columns if c not in ['Seleccionar', 'Uds a Enviar']],
                         key="editor_traslados")
                     
                     submitted = st.form_submit_button("⚙️ Confirmar Cambios en la Selección", use_container_width=True)
@@ -633,23 +653,28 @@ if active_tab == tab_titles[1]:
                         st.session_state.df_traslados_editor = edited_df_traslados
                         st.success("Cambios confirmados. Proceda a registrar el traslado a continuación.")
                 
-                # Logic to process the selection now happens outside and after the form is submitted
-                df_seleccionados_traslado = st.session_state.df_traslados_editor[
+                # --- FIX START: Logic to process the selection after form submission ---
+                df_seleccionados_traslado_full = st.session_state.df_traslados_editor[
                     (st.session_state.df_traslados_editor['Seleccionar']) & 
                     (st.session_state.df_traslados_editor['Uds a Enviar'] > 0)
-                ]
+                ].copy()
 
-                if not df_seleccionados_traslado.empty:
-                    df_seleccionados_traslado_full = pd.merge(
-                        df_seleccionados_traslado.copy(),
-                        df_plan_maestro[['SKU', 'Tienda Origen', 'Tienda Destino', 'Peso Individual (kg)', 'Costo_Promedio_UND', 'Proveedor']],
-                        on=['SKU', 'Tienda Origen', 'Tienda Destino'], how='left'
-                    )
-                    df_seleccionados_traslado_full['Peso del Traslado (kg)'] = df_seleccionados_traslado_full['Uds a Enviar'] * df_seleccionados_traslado_full['Peso Individual (kg)']
+                if not df_seleccionados_traslado_full.empty:
+                    # The redundant and error-prone merge is removed.
+                    # The calculation is now performed directly on the dataframe which already has the necessary columns.
+                    if 'Uds a Enviar' in df_seleccionados_traslado_full.columns and 'Peso Individual (kg)' in df_seleccionados_traslado_full.columns:
+                        df_seleccionados_traslado_full['Uds a Enviar'] = pd.to_numeric(df_seleccionados_traslado_full['Uds a Enviar'], errors='coerce').fillna(0)
+                        df_seleccionados_traslado_full['Peso Individual (kg)'] = pd.to_numeric(df_seleccionados_traslado_full['Peso Individual (kg)'], errors='coerce').fillna(0)
+                        df_seleccionados_traslado_full['Peso del Traslado (kg)'] = df_seleccionados_traslado_full['Uds a Enviar'] * df_seleccionados_traslado_full['Peso Individual (kg)']
+                    else:
+                        st.error("Faltan columnas ('Uds a Enviar', 'Peso Individual (kg)') para calcular el peso.")
+                        df_seleccionados_traslado_full['Peso del Traslado (kg)'] = 0 # Default value to prevent downstream errors
+                # --- FIX END ---
+                
                     st.markdown("---")
                     total_unidades = df_seleccionados_traslado_full['Uds a Enviar'].sum()
                     total_peso = df_seleccionados_traslado_full['Peso del Traslado (kg)'].sum()
-                    st.info(f"**Resumen de la Carga Seleccionada:** {total_unidades} Unidades Totales | **{total_peso:,.2f} kg** de Peso Total")
+                    st.info(f"**Resumen de la Carga Seleccionada:** {int(total_unidades)} Unidades Totales | **{total_peso:,.2f} kg** de Peso Total")
 
                     with st.form("form_traslado_auto_enviar"):
                         destinos_implicados = df_seleccionados_traslado_full['Tienda Destino'].unique().tolist()
@@ -885,7 +910,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                                 df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
