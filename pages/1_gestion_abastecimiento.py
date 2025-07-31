@@ -628,11 +628,13 @@ if active_tab == tab_titles[1]:
                 with st.form(key="traslados_automatico_form"):
                     st.markdown("Seleccione y/o ajuste las cantidades a enviar. **Haga clic en 'Confirmar Cambios' para procesar.**")
                     
+                    # --- INICIO DE LA CORRECCIÓN ---
+                    # Se añade 'Costo_Promedio_UND' a la lista para que no se pierda en el data_editor.
                     column_order = [
                         "Seleccionar", "SKU", "Descripcion", "Stock en Origen", "Stock en Destino",
                         "Uds a Enviar", "Stock_En_Transito", "Tienda Origen", "Tienda Destino",
                         "Necesidad en Destino", "Proveedor", "Marca_Nombre", "Segmento_ABC",
-                        "Valor del Traslado", "Peso Total (kg)", "Peso Individual (kg)"
+                        "Costo_Promedio_UND", "Valor del Traslado", "Peso Total (kg)", "Peso Individual (kg)"
                     ]
                     
                     display_columns = [col for col in column_order if col in st.session_state.df_traslados_editor.columns]
@@ -642,6 +644,8 @@ if active_tab == tab_titles[1]:
                         hide_index=True, use_container_width=True,
                         column_config={
                             "Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
+                            # Se añade la configuración para la columna de costo para darle formato y asegurar que sea de solo lectura.
+                            "Costo_Promedio_UND": st.column_config.NumberColumn(label="Costo UND", format="$ {:,.0f}"),
                             "Stock_En_Transito": st.column_config.NumberColumn(label="En Tránsito", format="%d"),
                             "Stock en Origen": st.column_config.NumberColumn(format="%d"),
                             "Stock en Destino": st.column_config.NumberColumn(format="%d"),
@@ -653,6 +657,7 @@ if active_tab == tab_titles[1]:
                         },
                         disabled=[c for c in display_columns if c not in ['Seleccionar', 'Uds a Enviar']],
                         key="editor_traslados")
+                    # --- FIN DE LA CORRECCIÓN ---
                     
                     form_t1, form_t2, form_t3 = st.columns([1,1.2,4])
                     select_all_t = form_t1.form_submit_button("Seleccionar Todos")
@@ -852,7 +857,7 @@ if active_tab == tab_titles[1]:
                 if cleared_special:
                     st.session_state.solicitud_traslado_especial = []
                     st.rerun()
-            # --- FIN CORRECCIÓN ---
+                # --- FIN CORRECCIÓN ---
 
 # --- PESTAÑA 3: PLAN DE COMPRAS ---
 if active_tab == tab_titles[2]:
@@ -1022,7 +1027,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                               df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
@@ -1294,7 +1299,7 @@ if active_tab == tab_titles[3]:
                             st.rerun()
                         else:
                             st.error(f"Error al guardar los cambios: {msg}")
-            
+                
             # --- NOTIFICACIONES (EN EXPANDER) ---
             with st.expander("Notificaciones: Reenviar Correo / WhatsApp", expanded=False):
                 with st.form(key=f"form_notify_{id_grupo_elegido}"):
