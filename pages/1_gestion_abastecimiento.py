@@ -304,7 +304,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}      |       {self.empresa_email}      |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -1022,7 +1022,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                               df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
@@ -1153,130 +1153,136 @@ if active_tab == tab_titles[3]:
         st.markdown("---")
         
         # --- 2. GESTIÓN DE ORDEN ESPECÍFICA ---
-        st.markdown("##### 2. Gestionar, Modificar o Reenviar una Orden Específica")
+        st.markdown("##### 2. Gestionar una Orden Específica")
         ordenes_id_unicas = sorted(df_summary['ID_Grupo'].unique().tolist(), reverse=True) if not df_summary.empty else []
         id_grupo_elegido = st.selectbox("Seleccione el GRUPO de la Orden para gestionar:", [""] + ordenes_id_unicas, key="select_grupo_id_to_edit")
 
         if id_grupo_elegido:
-            # Cargar datos de la orden si es una nueva selección
-            if st.session_state.order_to_edit != id_grupo_elegido:
-                df_orden_completa = df_ordenes_vista_original[df_ordenes_vista_original['ID_Grupo'] == id_grupo_elegido].copy()
-                df_orden_completa['Borrar'] = False # Añadir columna para borrado
-                st.session_state.orden_a_editar_df = df_orden_completa
-                st.session_state.order_to_edit = id_grupo_elegido
-                st.session_state.items_to_add_to_order = pd.DataFrame() # Limpiar items a añadir
+            st.markdown(f"### Gestionando Grupo de Orden: {id_grupo_elegido}")
 
-            st.markdown(f"#### Editando Orden (Grupo): **{id_grupo_elegido}**")
-            
-            # Editor para items existentes
+            # --- ACCIÓN RÁPIDA PARA CAMBIAR ESTADO ---
             with st.container(border=True):
-                st.markdown("**Items Actuales en la Orden:**")
-                edited_orden_df = st.data_editor(
-                    st.session_state.orden_a_editar_df,
-                    key="editor_modificar_orden", use_container_width=True, hide_index=True,
-                    column_config={
-                        "Cantidad_Solicitada": st.column_config.NumberColumn(label="Cantidad", min_value=0, step=1, format="%d"),
-                        "Costo_Unitario": st.column_config.NumberColumn(label="Costo Unit.", format="$%.2f"),
-                        "Borrar": st.column_config.CheckboxColumn(required=True)
-                    },
-                    disabled=['ID_Grupo', 'ID_Orden', 'Fecha_Emision', 'Proveedor', 'SKU', 'Descripcion', 'Tienda_Destino', 'Estado', 'Costo_Total']
-                )
-                # Actualizar el estado de la sesión con las ediciones
-                st.session_state.orden_a_editar_df = edited_orden_df
-
-            # Panel para añadir nuevos items
-            with st.container(border=True):
-                st.markdown("**Añadir Nuevos Items a la Orden:**")
-                search_term_add = st.text_input("Buscar producto por SKU o Descripción para añadir:", key="search_add_item_seguimiento")
+                st.markdown("#### Acción Rápida: Cambiar Estado del Grupo Completo")
                 
-                if search_term_add:
-                    mask_add = (df_maestro['SKU'].str.contains(search_term_add, case=False, na=False) | 
-                                df_maestro['Descripcion'].str.contains(search_term_add, case=False, na=False))
-                    df_resultados_add = df_maestro[mask_add].drop_duplicates(subset=['SKU']).copy()
+                current_status = df_ordenes_vista_original[df_ordenes_vista_original['ID_Grupo'] == id_grupo_elegido]['Estado'].iloc[0]
+                status_options = ['Pendiente', 'En Tránsito', 'Recibido', 'Cancelado']
+                try:
+                    current_status_index = status_options.index(current_status)
+                except ValueError:
+                    current_status_index = 0
 
-                    if not df_resultados_add.empty:
-                        df_resultados_add['Cantidad_Solicitada'] = 1
-                        df_resultados_add['Seleccionar'] = False
-                        cols_add = ['Seleccionar', 'SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND', 'Cantidad_Solicitada']
-                        
-                        df_add_editor = st.data_editor(
-                            df_resultados_add[cols_add], key="editor_add_seguimiento", use_container_width=True, hide_index=True,
-                            column_config={
-                                "Cantidad_Solicitada": st.column_config.NumberColumn(min_value=1), 
-                                "Seleccionar": st.column_config.CheckboxColumn(required=True)
-                            },
-                            disabled=['SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND']
-                        )
-                        
-                        if st.button("➕ Añadir Items Seleccionados a la Orden"):
-                            items_a_anadir = df_add_editor[df_add_editor['Seleccionar']].copy()
-                            if not items_a_anadir.empty:
-                                current_order = st.session_state.orden_a_editar_df
-                                new_items_list = []
-                                max_suffix = max([int(i.split('-')[-1]) for i in current_order['ID_Orden']]) if not current_order.empty else 0
+                with st.form("status_change_form"):
+                    nuevo_estado = st.selectbox(
+                        "Seleccione el nuevo estado para TODOS los ítems de esta orden:",
+                        options=status_options,
+                        index=current_status_index,
+                        key="sb_nuevo_estado"
+                    )
+                    submitted_status_change = st.form_submit_button("Aplicar Cambio de Estado al Grupo", type="primary", use_container_width=True)
+
+                    if submitted_status_change:
+                        if nuevo_estado == current_status:
+                            st.warning("El estado seleccionado es el mismo que el actual. No se realizaron cambios.")
+                        else:
+                            with st.spinner(f"Actualizando estado del grupo '{id_grupo_elegido}' a '{nuevo_estado}'..."):
+                                df_historico_modificado = df_ordenes_historico.copy()
+                                df_historico_modificado.loc[df_historico_modificado['ID_Grupo'] == id_grupo_elegido, 'Estado'] = nuevo_estado
                                 
-                                for i, row in items_a_anadir.iterrows():
-                                    new_item = {
-                                        'ID_Grupo': id_grupo_elegido,
-                                        'ID_Orden': f"{id_grupo_elegido}-{max_suffix + i + 1}",
-                                        'Fecha_Emision': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                        'Proveedor': current_order['Proveedor'].iloc[0],
-                                        'SKU': row['SKU'],
-                                        'Descripcion': row['Descripcion'],
-                                        'Cantidad_Solicitada': row['Cantidad_Solicitada'],
-                                        'Tienda_Destino': current_order['Tienda_Destino'].iloc[0],
-                                        'Estado': 'Pendiente',
-                                        'Costo_Unitario': row['Costo_Promedio_UND'],
-                                        'Costo_Total': row['Cantidad_Solicitada'] * row['Costo_Promedio_UND'],
-                                        'Borrar': False
-                                    }
-                                    new_items_list.append(new_item)
+                                exito, msg = update_sheet(client, "Registro_Ordenes", df_historico_modificado)
                                 
-                                df_new_items = pd.DataFrame(new_items_list)
-                                st.session_state.orden_a_editar_df = pd.concat([current_order, df_new_items], ignore_index=True)
-                                st.success(f"{len(df_new_items)} item(s) añadidos. Haga clic en 'Guardar Cambios' para finalizar.")
-                                st.rerun()
+                                if exito:
+                                    st.success(f"✅ ¡Éxito! El estado del grupo de orden '{id_grupo_elegido}' ha sido cambiado a '{nuevo_estado}'. La página se recargará.")
+                                    st.cache_data.clear()
+                                    st.cache_resource.clear()
+                                    st.session_state.order_to_edit = None
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ Error al actualizar la hoja de Google: {msg}")
 
-            # Formulario de acciones finales (Guardar, Reenviar)
-            with st.form(key=f"form_actions_{id_grupo_elegido}"):
-                st.markdown("##### 3. Acciones Finales")
-                
-                # Campos para reenvío de notificaciones
-                proveedor_orden = edited_orden_df['Proveedor'].iloc[0]
-                tienda_orden = edited_orden_df['Tienda_Destino'].iloc[0]
-                
-                is_traslado = "TRASLADO INTERNO" in proveedor_orden
-                if is_traslado:
-                    tienda_origen_nombre = proveedor_orden.replace("TRASLADO INTERNO: ", "").strip()
-                    contacto_info = CONTACTOS_TIENDAS.get(tienda_origen_nombre, {})
-                    email_val = contacto_info.get('email', '')
-                    nombre_val = contacto_info.get('nombre', '')
-                    celular_val = CONTACTOS_TIENDAS.get(tienda_orden, {}).get('celular', '')
-                else:
-                    contacto_info = CONTACTOS_PROVEEDOR.get(proveedor_orden.upper(), {})
-                    email_val = contacto_info.get('email', '')
-                    nombre_val = contacto_info.get('nombre', '')
-                    celular_val = contacto_info.get('celular', '')
+            # --- MODIFICACIÓN DETALLADA (EN EXPANDER) ---
+            with st.expander("Modificación Detallada: Editar, Añadir o Eliminar Ítems", expanded=False):
+                if st.session_state.order_to_edit != id_grupo_elegido:
+                    df_orden_completa = df_ordenes_vista_original[df_ordenes_vista_original['ID_Grupo'] == id_grupo_elegido].copy()
+                    df_orden_completa['Borrar'] = False
+                    st.session_state.orden_a_editar_df = df_orden_completa
+                    st.session_state.order_to_edit = id_grupo_elegido
+                    st.session_state.items_to_add_to_order = pd.DataFrame()
 
-                email_dest = st.text_input("Email(s) para notificación:", value=email_val)
-                nombre_contacto = st.text_input("Nombre de contacto para notificación:", value=nombre_val)
-                celular_contacto = st.text_input("Celular para notificación WhatsApp:", value=celular_val)
+                # Editor para items existentes
+                with st.container(border=True):
+                    st.markdown("**Ítems Actuales en la Orden:** (Puede editar cantidades o marcar para borrar)")
+                    edited_orden_df = st.data_editor(
+                        st.session_state.orden_a_editar_df,
+                        key="editor_modificar_orden", use_container_width=True, hide_index=True,
+                        column_config={
+                            "Cantidad_Solicitada": st.column_config.NumberColumn(label="Cantidad", min_value=0, step=1, format="%d"),
+                            "Costo_Unitario": st.column_config.NumberColumn(label="Costo Unit.", format="$%.2f"),
+                            "Borrar": st.column_config.CheckboxColumn(required=True)
+                        },
+                        disabled=['ID_Grupo', 'ID_Orden', 'Fecha_Emision', 'Proveedor', 'SKU', 'Descripcion', 'Tienda_Destino', 'Estado', 'Costo_Total']
+                    )
+                    st.session_state.orden_a_editar_df = edited_orden_df
 
-                # Botones de acción
-                btn_save, btn_notify = st.columns(2)
-                submitted_save = btn_save.form_submit_button("💾 Guardar Cambios en la Orden", type="primary", use_container_width=True)
-                submitted_notify = btn_notify.form_submit_button("📩 Reenviar Notificaciones (con cambios guardados)", use_container_width=True)
+                # Panel para añadir nuevos items
+                with st.container(border=True):
+                    st.markdown("**Añadir Nuevos Ítems a la Orden:**")
+                    search_term_add = st.text_input("Buscar producto por SKU o Descripción para añadir:", key="search_add_item_seguimiento")
+                    
+                    if search_term_add:
+                        mask_add = (df_maestro['SKU'].str.contains(search_term_add, case=False, na=False) | 
+                                    df_maestro['Descripcion'].str.contains(search_term_add, case=False, na=False))
+                        df_resultados_add = df_maestro[mask_add].drop_duplicates(subset=['SKU']).copy()
 
-                if submitted_save:
-                    with st.spinner("Guardando cambios en Google Sheets..."):
-                        # 1. Filtrar items borrados
+                        if not df_resultados_add.empty:
+                            df_resultados_add['Cantidad_Solicitada'] = 1
+                            df_resultados_add['Seleccionar'] = False
+                            cols_add = ['Seleccionar', 'SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND', 'Cantidad_Solicitada']
+                            
+                            df_add_editor = st.data_editor(
+                                df_resultados_add[cols_add], key="editor_add_seguimiento", use_container_width=True, hide_index=True,
+                                column_config={
+                                    "Cantidad_Solicitada": st.column_config.NumberColumn(min_value=1), 
+                                    "Seleccionar": st.column_config.CheckboxColumn(required=True)
+                                },
+                                disabled=['SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND']
+                            )
+                            
+                            if st.button("➕ Añadir Ítems Seleccionados a la Orden"):
+                                items_a_anadir = df_add_editor[df_add_editor['Seleccionar']].copy()
+                                if not items_a_anadir.empty:
+                                    current_order = st.session_state.orden_a_editar_df
+                                    new_items_list = []
+                                    max_suffix = max([int(i.split('-')[-1]) for i in current_order['ID_Orden']]) if not current_order.empty else 0
+                                    
+                                    for i, row in items_a_anadir.iterrows():
+                                        new_item = {
+                                            'ID_Grupo': id_grupo_elegido,
+                                            'ID_Orden': f"{id_grupo_elegido}-{max_suffix + i + 1}",
+                                            'Fecha_Emision': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                            'Proveedor': current_order['Proveedor'].iloc[0],
+                                            'SKU': row['SKU'],
+                                            'Descripcion': row['Descripcion'],
+                                            'Cantidad_Solicitada': row['Cantidad_Solicitada'],
+                                            'Tienda_Destino': current_order['Tienda_Destino'].iloc[0],
+                                            'Estado': 'Pendiente',
+                                            'Costo_Unitario': row['Costo_Promedio_UND'],
+                                            'Costo_Total': row['Cantidad_Solicitada'] * row['Costo_Promedio_UND'],
+                                            'Borrar': False
+                                        }
+                                        new_items_list.append(new_item)
+                                    
+                                    df_new_items = pd.DataFrame(new_items_list)
+                                    st.session_state.orden_a_editar_df = pd.concat([current_order, df_new_items], ignore_index=True)
+                                    st.success(f"{len(df_new_items)} ítem(s) añadidos. Haga clic en 'Guardar Cambios' para finalizar.")
+                                    st.rerun()
+
+                # Botón para guardar cambios detallados
+                if st.button("💾 Guardar Cambios Detallados (cantidades, ítems añadidos/borrados)", use_container_width=True):
+                    with st.spinner("Guardando cambios detallados en Google Sheets..."):
                         df_final_orden = st.session_state.orden_a_editar_df[st.session_state.orden_a_editar_df['Borrar'] == False].copy()
                         df_final_orden.drop(columns=['Borrar'], inplace=True)
-                        
-                        # 2. Recalcular costos totales
-                        df_final_orden['Costo_Total'] = df_final_orden['Cantidad_Solicitada'] * df_final_orden['Costo_Unitario']
+                        df_final_orden['Costo_Total'] = pd.to_numeric(df_final_orden['Cantidad_Solicitada'], errors='coerce') * pd.to_numeric(df_final_orden['Costo_Unitario'], errors='coerce')
 
-                        # 3. Actualizar la hoja de GSheets
                         df_historico_actualizado = df_ordenes_historico[df_ordenes_historico['ID_Grupo'] != id_grupo_elegido].copy()
                         df_historico_final = pd.concat([df_historico_actualizado, df_final_orden], ignore_index=True)
                         
@@ -1288,46 +1294,72 @@ if active_tab == tab_titles[3]:
                             st.rerun()
                         else:
                             st.error(f"Error al guardar los cambios: {msg}")
-
-                if submitted_notify:
-                    st.warning("Asegúrese de haber guardado los cambios antes de reenviar.")
-                    df_reenvio = st.session_state.orden_a_editar_df[st.session_state.orden_a_editar_df['Borrar'] == False].copy()
-
-                    if df_reenvio.empty:
-                        st.error("La orden está vacía. No se puede notificar.")
+            
+            # --- NOTIFICACIONES (EN EXPANDER) ---
+            with st.expander("Notificaciones: Reenviar Correo / WhatsApp", expanded=False):
+                with st.form(key=f"form_notify_{id_grupo_elegido}"):
+                    st.markdown("##### Reenviar Notificación de la Orden")
+                    st.info("Esta acción reenviará la orden con los últimos datos guardados. Asegúrese de haber guardado cualquier cambio detallado primero.")
+                    
+                    df_para_notificar = st.session_state.orden_a_editar_df.copy()
+                    proveedor_orden = df_para_notificar['Proveedor'].iloc[0]
+                    tienda_orden = df_para_notificar['Tienda_Destino'].iloc[0]
+                    
+                    is_traslado = "TRASLADO INTERNO" in proveedor_orden
+                    if is_traslado:
+                        tienda_origen_nombre = proveedor_orden.replace("TRASLADO INTERNO: ", "").strip()
+                        contacto_info = CONTACTOS_TIENDAS.get(tienda_origen_nombre, {})
+                        email_val = contacto_info.get('email', '')
+                        nombre_val = contacto_info.get('nombre', '')
+                        celular_val = CONTACTOS_TIENDAS.get(tienda_orden, {}).get('celular', '')
                     else:
-                        # Lógica de notificación (similar a la original)
-                        if is_traslado:
-                            asunto = f"**TRASLADO ACTUALIZADO** {id_grupo_elegido}"
-                            cuerpo_html = f"Se ha actualizado el plan de traslado N° {id_grupo_elegido}. Ver detalles."
-                            excel_bytes = generar_excel_dinamico(df_reenvio, f"Traslado_ACT_{id_grupo_elegido}")
-                            adjuntos = [{'datos': excel_bytes, 'nombre_archivo': f"Detalle_Traslado_ACT_{id_grupo_elegido}.xlsx"}]
-                            msg_wpp = f"Hola, se ha ACTUALIZADO la orden de traslado N° {id_grupo_elegido}."
-                            notif_label = f"📲 Notificar a {tienda_orden}"
-                        else: # Es compra
-                            direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_orden, "N/A")
-                            pdf_bytes = generar_pdf_orden_compra(df_reenvio, proveedor_orden, tienda_orden, direccion_entrega, nombre_contacto, id_grupo_elegido)
-                            excel_bytes = generar_excel_dinamico(df_reenvio, f"Orden_ACT_{id_grupo_elegido}")
-                            asunto = f"**ORDEN ACTUALIZADA** {id_grupo_elegido}"
-                            cuerpo_html = f"Adjunto la versión actualizada de la orden N° {id_grupo_elegido}."
-                            adjuntos = [ {'datos': pdf_bytes, 'nombre_archivo': f"OC_ACT_{id_grupo_elegido}.pdf"}, {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_ACT_{id_grupo_elegido}.xlsx"} ]
-                            msg_wpp = f"Hola {nombre_contacto}, te reenviamos la OC ACTUALIZADA N° {id_grupo_elegido}."
-                            notif_label = f"📲 Notificar a {proveedor_orden}"
-                        
-                        if email_dest:
-                            destinatarios = [e.strip() for e in email_dest.split(',') if e.strip()]
-                            enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
-                            if enviado: st.success(msg_envio)
-                            else: st.error(msg_envio)
-                        
-                        if celular_contacto:
-                             st.session_state.notificaciones_pendientes.append({
-                                "label": notif_label, 
-                                "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
-                                "key": f"wpp_update_{id_grupo_elegido}"
-                            })
-                        st.rerun()
+                        contacto_info = CONTACTOS_PROVEEDOR.get(proveedor_orden.upper(), {})
+                        email_val = contacto_info.get('email', '')
+                        nombre_val = contacto_info.get('nombre', '')
+                        celular_val = contacto_info.get('celular', '')
 
+                    email_dest = st.text_input("Email(s) para notificación:", value=email_val, key=f"email_notify_{id_grupo_elegido}")
+                    nombre_contacto = st.text_input("Nombre de contacto para notificación:", value=nombre_val, key=f"nombre_notify_{id_grupo_elegido}")
+                    celular_contacto = st.text_input("Celular para notificación WhatsApp:", value=celular_val, key=f"celular_notify_{id_grupo_elegido}")
+
+                    submitted_notify = st.form_submit_button("📩 Reenviar Notificaciones", use_container_width=True)
+
+                    if submitted_notify:
+                        df_reenvio = df_para_notificar[df_para_notificar['Borrar'] == False]
+                        if df_reenvio.empty:
+                            st.error("La orden está vacía. No se puede notificar.")
+                        else:
+                            with st.spinner("Enviando notificaciones..."):
+                                if is_traslado:
+                                    asunto = f"**RECORDATORIO/ACTUALIZACIÓN TRASLADO** {id_grupo_elegido}"
+                                    cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto. Gracias."
+                                    excel_bytes = generar_excel_dinamico(df_reenvio, f"Traslado_ACT_{id_grupo_elegido}")
+                                    adjuntos = [{'datos': excel_bytes, 'nombre_archivo': f"Detalle_Traslado_ACT_{id_grupo_elegido}.xlsx"}]
+                                    msg_wpp = f"Hola, te reenviamos la información del traslado N° {id_grupo_elegido}."
+                                    notif_label = f"📲 Notificar a {tienda_orden}"
+                                else:
+                                    direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_orden, "N/A")
+                                    pdf_bytes = generar_pdf_orden_compra(df_reenvio, proveedor_orden, tienda_orden, direccion_entrega, nombre_contacto, id_grupo_elegido)
+                                    excel_bytes = generar_excel_dinamico(df_reenvio, f"Orden_ACT_{id_grupo_elegido}")
+                                    asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
+                                    cuerpo_html = f"Estimados Sres. {proveedor_orden}, adjunto reenviamos la versión actualizada de la orden de compra N° {id_grupo_elegido}. Agradecemos su gestión."
+                                    adjuntos = [ {'datos': pdf_bytes, 'nombre_archivo': f"OC_ACT_{id_grupo_elegido}.pdf"}, {'datos': excel_bytes, 'nombre_archivo': f"Detalle_OC_ACT_{id_grupo_elegido}.xlsx"} ]
+                                    msg_wpp = f"Hola {nombre_contacto}, te reenviamos la OC ACTUALIZADA N° {id_grupo_elegido}."
+                                    notif_label = f"📲 Notificar a {proveedor_orden}"
+                                
+                                if email_dest:
+                                    destinatarios = [e.strip() for e in email_dest.split(',') if e.strip()]
+                                    enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
+                                    if enviado: st.success(f"Correo reenviado: {msg_envio}")
+                                    else: st.error(f"Error al reenviar correo: {msg_envio}")
+                                
+                                if celular_contacto:
+                                    st.session_state.notificaciones_pendientes.append({
+                                        "label": notif_label, 
+                                        "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
+                                        "key": f"wpp_update_{id_grupo_elegido}"
+                                    })
+                                st.rerun()
 # --- FIN MODIFICACIÓN ---
 
 # --- BLOQUE FINAL PARA MOSTRAR NOTIFICACIONES PENDIENTES ---
