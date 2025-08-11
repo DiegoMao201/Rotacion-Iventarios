@@ -717,7 +717,7 @@ if active_tab == tab_titles[1]:
                         "Seleccionar", "SKU", "Descripcion", "Stock en Origen", "Stock en Destino",
                         "Uds a Enviar", "Stock_En_Transito", "Tienda Origen", "Tienda Destino",
                         "Necesidad en Destino", "Proveedor", "Marca_Nombre", "Segmento_ABC",
-                        "Costo_Promedio_UND", "Valor del Traslado", "Peso Total (kg)", "Peso Individual (kg)"
+                        "Peso Total (kg)", "Peso Individual (kg)"
                     ]
                     
                     display_columns = [col for col in column_order if col in st.session_state.df_traslados_editor.columns]
