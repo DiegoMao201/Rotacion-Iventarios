@@ -325,7 +325,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}        |       {self.empresa_email}        |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -449,12 +449,12 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
         if 'Peso_Unitario_kg' in df_excel.columns:
             df_excel['Peso_Unitario_kg'] = pd.to_numeric(df_excel['Peso_Unitario_kg'], errors='coerce').fillna(0)
             if 'Peso_Total_kg' not in df_excel.columns:
-                 df_excel['Peso_Total_kg'] = df_excel['Cantidad'] * df_excel['Peso_Unitario_kg']
+                df_excel['Peso_Total_kg'] = df_excel['Cantidad'] * df_excel['Peso_Unitario_kg']
 
         if 'Costo_Unitario' in df_excel.columns:
             df_excel['Costo_Unitario'] = pd.to_numeric(df_excel['Costo_Unitario'], errors='coerce').fillna(0)
             if 'Costo_Total' not in df_excel.columns:
-                 df_excel['Costo_Total'] = df_excel['Cantidad'] * df_excel['Costo_Unitario']
+                df_excel['Costo_Total'] = df_excel['Cantidad'] * df_excel['Costo_Unitario']
 
     # Definir el orden final y las columnas a mostrar
     COLS_FINALES_EXCEL = ['SKU', 'Descripcion', 'Cantidad', 'Origen', 'Destino', 'Peso_Unitario_kg', 'Peso_Total_kg', 'Costo_Unitario', 'Costo_Total']
@@ -750,9 +750,11 @@ if active_tab == tab_titles[1]:
                     if deselect_all_t:
                         edited_df_traslados['Seleccionar'] = False
 
+                    # MODIFICACIÓN: Se elimina el st.rerun() para un flujo más suave. 
+                    # Los cambios se aplicarán al presionar "Confirmar Cambios".
                     if select_all_t or deselect_all_t:
                         st.session_state.df_traslados_editor = edited_df_traslados
-                        st.rerun()
+                        # st.rerun() <-- REMOVED
 
                     if submitted:
                         st.session_state.df_traslados_editor = edited_df_traslados
@@ -870,7 +872,6 @@ if active_tab == tab_titles[1]:
                                 'Peso Individual (kg)': item_data['Peso_Articulo']
                             })
                     st.success(f"{len(df_para_anadir)} producto(s) añadidos a la solicitud.")
-                    # --- CORRECCIÓN: Se elimina st.rerun() para un flujo más suave ---
             else:
                 st.warning("No se encontraron productos con stock para ese criterio de búsqueda.")
 
@@ -999,12 +1000,14 @@ if active_tab == tab_titles[2]:
                 if deselect_all:
                     edited_df['Seleccionar'] = False
 
-                if select_all or deselect_all or confirm_changes:
+                # MODIFICACIÓN: Se elimina el st.rerun() para un flujo más suave.
+                if select_all or deselect_all:
                     st.session_state.df_compras_editor = edited_df
-                    if select_all or deselect_all:
-                        st.rerun() 
-                    else:
-                        st.success("Cambios confirmados. Proceda a generar las órdenes a continuación.")
+                    # st.rerun() <-- REMOVED
+                
+                if confirm_changes:
+                    st.session_state.df_compras_editor = edited_df
+                    st.success("Cambios confirmados. Proceda a generar las órdenes a continuación.")
 
             df_seleccionados = st.session_state.df_compras_editor[
                 (st.session_state.df_compras_editor['Seleccionar']) & 
@@ -1120,7 +1123,6 @@ if active_tab == tab_titles[2]:
                         if not any(item['SKU'] == row['SKU'] for item in st.session_state.compra_especial_items):
                             st.session_state.compra_especial_items.append(row.to_dict())
                     st.success(f"{len(df_para_anadir_compra)} producto(s) añadidos a la compra especial.")
-                    # --- CORRECCIÓN: Se elimina st.rerun() para un flujo más suave ---
             else:
                 st.warning("No se encontraron productos con ese criterio de búsqueda.")
 
@@ -1157,7 +1159,7 @@ if active_tab == tab_titles[2]:
                             if exito:
                                 st.success(f"✅ Compra especial registrada. {msg}")
                                 orden_id_grupo = df_reg['ID_Grupo'].iloc[0] if not df_reg.empty else f"OC-SP-{datetime.now().strftime('%f')}"
-                                direccion_entreга = DIRECCIONES_TIENDAS.get(tienda_destino_especial_compra, "N/A")
+                                direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_destino_especial_compra, "N/A")
                                 pdf_bytes = generar_pdf_orden_compra(df_reg, proveedor_especial, tienda_destino_especial_compra, direccion_entrega, nombre_contacto_esp, orden_id_grupo)
                                 excel_bytes_oc_esp = generar_excel_dinamico(df_reg, f"Compra_Especial_{proveedor_especial}", "Compra Especial")
                                 asunto = f"Nueva Orden de Compra Especial {orden_id_grupo} de Ferreinox SAS BIC - {proveedor_especial}"
@@ -1197,6 +1199,11 @@ if active_tab == tab_titles[3]:
         for col in ['Costo_Total', 'Cantidad_Solicitada', 'Costo_Unitario', 'Peso_Unitario_kg', 'Peso_Total_kg']:
             if col in df_ordenes_vista_original.columns:
                 df_ordenes_vista_original[col] = pd.to_numeric(df_ordenes_vista_original[col], errors='coerce').fillna(0)
+        
+        # --- FIX: Recalcular explícitamente el peso total para asegurar que no sea cero si la data de origen es incorrecta ---
+        if 'Cantidad_Solicitada' in df_ordenes_vista_original.columns and 'Peso_Unitario_kg' in df_ordenes_vista_original.columns:
+            df_ordenes_vista_original['Peso_Total_kg'] = df_ordenes_vista_original['Cantidad_Solicitada'] * df_ordenes_vista_original['Peso_Unitario_kg']
+
 
         # --- 1. FILTROS Y VISTA RESUMIDA ---
         st.markdown("##### 1. Filtrar y Visualizar Grupos de Órdenes")
@@ -1289,7 +1296,8 @@ if active_tab == tab_titles[3]:
                                     st.error(f"❌ Error al actualizar la hoja de Google: {msg}")
 
             # --- MODIFICACIÓN DETALLADA (EN EXPANDER) ---
-            with st.expander("Modificación Detallada: Editar, Añadir o Eliminar Ítems", expanded=False):
+            # FIX: Set expanded=True to prevent the UI from collapsing after an interaction inside it.
+            with st.expander("Modificación Detallada: Editar, Añadir o Eliminar Ítems", expanded=True):
                 if st.session_state.order_to_edit != id_grupo_elegido:
                     df_orden_completa = df_ordenes_vista_original[df_ordenes_vista_original['ID_Grupo'] == id_grupo_elegido].copy()
                     df_orden_completa['Borrar'] = False
@@ -1366,7 +1374,7 @@ if active_tab == tab_titles[3]:
                                     df_new_items = pd.DataFrame(new_items_list)
                                     st.session_state.orden_a_editar_df = pd.concat([current_order, df_new_items], ignore_index=True)
                                     st.success(f"{len(df_new_items)} ítem(s) añadidos. Haga clic en 'Guardar Cambios' para finalizar.")
-                                    # --- CORRECCIÓN: Se elimina st.rerun() para un flujo más suave ---
+                                    # No rerun needed here, the UI will update smoothly on the next interaction.
 
                 # Botón para guardar cambios detallados
                 if st.button("💾 Guardar Cambios Detallados (cantidades, ítems añadidos/borrados)", use_container_width=True):
@@ -1390,7 +1398,8 @@ if active_tab == tab_titles[3]:
                             st.error(f"Error al guardar los cambios: {msg}")
                 
             # --- NOTIFICACIONES Y DESCARGA (EN EXPANDER) ---
-            with st.expander("Descargar y Notificar Orden", expanded=False):
+            # FIX: Set expanded=True so the user immediately sees the next actions.
+            with st.expander("Descargar y Notificar Orden", expanded=True):
                 df_para_notificar = st.session_state.orden_a_editar_df.copy()
                 df_para_notificar = df_para_notificar[df_para_notificar['Borrar'] == False]
                 
