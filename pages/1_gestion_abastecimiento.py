@@ -328,7 +328,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}        |       {self.empresa_email}        |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -499,11 +499,11 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
                 column_lens = df_final[col].astype(str).map(len)
                 if len(column_lens) == 0:
                     column_len = 0
-            else:
-                column_len = column_lens.max()
+                else:
+                    column_len = column_lens.max()
                 # Si es nan, pon 0
                 if pd.isnull(column_len):
-                     column_len = 0
+                    column_len = 0
             else:
                 column_len = 0
             # Convierte a int de forma segura
@@ -725,8 +725,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                                left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                                ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                              left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                              ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -1273,10 +1273,10 @@ if active_tab == tab_titles[3]:
             ).reset_index().sort_values(by="Fecha_Emision", ascending=False)
             
             st.dataframe(df_summary, use_container_width=True, hide_index=True,
-                            column_config={
-                                "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
-                                "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
-                            })
+                         column_config={
+                             "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
+                             "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
+                         })
         else:
             st.info("No hay órdenes que coincidan con los filtros seleccionados.")
             df_summary = pd.DataFrame() 
