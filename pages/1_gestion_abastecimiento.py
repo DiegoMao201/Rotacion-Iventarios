@@ -497,14 +497,14 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
             # Calcular el largo máximo de la columna de forma segura
             # Si la columna está vacía, column_len será 0
             if not df_final[col].empty:
-            column_len = df_final[col].astype(str).map(len).max()
+                column_len = df_final[col].astype(str).map(len).max()
             else:
-            column_len = 0
+                column_len = 0
             max_len = max(column_len, len(str(col))) + 2
 
             # No sobreescribir el ancho de las columnas con formato especial
-        if col not in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
-            worksheet.set_column(i, i, min(max_len, 50))
+            if col not in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
+                worksheet.set_column(i, i, min(max_len, 50))
                 
     return output.getvalue()
 
