@@ -500,7 +500,7 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
                 column_len = df_final[col].astype(str).map(len).max()
             else:
                 column_len = 0
-            max_len = max(column_len, len(str(col))) + 2
+            max_len = max(int(column_len), len(str(col))) + 2
 
             # No sobreescribir el ancho de las columnas con formato especial
             if col not in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
