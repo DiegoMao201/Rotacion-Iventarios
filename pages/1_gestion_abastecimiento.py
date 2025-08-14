@@ -127,7 +127,7 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     # Identificar columnas de cantidad, costo y peso dinámicamente
     cantidad_col = next((col for col in ['Uds a Comprar', 'Uds a Enviar', 'Cantidad_Solicitada'] if col in df_orden.columns), None)
     costo_col = next((col for col in ['Costo_Promedio_UND', 'Costo_Unitario'] if col in df_orden.columns), None)
-    peso_col = next((col for col in ['Peso_Articulo', 'Peso Individual (kg)'] if col in df_orden.columns), None)
+    peso_col = next((col for col in ['Peso_Articulo', 'Peso Individual (kg)', 'Peso_Unitario_kg'] if col in df_orden.columns), None)
     
     if not cantidad_col: return False, "No se encontró la columna de cantidad.", pd.DataFrame()
 
@@ -179,6 +179,7 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     df_final_para_gsheets = df_registro.reindex(columns=columnas_finales).fillna('')
 
     return append_to_sheet(client, "Registro_Ordenes", df_final_para_gsheets)
+
 
 # --- 2. FUNCIONES AUXILIARES Y DE UI ---
 def enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, lista_de_adjuntos):
@@ -327,7 +328,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -409,7 +410,7 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
-# --- MODIFICACIÓN: Función de Excel Estandarizada ---
+# --- CORRECCIÓN: Función de Excel Estandarizada ---
 # Esta función ahora crea un excel con formato unificado de peso y costo.
 def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
     """Genera un archivo Excel en memoria a partir de un DataFrame, con formato unificado."""
@@ -419,28 +420,30 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
     df_excel = df.copy()
     
     # Mapeo de columnas a un formato estándar
-    if tipo_orden in ["Traslado Automático", "Traslado Especial"]:
-        rename_map = {
-            'Uds a Enviar': 'Cantidad',
-            'Tienda Origen': 'Origen',
-            'Tienda Destino': 'Destino',
-            'Peso Individual (kg)': 'Peso_Unitario_kg',
-            'Peso Total (kg)': 'Peso_Total_kg',
-            'Costo_Promedio_UND': 'Costo_Unitario',
-            'Valor del Traslado': 'Costo_Total'
-        }
-    elif tipo_orden in ["Compra Sugerencia", "Compra Especial", "Seguimiento"]:
-        rename_map = {
-            'Uds a Comprar': 'Cantidad',
-            'Cantidad_Solicitada': 'Cantidad',
-            'Proveedor': 'Origen',
-            'Tienda': 'Destino',
-            'Tienda_Destino': 'Destino',
-            'Peso_Articulo': 'Peso_Unitario_kg',
-            'Peso Individual (kg)': 'Peso_Unitario_kg'
-        }
-    else:
-        rename_map = {}
+    # Este mapa es flexible para manejar ligeras variaciones en los nombres de las columnas
+    rename_map = {
+        # Cantidad
+        'Uds a Enviar': 'Cantidad',
+        'Uds a Comprar': 'Cantidad',
+        'Cantidad_Solicitada': 'Cantidad',
+        # Origen
+        'Tienda Origen': 'Origen',
+        'Proveedor': 'Origen',
+        # Destino
+        'Tienda Destino': 'Destino',
+        'Tienda_Destino': 'Destino',
+        'Tienda': 'Destino',
+        # Peso Unitario
+        'Peso Individual (kg)': 'Peso_Unitario_kg',
+        'Peso_Articulo': 'Peso_Unitario_kg',
+        # Peso Total
+        'Peso Total (kg)': 'Peso_Total_kg',
+        # Costo Unitario
+        'Costo_Promedio_UND': 'Costo_Unitario',
+        # Costo Total
+        'Valor del Traslado': 'Costo_Total',
+        'Valor de la Compra': 'Costo_Total',
+    }
 
     df_excel.rename(columns=rename_map, inplace=True)
 
@@ -460,7 +463,10 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
 
     # Definir el orden final y las columnas a mostrar
     COLS_FINALES_EXCEL = ['SKU', 'Descripcion', 'Cantidad', 'Origen', 'Destino', 'Peso_Unitario_kg', 'Peso_Total_kg', 'Costo_Unitario', 'Costo_Total']
-    df_final = df_excel.reindex(columns=COLS_FINALES_EXCEL).fillna('')
+    
+    # Seleccionar solo las columnas que existen en el DataFrame después del renombrado
+    cols_existentes_en_df = [col for col in COLS_FINALES_EXCEL if col in df_excel.columns]
+    df_final = df_excel[cols_existentes_en_df].fillna('')
     
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         if df_final.empty:
@@ -703,8 +709,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                              left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                              ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                            left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                            ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -815,27 +821,34 @@ if active_tab == tab_titles[1]:
 
                         if st.form_submit_button("✅ Enviar y Registrar Traslado", use_container_width=True, type="primary"):
                             with st.spinner("Registrando traslado y enviando notificaciones..."):
-                                exito_registro, msg_registro, df_registrado = registrar_ordenes_en_sheets(client, df_seleccionados_traslado_full, "Traslado Automático")
+                                # CORRECCIÓN: Usar el DataFrame original (df_seleccionados_traslado_full) para el correo, 
+                                # ya que `registrar_ordenes_en_sheets` devuelve un df con nombres de columna para GSheets.
+                                df_para_notificar_email = df_seleccionados_traslado_full.copy()
+                                
+                                exito_registro, msg_registro, df_registrado_gsheets = registrar_ordenes_en_sheets(client, df_seleccionados_traslado_full, "Traslado Automático")
                                 if exito_registro:
                                     st.success(f"✅ ¡Traslado registrado exitosamente! {msg_registro}")
                                     if email_dest_traslado:
-                                        excel_bytes = generar_excel_dinamico(df_registrado, "Plan_de_Traslados", "Traslado Automático")
-                                        asunto = f"Nuevo Plan de Traslado Interno - {datetime.now().strftime('%d/%m/%Y')}"
-                                        cuerpo_html = f"""<html><body><p>Hola equipo,</p><p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p><p><b>ID de Grupo de Traslado:</b> {df_registrado['ID_Grupo'].iloc[0]}</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"""
-                                        adjunto = [{'datos': excel_bytes, 'nombre_archivo': f"Plan_Traslado_{df_registrado['ID_Grupo'].iloc[0]}.xlsx"}]
+                                        # Usar el df con las columnas originales para el excel del correo
+                                        excel_bytes_email = generar_excel_dinamico(df_para_notificar_email, "Plan_de_Traslados", "Traslado Automático")
+                                        id_grupo_registrado = df_registrado_gsheets['ID_Grupo'].iloc[0]
+                                        asunto = f"Nuevo Plan de Traslado Interno - {id_grupo_registrado}"
+                                        cuerpo_html = f"""<html><body><p>Hola equipo,</p><p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p><p><b>ID de Grupo de Traslado:</b> {id_grupo_registrado}</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"""
+                                        adjunto = [{'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}]
                                         destinatarios_finales = [e.strip() for e in email_dest_traslado.replace(';', ',').split(',') if e.strip()]
                                         enviado, msg = enviar_correo_con_adjuntos(destinatarios_finales, asunto, cuerpo_html, adjunto)
                                         if enviado: st.success(msg)
                                         else: st.error(msg)
 
                                     st.session_state.notificaciones_pendientes = []
-                                    for destino, df_grupo_destino in df_registrado.groupby('Tienda_Destino'):
+                                    # La lógica para WhatsApp usará el DataFrame que se registró, que tiene las columnas correctas.
+                                    for destino, df_grupo_destino in df_para_notificar_email.groupby('Tienda Destino'):
                                         info_tienda = st.session_state.contacto_manual.get(destino, {})
                                         numero_wpp = info_tienda.get("celular", "").strip()
                                         if numero_wpp:
                                             nombre_contacto = info_tienda.get("nombre", "equipo de " + destino)
-                                            id_grupo_tienda = df_grupo_destino['ID_Grupo'].iloc[0]
-                                            peso_total_destino = pd.to_numeric(df_grupo_destino['Peso_Total_kg'], errors='coerce').sum()
+                                            id_grupo_tienda = df_registrado_gsheets['ID_Grupo'].iloc[0] # Usar el ID de grupo único
+                                            peso_total_destino = pd.to_numeric(df_grupo_destino['Peso Total (kg)'], errors='coerce').sum()
                                             mensaje_wpp = f"Hola {nombre_contacto}, se ha generado una nueva orden de traslado hacia su tienda (Grupo ID: {id_grupo_tienda}). El peso total de la carga es de *{peso_total_destino:,.2f} kg*. Por favor, estar atentos a la recepción. ¡Gracias!"
                                             st.session_state.notificaciones_pendientes.append({
                                                 "label": f"📲 Notificar a {destino} por WhatsApp",
@@ -844,6 +857,7 @@ if active_tab == tab_titles[1]:
                                             })
                                 else:
                                     st.error(f"❌ Error al registrar el traslado en Google Sheets: {msg_registro}")
+
 
     with st.expander("🚚 **Traslados Especiales (Búsqueda y Solicitud Manual)**", expanded=False):
         st.markdown("##### 1. Buscar y añadir productos a la solicitud")
@@ -904,15 +918,18 @@ if active_tab == tab_titles[1]:
                 
                 if submitted_special:
                     with st.spinner("Procesando..."):
-                        exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_solicitud, "Traslado Especial", tienda_destino=tienda_destino_especial)
+                        # CORRECCIÓN: Usar el df_solicitud original para el correo
+                        df_para_email_especial = df_solicitud.copy()
+                        exito, msg, df_reg_gsheets = registrar_ordenes_en_sheets(client, df_solicitud, "Traslado Especial", tienda_destino=tienda_destino_especial)
                         if exito:
                             st.success(f"✅ Solicitud especial registrada. {msg}")
                             st.session_state.notificaciones_pendientes = []
                             # Email Notification
-                            excel_bytes_especial = generar_excel_dinamico(df_reg, "Traslado_Especial", "Traslado Especial")
-                            asunto = f"Nueva Solicitud de Traslado Especial - {df_reg['ID_Grupo'].iloc[0]}"
-                            cuerpo = f"Se ha generado una nueva solicitud de traslado especial (ID: {df_reg['ID_Grupo'].iloc[0]}) a la tienda {tienda_destino_especial}. Ver detalles en adjunto."
-                            adjuntos = [{'datos': excel_bytes_especial, 'nombre_archivo': f"Traslado_Especial_{df_reg['ID_Grupo'].iloc[0]}.xlsx"}]
+                            id_grupo_reg = df_reg_gsheets['ID_Grupo'].iloc[0]
+                            excel_bytes_especial = generar_excel_dinamico(df_para_email_especial, "Traslado_Especial", "Traslado Especial")
+                            asunto = f"Nueva Solicitud de Traslado Especial - {id_grupo_reg}"
+                            cuerpo = f"Se ha generado una nueva solicitud de traslado especial (ID: {id_grupo_reg}) a la tienda {tienda_destino_especial}. Ver detalles en adjunto."
+                            adjuntos = [{'datos': excel_bytes_especial, 'nombre_archivo': f"Traslado_Especial_{id_grupo_reg}.xlsx"}]
                             destinatarios = [e.strip() for e in email_dest_especial.split(',') if e.strip()]
                             if destinatarios:
                                 enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo, adjuntos)
@@ -921,9 +938,8 @@ if active_tab == tab_titles[1]:
                             
                             # WhatsApp Notification
                             if celular_contacto_especial:
-                                ids_grupo = ", ".join(df_reg['ID_Grupo'].unique())
-                                peso_total_solicitud = pd.to_numeric(df_reg['Peso_Total_kg'], errors='coerce').sum()
-                                mensaje_wpp = f"Hola {nombre_contacto_especial or tienda_destino_especial}, se ha generado una solicitud especial de traslado a su tienda (Grupo ID: {ids_grupo}). El peso total de la carga es de *{peso_total_solicitud:,.2f} kg*. ¡Gracias!"
+                                peso_total_solicitud = pd.to_numeric(df_para_email_especial['Peso Total (kg)'], errors='coerce').sum()
+                                mensaje_wpp = f"Hola {nombre_contacto_especial or tienda_destino_especial}, se ha generado una solicitud especial de traslado a su tienda (Grupo ID: {id_grupo_reg}). El peso total de la carga es de *{peso_total_solicitud:,.2f} kg*. ¡Gracias!"
                                 st.session_state.notificaciones_pendientes.append({
                                     "label": f"📲 Notificar a {tienda_destino_especial}", "url": generar_link_whatsapp(celular_contacto_especial, mensaje_wpp), "key": "wpp_traslado_esp"
                                 })
@@ -935,6 +951,7 @@ if active_tab == tab_titles[1]:
                 if cleared_special:
                     st.session_state.solicitud_traslado_especial = []
                     st.rerun()
+
 
 # --- PESTAÑA 3: PLAN DE COMPRAS ---
 if active_tab == tab_titles[2]:
@@ -1076,13 +1093,15 @@ if active_tab == tab_titles[2]:
                                 if not email_dest: st.warning("Se necesita un correo para enviar la orden.")
                                 else:
                                     with st.spinner(f"Procesando orden para {proveedor}..."):
+                                        # CORRECCIÓN: Usar df_grupo para la notificación, no el resultado de Gsheets
+                                        df_para_notificar_compra = df_grupo.copy()
                                         exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_grupo, "Compra Sugerencia")
                                         if exito:
                                             st.success(f"¡Orden registrada! {msg}")
                                             orden_id_grupo = df_reg['ID_Grupo'].iloc[0] if not df_reg.empty else f"OC-{datetime.now().strftime('%f')}"
                                             direccion_entrega = DIRECCIONES_TIENDAS.get(tienda, "N/A")
-                                            pdf_bytes = generar_pdf_orden_compra(df_grupo, proveedor, tienda, direccion_entrega, nombre_contacto, orden_id_grupo)
-                                            excel_bytes_oc = generar_excel_dinamico(df_reg, f"Compra_{proveedor}", "Compra Sugerencia")
+                                            pdf_bytes = generar_pdf_orden_compra(df_para_notificar_compra, proveedor, tienda, direccion_entrega, nombre_contacto, orden_id_grupo)
+                                            excel_bytes_oc = generar_excel_dinamico(df_para_notificar_compra, f"Compra_{proveedor}", "Compra Sugerencia")
 
                                             asunto = f"Nueva Orden de Compra {orden_id_grupo} de Ferreinox SAS BIC - {proveedor}"
                                             cuerpo_html = f"<html><body><p>Estimados Sres. {proveedor},</p><p>Adjunto a este correo encontrarán nuestra <b>orden de compra N° {orden_id_grupo}</b> en formatos PDF y Excel.</p><p>Por favor, realizar el despacho a la siguiente dirección:</p><p><b>Sede de Entrega:</b> {tienda}<br><b>Dirección:</b> {direccion_entrega}<br><b>Contacto en Bodega:</b> Leivyn Gabriel Garcia</p><p>Agradecemos su pronta gestión.</p><p>Cordialmente,</p><p>--<br><b>Departamento de Compras</b><br>Ferreinox SAS BIC</p></body></html>"
@@ -1093,7 +1112,7 @@ if active_tab == tab_titles[2]:
                                             else: st.error(msg_envio)
 
                                             if celular_proveedor:
-                                                peso_total_orden = pd.to_numeric(df_reg['Peso_Total_kg'], errors='coerce').sum()
+                                                peso_total_orden = pd.to_numeric(df_para_notificar_compra['Peso Total (kg)'], errors='coerce').sum()
                                                 msg_wpp = f"Hola {nombre_contacto}, te acabamos de enviar la Orden de Compra N° {orden_id_grupo} al correo. Peso total: {peso_total_orden:,.2f} kg. Quedamos atentos. ¡Gracias!"
                                                 st.session_state.notificaciones_pendientes.append({
                                                     "label": f"📲 Notificar a {proveedor}", "url": generar_link_whatsapp(celular_proveedor, msg_wpp), "key": f"wpp_compra_{proveedor}_{tienda}"
@@ -1106,7 +1125,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                               df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
@@ -1154,13 +1173,14 @@ if active_tab == tab_titles[2]:
                 if submitted_special_compra:
                     if proveedor_especial and tienda_destino_especial_compra:
                         with st.spinner("Procesando compra especial..."):
+                            df_para_notificar_compra_esp = df_compra_especial.copy()
                             exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_compra_especial, "Compra Especial", proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial_compra)
                             if exito:
                                 st.success(f"✅ Compra especial registrada. {msg}")
                                 orden_id_grupo = df_reg['ID_Grupo'].iloc[0] if not df_reg.empty else f"OC-SP-{datetime.now().strftime('%f')}"
                                 direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_destino_especial_compra, "N/A")
-                                pdf_bytes = generar_pdf_orden_compra(df_reg, proveedor_especial, tienda_destino_especial_compra, direccion_entrega, nombre_contacto_esp, orden_id_grupo)
-                                excel_bytes_oc_esp = generar_excel_dinamico(df_reg, f"Compra_Especial_{proveedor_especial}", "Compra Especial")
+                                pdf_bytes = generar_pdf_orden_compra(df_para_notificar_compra_esp, proveedor_especial, tienda_destino_especial_compra, direccion_entrega, nombre_contacto_esp, orden_id_grupo)
+                                excel_bytes_oc_esp = generar_excel_dinamico(df_para_notificar_compra_esp, f"Compra_Especial_{proveedor_especial}", "Compra Especial")
                                 asunto = f"Nueva Orden de Compra Especial {orden_id_grupo} de Ferreinox SAS BIC - {proveedor_especial}"
                                 cuerpo_html = f"<html><body><p>Estimados Sres. {proveedor_especial},</p><p>Adjunto a este correo encontrarán nuestra <b>orden de compra especial N° {orden_id_grupo}</b>.</p><p><b>Sede de Entrega:</b> {tienda_destino_especial_compra}<br><b>Dirección:</b> {direccion_entrega}</p><p>Agradecemos su gestión.</p><p>Cordialmente,<br><b>Departamento de Compras</b></p></body></html>"
                                 adjuntos = [ {'datos': pdf_bytes, 'nombre_archivo': f"OC_{orden_id_grupo}.pdf"}, {'datos': excel_bytes_oc_esp, 'nombre_archivo': f"Detalle_OC_Especial_{orden_id_grupo}.xlsx"} ]
@@ -1170,7 +1190,7 @@ if active_tab == tab_titles[2]:
                                     if enviado: st.success(msg_envio)
                                     else: st.error(msg_envio)
                                 if celular_proveedor_esp:
-                                    peso_total_orden_esp = pd.to_numeric(df_reg['Peso_Total_kg'], errors='coerce').sum()
+                                    peso_total_orden_esp = pd.to_numeric(df_para_notificar_compra_esp['Peso Total (kg)'], errors='coerce').sum()
                                     msg_wpp = f"Hola {nombre_contacto_esp}, te acabamos de enviar la Orden de Compra Especial N° {orden_id_grupo} al correo. Peso total: {peso_total_orden_esp:,.2f} kg. ¡Gracias!"
                                     st.session_state.notificaciones_pendientes.append({ "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"})
                                 st.session_state.compra_especial_items = []
@@ -1237,10 +1257,10 @@ if active_tab == tab_titles[3]:
             ).reset_index().sort_values(by="Fecha_Emision", ascending=False)
             
             st.dataframe(df_summary, use_container_width=True, hide_index=True,
-                         column_config={
-                             "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
-                             "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
-                         })
+                            column_config={
+                                "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
+                                "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
+                            })
         else:
             st.info("No hay órdenes que coincidan con los filtros seleccionados.")
             df_summary = pd.DataFrame() 
@@ -1459,6 +1479,7 @@ if active_tab == tab_titles[3]:
                                     notif_label = f"📲 Notificar a {tienda_orden} (Destino)"
                                 else: # Es Compra
                                     direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_orden, "N/A")
+                                    # Para la notificación, se usa 'Cantidad_Solicitada' que es el nombre de la columna en el df
                                     pdf_bytes = generar_pdf_orden_compra(df_para_notificar, proveedor_orden, tienda_orden, direccion_entrega, nombre_contacto, id_grupo_elegido)
                                     adjuntos.insert(0, {'datos': pdf_bytes, 'nombre_archivo': f"OC_ACT_{id_grupo_elegido}.pdf"}) # Añadir PDF para compras
                                     asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
