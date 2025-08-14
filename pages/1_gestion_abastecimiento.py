@@ -410,44 +410,30 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
     pdf.cell(55, 10, 'TOTAL A PAGAR', 1, 0, 'R'); pdf.cell(35, 10, f"${total_general:,.2f}", 1, 1, 'R')
     return bytes(pdf.output())
 
-# --- CORRECCIÓN: Función de Excel Estandarizada ---
-# Esta función ahora crea un excel con formato unificado de peso y costo.
+# --- INICIO DEL BLOQUE CORREGIDO: Función de Excel Estandarizada y Robusta ---
 def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
-    """Genera un archivo Excel en memoria a partir de un DataFrame, con formato unificado."""
+    """
+    Genera un archivo Excel en memoria a partir de un DataFrame, con formato unificado y cálculo de ancho de columna robusto.
+    """
     output = io.BytesIO()
     nombre_hoja_truncado = nombre_hoja[:31]
     
     df_excel = df.copy()
     
-    # Mapeo de columnas a un formato estándar
-    # Este mapa es flexible para manejar ligeras variaciones en los nombres de las columnas
+    # Mapa flexible para estandarizar nombres de columnas
     rename_map = {
-        # Cantidad
-        'Uds a Enviar': 'Cantidad',
-        'Uds a Comprar': 'Cantidad',
-        'Cantidad_Solicitada': 'Cantidad',
-        # Origen
-        'Tienda Origen': 'Origen',
-        'Proveedor': 'Origen',
-        # Destino
-        'Tienda Destino': 'Destino',
-        'Tienda_Destino': 'Destino',
-        'Tienda': 'Destino',
-        # Peso Unitario
-        'Peso Individual (kg)': 'Peso_Unitario_kg',
-        'Peso_Articulo': 'Peso_Unitario_kg',
-        # Peso Total
+        'Uds a Enviar': 'Cantidad', 'Uds a Comprar': 'Cantidad', 'Cantidad_Solicitada': 'Cantidad',
+        'Tienda Origen': 'Origen', 'Proveedor': 'Origen',
+        'Tienda Destino': 'Destino', 'Tienda_Destino': 'Destino', 'Tienda': 'Destino',
+        'Peso Individual (kg)': 'Peso_Unitario_kg', 'Peso_Articulo': 'Peso_Unitario_kg',
         'Peso Total (kg)': 'Peso_Total_kg',
-        # Costo Unitario
         'Costo_Promedio_UND': 'Costo_Unitario',
-        # Costo Total
-        'Valor del Traslado': 'Costo_Total',
-        'Valor de la Compra': 'Costo_Total',
+        'Valor del Traslado': 'Costo_Total', 'Valor de la Compra': 'Costo_Total',
     }
 
     df_excel.rename(columns=rename_map, inplace=True)
 
-    # Asegurar que las columnas calculadas existen
+    # Asegurar que las columnas calculadas existen y son numéricas
     if 'Cantidad' in df_excel.columns:
         df_excel['Cantidad'] = pd.to_numeric(df_excel['Cantidad'], errors='coerce').fillna(0)
         
@@ -461,10 +447,8 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
             if 'Costo_Total' not in df_excel.columns:
                 df_excel['Costo_Total'] = df_excel['Cantidad'] * df_excel['Costo_Unitario']
 
-    # Definir el orden final y las columnas a mostrar
+    # Definir el orden final y seleccionar columnas existentes
     COLS_FINALES_EXCEL = ['SKU', 'Descripcion', 'Cantidad', 'Origen', 'Destino', 'Peso_Unitario_kg', 'Peso_Total_kg', 'Costo_Unitario', 'Costo_Total']
-    
-    # Seleccionar solo las columnas que existen en el DataFrame después del renombrado
     cols_existentes_en_df = [col for col in COLS_FINALES_EXCEL if col in df_excel.columns]
     df_final = df_excel[cols_existentes_en_df].fillna('')
     
@@ -477,52 +461,46 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
         df_final.to_excel(writer, index=False, sheet_name=nombre_hoja_truncado, startrow=1)
         workbook, worksheet = writer.book, writer.sheets[nombre_hoja_truncado]
         
-        # Formatos
+        # Formatos de celda
         header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top', 'fg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
         money_format = workbook.add_format({'num_format': '$#,##0.00'})
         weight_format = workbook.add_format({'num_format': '0.00 "kg"'})
         
-        # Escribir cabeceras
+        # Escribir cabeceras con formato
         for col_num, value in enumerate(df_final.columns.values): 
             worksheet.write(0, col_num, value.replace('_', ' ').title(), header_format)
 
-        # Aplicar formatos a columnas
+        # Aplicar formatos numéricos a columnas específicas
         col_map = {col: i for i, col in enumerate(df_final.columns)}
         if 'Costo_Unitario' in col_map: worksheet.set_column(col_map['Costo_Unitario'], col_map['Costo_Unitario'], 15, money_format)
         if 'Costo_Total' in col_map: worksheet.set_column(col_map['Costo_Total'], col_map['Costo_Total'], 15, money_format)
         if 'Peso_Unitario_kg' in col_map: worksheet.set_column(col_map['Peso_Unitario_kg'], col_map['Peso_Unitario_kg'], 15, weight_format)
         if 'Peso_Total_kg' in col_map: worksheet.set_column(col_map['Peso_Total_kg'], col_map['Peso_Total_kg'], 15, weight_format)
 
-        # --- INICIO DEL BLOQUE CORREGIDO ---
-        # Ajustar anchos de columna automáticamente
+        # Lógica robusta para ajustar anchos de columna automáticamente
         for i, col in enumerate(df_final.columns):
-            # Obtener la longitud del encabezado
+            # Omitir columnas con formato especial ya definido
+            if col in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
+                continue
+
+            # Calcular longitud del encabezado
             header_len = len(str(col))
 
-            # Obtener la longitud máxima de los datos en la columna
-            try:
-                # .astype(str) maneja varios tipos de datos, incluidos números y NaN
-                # .str.len() obtiene la longitud de cada representación de cadena
-                # .max() obtiene la longitud máxima. Esto generará un error en una serie vacía.
-                data_max_len = df_final[col].astype(str).str.len().max()
-            except (ValueError, TypeError):
-                # Esto sucede si la columna está vacía, por lo que no hay datos.
+            # Calcular longitud máxima de los datos en la columna de forma segura
+            if not df_final[col].empty:
+                # Usar una list comprehension para convertir todo a string y obtener la longitud.
+                # `default=0` previene errores en secuencias vacías.
+                data_max_len = max((len(str(x)) for x in df_final[col]), default=0)
+            else:
                 data_max_len = 0
             
-            # Usar el mayor de los dos y convertir a int por si .max() devolvió un float
-            # Agregar un búfer para el relleno
-            # pd.notna es una comprobación segura para NaN, aunque la lógica del try/except ya lo maneja
-            if pd.notna(data_max_len):
-              max_len = max(header_len, int(data_max_len)) + 2
-            else:
-              max_len = header_len + 2
-
-            # No ajustar el ancho de las columnas con formato numérico especial
-            if col not in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
-                worksheet.set_column(i, i, min(max_len, 50))
-        # --- FIN DEL BLOQUE CORREGIDO ---
+            # Usar el valor mayor (encabezado o datos) y añadir un búfer.
+            # Limitar el ancho máximo a 50 para evitar columnas excesivamente anchas.
+            max_len = max(header_len, data_max_len) + 2
+            worksheet.set_column(i, i, min(max_len, 50))
             
     return output.getvalue()
+# --- FIN DEL BLOQUE CORREGIDO ---
 
 
 # --- DICCIONARIOS DE CONTACTO Y DIRECCIONES ---
@@ -843,7 +821,7 @@ if active_tab == tab_titles[1]:
 
                         if st.form_submit_button("✅ Enviar y Registrar Traslado", use_container_width=True, type="primary"):
                             with st.spinner("Registrando traslado y enviando notificaciones..."):
-                                # CORRECCIÓN: Usar el DataFrame original (df_seleccionados_traslado_full) para el correo, 
+                                # Usar el DataFrame original (df_seleccionados_traslado_full) para el correo, 
                                 # ya que `registrar_ordenes_en_sheets` devuelve un df con nombres de columna para GSheets.
                                 df_para_notificar_email = df_seleccionados_traslado_full.copy()
                                 
@@ -940,7 +918,7 @@ if active_tab == tab_titles[1]:
                 
                 if submitted_special:
                     with st.spinner("Procesando..."):
-                        # CORRECCIÓN: Usar el df_solicitud original para el correo
+                        # Usar el df_solicitud original para el correo
                         df_para_email_especial = df_solicitud.copy()
                         exito, msg, df_reg_gsheets = registrar_ordenes_en_sheets(client, df_solicitud, "Traslado Especial", tienda_destino=tienda_destino_especial)
                         if exito:
@@ -1115,7 +1093,7 @@ if active_tab == tab_titles[2]:
                                 if not email_dest: st.warning("Se necesita un correo para enviar la orden.")
                                 else:
                                     with st.spinner(f"Procesando orden para {proveedor}..."):
-                                        # CORRECCIÓN: Usar df_grupo para la notificación, no el resultado de Gsheets
+                                        # Usar df_grupo para la notificación, no el resultado de Gsheets
                                         df_para_notificar_compra = df_grupo.copy()
                                         exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_grupo, "Compra Sugerencia")
                                         if exito:
@@ -1147,7 +1125,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                               df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
@@ -1236,12 +1214,12 @@ if active_tab == tab_titles[3]:
         df_ordenes_vista_original = df_ordenes_historico.copy().sort_values(by="Fecha_Emision", ascending=False)
         df_ordenes_vista_original['Proveedor'] = df_ordenes_vista_original['Proveedor'].astype(str).fillna('N/A')
         
-        # --- MODIFICACIÓN: Convertir a numérico las nuevas columnas de peso ---
+        # Convertir a numérico las columnas de costo y peso
         for col in ['Costo_Total', 'Cantidad_Solicitada', 'Costo_Unitario', 'Peso_Unitario_kg', 'Peso_Total_kg']:
             if col in df_ordenes_vista_original.columns:
                 df_ordenes_vista_original[col] = pd.to_numeric(df_ordenes_vista_original[col], errors='coerce').fillna(0)
         
-        # --- FIX: Recalcular explícitamente el peso total para asegurar que no sea cero si la data de origen es incorrecta ---
+        # Recalcular explícitamente el peso total para asegurar consistencia
         if 'Cantidad_Solicitada' in df_ordenes_vista_original.columns and 'Peso_Unitario_kg' in df_ordenes_vista_original.columns:
             df_ordenes_vista_original['Peso_Total_kg'] = df_ordenes_vista_original['Cantidad_Solicitada'] * df_ordenes_vista_original['Peso_Unitario_kg']
 
@@ -1266,7 +1244,7 @@ if active_tab == tab_titles[3]:
         if filtro_proveedor_orden != "Todos": df_ordenes_filtradas = df_ordenes_filtradas[df_ordenes_filtradas['Proveedor'] == filtro_proveedor_orden]
         if filtro_tienda_orden != "Todos": df_ordenes_filtradas = df_ordenes_filtradas[df_ordenes_filtradas['Tienda_Destino'] == filtro_tienda_orden]
 
-        # --- MODIFICACIÓN: Vista resumida ahora incluye Peso Total ---
+        # Vista resumida ahora incluye Peso Total
         if not df_ordenes_filtradas.empty:
             df_summary = df_ordenes_filtradas.groupby('ID_Grupo').agg(
                 Fecha_Emision=('Fecha_Emision', 'first'),
@@ -1279,10 +1257,10 @@ if active_tab == tab_titles[3]:
             ).reset_index().sort_values(by="Fecha_Emision", ascending=False)
             
             st.dataframe(df_summary, use_container_width=True, hide_index=True,
-                         column_config={
-                             "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
-                             "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
-                         })
+                            column_config={
+                                "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
+                                "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
+                            })
         else:
             st.info("No hay órdenes que coincidan con los filtros seleccionados.")
             df_summary = pd.DataFrame() 
@@ -1337,7 +1315,6 @@ if active_tab == tab_titles[3]:
                                     st.error(f"❌ Error al actualizar la hoja de Google: {msg}")
 
             # --- MODIFICACIÓN DETALLADA (EN EXPANDER) ---
-            # FIX: Set expanded=True to prevent the UI from collapsing after an interaction inside it.
             with st.expander("Modificación Detallada: Editar, Añadir o Eliminar Ítems", expanded=True):
                 if st.session_state.order_to_edit != id_grupo_elegido:
                     df_orden_completa = df_ordenes_vista_original[df_ordenes_vista_original['ID_Grupo'] == id_grupo_elegido].copy()
@@ -1439,12 +1416,11 @@ if active_tab == tab_titles[3]:
                             st.error(f"Error al guardar los cambios: {msg}")
                 
             # --- NOTIFICACIONES Y DESCARGA (EN EXPANDER) ---
-            # FIX: Set expanded=True so the user immediately sees the next actions.
             with st.expander("Descargar y Notificar Orden", expanded=True):
                 df_para_notificar = st.session_state.orden_a_editar_df.copy()
                 df_para_notificar = df_para_notificar[df_para_notificar['Borrar'] == False]
                 
-                # --- NUEVO: Botón de descarga de Excel ---
+                # --- Botón de descarga de Excel ---
                 st.markdown("##### Descargar Orden en Formato Excel")
                 excel_bytes_seguimiento = generar_excel_dinamico(df_para_notificar, f"Orden_{id_grupo_elegido}", "Seguimiento")
                 st.download_button(
