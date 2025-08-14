@@ -156,14 +156,16 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
         id_grupo = f"TR-{timestamp}"
         df_registro['Proveedor'] = "TRASLADO INTERNO: " + df_registro['Tienda Origen']
         df_registro['Tienda_Destino'] = df_registro['Tienda Destino']
-        df_registro['Costo_Unitario'] = 0 # Traslados no tienen costo de compra
-        df_registro['Costo_Total'] = 0
+        # Corrección: Mantener el costo para traslados para valorar el inventario movido
+        # df_registro['Costo_Unitario'] = 0 # Traslados no tienen costo de compra
+        # df_registro['Costo_Total'] = 0
     elif tipo_orden == "Traslado Especial":
         id_grupo = f"TR-SP-{timestamp}"
         df_registro['Proveedor'] = "TRASLADO INTERNO: " + df_registro['Tienda Origen']
         df_registro['Tienda_Destino'] = tienda_destino
-        df_registro['Costo_Unitario'] = 0 # Traslados no tienen costo de compra
-        df_registro['Costo_Total'] = 0
+        # Corrección: Mantener el costo para traslados
+        # df_registro['Costo_Unitario'] = 0 # Traslados no tienen costo de compra
+        # df_registro['Costo_Total'] = 0
 
     df_registro['ID_Grupo'] = id_grupo
     df_registro['ID_Orden'] = [f"{id_grupo}-{i+1}" for i in range(len(df_registro))]
@@ -325,7 +327,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}        |       {self.empresa_email}        |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -701,8 +703,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                          left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                          ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                              left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                              ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -717,7 +719,7 @@ if active_tab == tab_titles[1]:
                         "Seleccionar", "SKU", "Descripcion", "Stock en Origen", "Stock en Destino",
                         "Uds a Enviar", "Stock_En_Transito", "Tienda Origen", "Tienda Destino",
                         "Necesidad en Destino", "Proveedor", "Marca_Nombre", "Segmento_ABC",
-                        "Peso Total (kg)", "Peso Individual (kg)"
+                        "Costo_Promedio_UND", "Valor del Traslado", "Peso Total (kg)", "Peso Individual (kg)"
                     ]
                     
                     display_columns = [col for col in column_order if col in st.session_state.df_traslados_editor.columns]
@@ -750,11 +752,9 @@ if active_tab == tab_titles[1]:
                     if deselect_all_t:
                         edited_df_traslados['Seleccionar'] = False
 
-                    # MODIFICACIÓN: Se elimina el st.rerun() para un flujo más suave. 
-                    # Los cambios se aplicarán al presionar "Confirmar Cambios".
                     if select_all_t or deselect_all_t:
                         st.session_state.df_traslados_editor = edited_df_traslados
-                        # st.rerun() <-- REMOVED
+                        st.rerun()
 
                     if submitted:
                         st.session_state.df_traslados_editor = edited_df_traslados
@@ -1000,10 +1000,9 @@ if active_tab == tab_titles[2]:
                 if deselect_all:
                     edited_df['Seleccionar'] = False
 
-                # MODIFICACIÓN: Se elimina el st.rerun() para un flujo más suave.
                 if select_all or deselect_all:
                     st.session_state.df_compras_editor = edited_df
-                    # st.rerun() <-- REMOVED
+                    st.rerun()
                 
                 if confirm_changes:
                     st.session_state.df_compras_editor = edited_df
@@ -1350,7 +1349,7 @@ if active_tab == tab_titles[3]:
                                 if not items_a_anadir.empty:
                                     current_order = st.session_state.orden_a_editar_df
                                     new_items_list = []
-                                    max_suffix = max([int(i.split('-')[-1]) for i in current_order['ID_Orden']]) if not current_order.empty and any('-' in s for s in current_order['ID_Orden']) else len(current_order)
+                                    max_suffix = max([int(i.split('-')[-1]) for i in current_order['ID_Orden'] if '-' in i]) if not current_order.empty and any('-' in s for s in current_order['ID_Orden']) else len(current_order)
 
                                     for i, row in items_a_anadir.iterrows():
                                         new_item = {
@@ -1374,7 +1373,7 @@ if active_tab == tab_titles[3]:
                                     df_new_items = pd.DataFrame(new_items_list)
                                     st.session_state.orden_a_editar_df = pd.concat([current_order, df_new_items], ignore_index=True)
                                     st.success(f"{len(df_new_items)} ítem(s) añadidos. Haga clic en 'Guardar Cambios' para finalizar.")
-                                    # No rerun needed here, the UI will update smoothly on the next interaction.
+                                    st.rerun()
 
                 # Botón para guardar cambios detallados
                 if st.button("💾 Guardar Cambios Detallados (cantidades, ítems añadidos/borrados)", use_container_width=True):
@@ -1431,7 +1430,7 @@ if active_tab == tab_titles[3]:
                         email_val = f"{contacto_info_origen.get('email', '')},{contacto_info_destino.get('email', '')}"
                         nombre_val = contacto_info_origen.get('nombre', '')
                         celular_val = contacto_info_destino.get('celular', '') # Notificar al que recibe
-                    else:
+                    else: # Es Compra
                         contacto_info = CONTACTOS_PROVEEDOR.get(proveedor_orden.upper(), {})
                         email_val = contacto_info.get('email', '')
                         nombre_val = contacto_info.get('nombre', '')
