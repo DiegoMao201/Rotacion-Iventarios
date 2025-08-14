@@ -328,7 +328,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}        |       {self.empresa_email}        |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -494,8 +494,14 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
         if 'Peso_Total_kg' in col_map: worksheet.set_column(col_map['Peso_Total_kg'], col_map['Peso_Total_kg'], 15, weight_format)
 
         for i, col in enumerate(df_final.columns):
+            # --- INICIO DE LA CORRECCIÓN ---
+            # Se simplifica el cálculo del ancho máximo de la columna para evitar el error.
+            # La comprobación `pd.notna` se elimina porque es redundante después de `.fillna('')`
+            # y es la fuente del error `ValueError`.
             column_len = df_final[col].astype(str).map(len).max()
-            max_len = max(column_len if pd.notna(column_len) else 0, len(col)) + 2
+            max_len = max(column_len, len(col)) + 2
+            # --- FIN DE LA CORRECCIÓN ---
+            
             # No sobreescribir el ancho de las columnas con formato especial
             if col not in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
                 worksheet.set_column(i, i, min(max_len, 50))
@@ -709,8 +715,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                            left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                            ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                                left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                                ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -1125,7 +1131,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                                df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                                 df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
