@@ -328,7 +328,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -486,36 +486,42 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
         for col_num, value in enumerate(df_final.columns.values): 
             worksheet.write(0, col_num, value.replace('_', ' ').title(), header_format)
 
-        # Aplicar formatos a columnas y ajustar anchos
+        # Aplicar formatos a columnas
         col_map = {col: i for i, col in enumerate(df_final.columns)}
         if 'Costo_Unitario' in col_map: worksheet.set_column(col_map['Costo_Unitario'], col_map['Costo_Unitario'], 15, money_format)
         if 'Costo_Total' in col_map: worksheet.set_column(col_map['Costo_Total'], col_map['Costo_Total'], 15, money_format)
         if 'Peso_Unitario_kg' in col_map: worksheet.set_column(col_map['Peso_Unitario_kg'], col_map['Peso_Unitario_kg'], 15, weight_format)
         if 'Peso_Total_kg' in col_map: worksheet.set_column(col_map['Peso_Total_kg'], col_map['Peso_Total_kg'], 15, weight_format)
 
+        # --- INICIO DEL BLOQUE CORREGIDO ---
+        # Ajustar anchos de columna automáticamente
         for i, col in enumerate(df_final.columns):
-            # Calcular el largo máximo de la columna de forma segura
-            if not df_final[col].empty:
-                column_lens = df_final[col].astype(str).map(len)
-                if len(column_lens) == 0:
-                    column_len = 0
-                else:
-                    column_len = column_lens.max()
-                # Si es nan, pon 0
-                if pd.isnull(column_len):
-                    column_len = 0
-            else:
-                column_len = 0
-            # Convierte a int de forma segura
-            try:
-                column_len_int = int(column_len)
-            except Exception:
-                column_len_int = 0
-            max_len = max(column_len_int, len(str(col))) + 2
+            # Obtener la longitud del encabezado
+            header_len = len(str(col))
 
+            # Obtener la longitud máxima de los datos en la columna
+            try:
+                # .astype(str) maneja varios tipos de datos, incluidos números y NaN
+                # .str.len() obtiene la longitud de cada representación de cadena
+                # .max() obtiene la longitud máxima. Esto generará un error en una serie vacía.
+                data_max_len = df_final[col].astype(str).str.len().max()
+            except (ValueError, TypeError):
+                # Esto sucede si la columna está vacía, por lo que no hay datos.
+                data_max_len = 0
+            
+            # Usar el mayor de los dos y convertir a int por si .max() devolvió un float
+            # Agregar un búfer para el relleno
+            # pd.notna es una comprobación segura para NaN, aunque la lógica del try/except ya lo maneja
+            if pd.notna(data_max_len):
+              max_len = max(header_len, int(data_max_len)) + 2
+            else:
+              max_len = header_len + 2
+
+            # No ajustar el ancho de las columnas con formato numérico especial
             if col not in ['Costo_Unitario', 'Costo_Total', 'Peso_Unitario_kg', 'Peso_Total_kg']:
                 worksheet.set_column(i, i, min(max_len, 50))
-                
+        # --- FIN DEL BLOQUE CORREGIDO ---
+            
     return output.getvalue()
 
 
@@ -725,8 +731,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                              left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                              ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                            left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                            ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -1141,7 +1147,7 @@ if active_tab == tab_titles[2]:
         search_term_compra_esp = st.text_input("Buscar producto por SKU o Descripción para compra especial:", key="search_compra_especial")
         if search_term_compra_esp:
             mask_compra_esp = (df_maestro['SKU'].str.contains(search_term_compra_esp, case=False, na=False) | 
-                                 df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
+                               df_maestro['Descripcion'].str.contains(search_term_compra_esp, case=False, na=False))
             df_resultados_compra_esp = df_maestro[mask_compra_esp].drop_duplicates(subset=['SKU']).copy()
 
             if not df_resultados_compra_esp.empty:
