@@ -305,7 +305,7 @@ class PDF(FPDF):
         font_name = self.font_family
         try:
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            logo_path = os.path.join(script_dir, 'Logo Ferreinox SAS BIC 2024.png')
+            logo_path = os.path.join(script_dir, 'LOGO FERREINOX SAS BIC 2024.png')
             
             if os.path.exists(logo_path):
                 self.image(logo_path, x=10, y=8, w=65)
