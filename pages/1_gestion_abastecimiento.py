@@ -328,7 +328,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}       |       {self.empresa_email}       |       {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}     |       {self.empresa_web}        |       {self.empresa_email}        |       {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -692,8 +692,11 @@ if active_tab == tab_titles[1]:
         else:
             st.markdown("##### Filtros Avanzados de Traslados")
             f_col1, f_col2, f_col3 = st.columns(3)
-            lista_origenes = ["Todas"] + sorted(df_plan_maestro['Tienda Origen'].unique().tolist())
-            filtro_origen = f_col1.selectbox("Filtrar por Tienda Origen:", lista_origenes, key="filtro_origen")
+            
+            # --- INICIO DE MODIFICACIÓN: FILTRO DE ORIGEN A MULTISELECT ---
+            lista_origenes = sorted(df_plan_maestro['Tienda Origen'].unique().tolist())
+            filtro_origen = f_col1.multiselect("Filtrar por Tienda(s) Origen:", lista_origenes, default=lista_origenes, key="filtro_origen_multi")
+            # --- FIN DE MODIFICACIÓN ---
 
             lista_destinos = ["Todas"] + sorted(df_plan_maestro['Tienda Destino'].unique().tolist())
             filtro_destino = f_col2.selectbox("Filtrar por Tienda Destino:", lista_destinos, key="filtro_destino")
@@ -704,13 +707,18 @@ if active_tab == tab_titles[1]:
             current_filters = f"{filtro_origen}-{filtro_destino}-{filtro_proveedor_traslado}"
             if st.session_state.last_filters_traslados != current_filters:
                 df_aplicar_filtros = df_plan_maestro.copy()
-                if filtro_origen != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Origen'] == filtro_origen]
+                
+                # --- INICIO DE MODIFICACIÓN: LÓGICA DE FILTRADO PARA MULTISELECT ---
+                if filtro_origen: 
+                    df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Origen'].isin(filtro_origen)]
+                # --- FIN DE MODIFICACIÓN ---
+                
                 if filtro_destino != "Todas": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Tienda Destino'] == filtro_destino]
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                            left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                            ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                              left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                              ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -991,8 +999,10 @@ if active_tab == tab_titles[2]:
         proveedores_disponibles = ["Todos"] + sorted([p for p in df_plan_compras_base['Proveedor'].unique() if p and p != 'NAN'])
         selected_proveedor = f_c2.selectbox("Filtrar por Proveedor:", proveedores_disponibles, key="sb_proveedores")
         
-        marcas_con_sugerencia = ["Todas"] + sorted([m for m in df_plan_compras_base['Marca_Nombre'].unique() if m and pd.notna(m)])
-        filtro_marca_compra = f_c3.selectbox("Filtrar por Marca:", marcas_con_sugerencia, key="filtro_marca_compra")
+        # --- INICIO DE MODIFICACIÓN: FILTRO DE MARCA A MULTISELECT ---
+        marcas_con_sugerencia = sorted([m for m in df_plan_compras_base['Marca_Nombre'].unique() if m and pd.notna(m)])
+        filtro_marca_compra = f_c3.multiselect("Filtrar por Marca(s):", marcas_con_sugerencia, default=marcas_con_sugerencia, key="filtro_marca_compra_multi")
+        # --- FIN DE MODIFICACIÓN ---
         
         current_filters = f"{filtro_tienda_compra}-{selected_proveedor}-{filtro_marca_compra}"
         if st.session_state.last_filters_compras != current_filters:
@@ -1001,8 +1011,11 @@ if active_tab == tab_titles[2]:
                 df_temp = df_temp[df_temp['Almacen_Nombre'] == filtro_tienda_compra]
             if selected_proveedor != 'Todos':
                 df_temp = df_temp[df_temp['Proveedor'] == selected_proveedor]
-            if filtro_marca_compra != "Todas":
-                df_temp = df_temp[df_temp['Marca_Nombre'] == filtro_marca_compra]
+            
+            # --- INICIO DE MODIFICACIÓN: LÓGICA DE FILTRADO PARA MULTISELECT ---
+            if filtro_marca_compra:
+                df_temp = df_temp[df_temp['Marca_Nombre'].isin(filtro_marca_compra)]
+            # --- FIN DE MODIFICACIÓN ---
             
             df_a_mostrar = df_temp.copy()
             df_a_mostrar['Uds a Comprar'] = df_a_mostrar['Sugerencia_Compra'].apply(np.ceil).astype(int)
