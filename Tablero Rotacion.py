@@ -4,7 +4,7 @@ import numpy as np
 import dropbox
 import io
 from datetime import datetime
-import time  # ✨ NUEVO: Importamos la librería time para una pequeña pausa visual
+import time
 
 # --- 0. CONFIGURACIÓN INICIAL ---
 st.set_page_config(
@@ -102,7 +102,7 @@ def cargar_proveedores_desde_dropbox():
                 df_proveedores = pd.read_excel(stream, dtype={'REFERENCIA': str, 'COD PROVEEDOR': str})
 
         df_proveedores.rename(columns={
-            'REFERENCIA': 'SKU', 
+            'REFERENCIA': 'SKU',
             'PROVEEDOR': 'Proveedor',
             'COD PROVEEDOR': 'SKU_Proveedor'
         }, inplace=True)
@@ -115,16 +115,45 @@ def cargar_proveedores_desde_dropbox():
         info_message.error(f"No se pudo cargar '{proveedores_path}' desde Dropbox: {e}. La información de proveedores no estará disponible.", icon="🔥")
         return pd.DataFrame(columns=['SKU', 'Proveedor', 'SKU_Proveedor'])
 
+# ✨ NUEVA FUNCIÓN: Lógica para limpiar duplicados de SKU por almacén
+def limpiar_duplicados_sku_por_almacen(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # Agrupar por las columnas clave y sumar o tomar la primera aparición
+    agg_funcs = {
+        'DEPARTAMENTO': 'first',
+        'REFERENCIA': 'first',
+        'DESCRIPCION': 'first',
+        'MARCA': 'first',
+        'PESO_ARTICULO': 'first',
+        'UNIDADES_VENDIDAS': 'sum',
+        'STOCK': 'sum',
+        'COSTO_PROMEDIO_UND': 'first', # Asumimos que el costo promedio es el mismo
+        'CODALMACEN': 'first',
+        'LEAD_TIME_PROVEEDOR': 'first',
+        'HISTORIAL_VENTAS': lambda x: ','.join(x.astype(str).unique()) # Combina los historiales de ventas únicos
+    }
+
+    # Eliminar 'HISTORIAL_VENTAS' si todas sus filas son nulas, para evitar errores en la lambda
+    if df['HISTORIAL_VENTAS'].isnull().all():
+        del agg_funcs['HISTORIAL_VENTAS']
+        
+    df_agrupado = df.groupby(['REFERENCIA', 'CODALMACEN'], as_index=False).agg(agg_funcs)
+    
+    return df_agrupado
+
 # --- LÓGICA DE ANÁLISIS DE INVENTARIO ---
 @st.cache_data
 def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, dias_objetivo=None):
     if _df_crudo is None or _df_crudo.empty:
         return pd.DataFrame()
 
+    # Llama a la nueva función de limpieza
+    df = limpiar_duplicados_sku_por_almacen(_df_crudo.copy())
+    
     if dias_objetivo is None:
         dias_objetivo = {'A': 30, 'B': 45, 'C': 60}
-
-    df = _df_crudo.copy()
 
     # 1. Limpieza y Preparación
     column_mapping = {
@@ -216,7 +245,7 @@ if st.button("🔄 Actualizar Datos de Inventario", help="Borra la memoria cach�
     time.sleep(1)
     st.rerun()
 
-st.markdown("---")  # ✨ NUEVO: Separador visual
+st.markdown("---")
 
 # Cargar ambos dataframes desde Dropbox
 df_crudo = cargar_datos_desde_dropbox()
@@ -242,7 +271,6 @@ if df_crudo is not None and not df_crudo.empty:
 
     st.session_state['df_analisis_maestro'] = df_analisis_completo.copy()
 
-    # --- EL RESTO DE LA PÁGINA ES IDÉNTICO Y NO REQUIERE CAMBIOS ---
     if st.session_state.user_role == 'tienda':
         st.session_state['df_analisis'] = df_analisis_completo[df_analisis_completo['Almacen_Nombre'] == st.session_state.almacen_nombre]
     else:
@@ -296,11 +324,11 @@ if df_crudo is not None and not df_crudo.empty:
         if not df_filtered.empty:
             valor_excedente_total = valor_sobrestock + valor_baja_rotacion
             porc_excedente = (valor_excedente_total / valor_total_inv) * 100 if valor_total_inv > 0 else 0
-            if skus_quiebre > 10: 
+            if skus_quiebre > 10:
                 st.error(f"🚨 **Alerta de Abastecimiento:** ¡Atención! La tienda **{selected_almacen_nombre}** tiene **{skus_quiebre} productos en quiebre de stock**. Usa el módulo 'Atender Quiebres' para actuar.", icon="🚨")
-            elif porc_excedente > 30: 
+            elif porc_excedente > 30:
                 st.warning(f"💸 **Oportunidad de Capital:** En **{selected_almacen_nombre}**, más del **{porc_excedente:.1f}%** del inventario es excedente. El problema principal está en: {'Baja Rotación' if valor_baja_rotacion > valor_sobrestock else 'Sobre-stock'}.", icon="💸")
-            else: 
+            else:
                 st.success(f"✅ **Inventario Saludable:** La tienda **{selected_almacen_nombre}** mantiene un buen balance.", icon="✅")
         elif st.session_state.get('user_role') == 'gerente' and selected_almacen_nombre == "-- Consolidado (Todas las Tiendas) --":
             st.info("Selecciona una tienda específica en el filtro para ver su diagnóstico detallado.")
