@@ -327,7 +327,7 @@ class PDF(FPDF):
         font_name = self.font_family
         self.set_y(-20); self.set_draw_color(*self.color_rojo_ferreinox); self.set_line_width(1); self.line(10, self.get_y(), 200, self.get_y())
         self.ln(2); self.set_font(font_name, '', 8); self.set_text_color(128, 128, 128)
-        footer_text = f"{self.empresa_nombre}      |        {self.empresa_web}         |        {self.empresa_email}         |        {self.empresa_tel}"
+        footer_text = f"{self.empresa_nombre}      |      {self.empresa_web}      |      {self.empresa_email}      |      {self.empresa_tel}"
         self.cell(0, 10, footer_text, 0, 0, 'C')
         self.set_y(-12); self.cell(0, 10, f'Página {self.page_no()}', 0, 0, 'C')
 
@@ -716,8 +716,8 @@ if active_tab == tab_titles[1]:
                 if filtro_proveedor_traslado != "Todos": df_aplicar_filtros = df_aplicar_filtros[df_aplicar_filtros['Proveedor'] == filtro_proveedor_traslado]
 
                 df_para_editar = pd.merge(df_aplicar_filtros, df_maestro[['SKU', 'Almacen_Nombre', 'Stock_En_Transito']],
-                                          left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
-                                          ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
+                                         left_on=['SKU', 'Tienda Destino'], right_on=['SKU', 'Almacen_Nombre'], how='left'
+                                         ).drop(columns=['Almacen_Nombre']).fillna({'Stock_En_Transito': 0})
                 df_para_editar['Seleccionar'] = False
                 st.session_state.df_traslados_editor = df_para_editar.copy()
                 st.session_state.last_filters_traslados = current_filters
@@ -1217,59 +1217,61 @@ if active_tab == tab_titles[2]:
             st.markdown("---")
             st.markdown("##### 2. Revisar y generar la Orden de Compra Especial")
 
-            with st.form("form_compra_especial"):
-                df_compra_especial_actual = pd.DataFrame(st.session_state.compra_especial_items)
-                
-                edited_df_compra_especial = st.data_editor(
-                    df_compra_especial_actual,
-                    key="editor_lista_compra_especial",
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        'Uds a Comprar': st.column_config.NumberColumn(min_value=0, step=1, required=True),
-                        'Costo_Promedio_UND': st.column_config.NumberColumn(format="$%.2f", required=True),
-                        'Peso_Articulo': st.column_config.NumberColumn(label="Peso Unit. (kg)", format="%.2f kg", required=True),
-                        'Borrar': st.column_config.CheckboxColumn(required=True)
-                    },
-                    disabled=['SKU', 'Descripcion', 'Proveedor']
+            df_compra_especial_actual = pd.DataFrame(st.session_state.compra_especial_items)
+            
+            edited_df_compra_especial = st.data_editor(
+                df_compra_especial_actual,
+                key="editor_lista_compra_especial",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Uds a Comprar': st.column_config.NumberColumn(min_value=0, step=1, required=True),
+                    'Costo_Promedio_UND': st.column_config.NumberColumn(format="$%.2f", required=True),
+                    'Peso_Articulo': st.column_config.NumberColumn(label="Peso Unit. (kg)", format="%.2f kg", required=True),
+                    'Borrar': st.column_config.CheckboxColumn(required=True)
+                },
+                disabled=['SKU', 'Descripcion', 'Proveedor']
+            )
+
+            # Update session state with the edited dataframe
+            st.session_state.compra_especial_items = edited_df_compra_especial.to_dict('records')
+
+            st.markdown("---")
+            st.markdown("##### 3. Información del Proveedor y Destino")
+            proveedor_especial = st.text_input("Nombre del Proveedor:", key="proveedor_especial_nombre")
+            tienda_destino_especial_compra = st.selectbox("Tienda Destino:", almacenes_disponibles, key="tienda_destino_compra_esp")
+            
+            contacto_info_esp = CONTACTOS_PROVEEDOR.get(proveedor_especial.upper(), {})
+            contacto_tienda_esp = CONTACTOS_TIENDAS.get(tienda_destino_especial_compra, {})
+            email_proveedor_esp = contacto_info_esp.get('email', '')
+            email_tienda_esp = contacto_tienda_esp.get('email', '')
+            emails_predefinidos_compra_esp = list(set(filter(None, [email_proveedor_esp, email_tienda_esp])))
+            email_dest_esp = st.text_input("📧 Correo del proveedor y tienda (separar con coma):", value=", ".join(emails_predefinidos_compra_esp), key="email_compra_esp")
+
+            nombre_contacto_esp = st.text_input("Nombre contacto proveedor:", value=contacto_info_esp.get('nombre', ''), key="nombre_compra_esp")
+            celular_proveedor_esp = st.text_input("Celular proveedor:", value=contacto_info_esp.get('celular', ''), key="celular_compra_esp")
+
+            df_compra_especial_final = edited_df_compra_especial[edited_df_compra_especial['Borrar'] == False].copy()
+            
+            col_descarga, col_enviar, col_limpiar = st.columns([1, 1, 1])
+
+            # Botón de descarga de PDF (fuera del formulario para que funcione)
+            if not df_compra_especial_final.empty and proveedor_especial and tienda_destino_especial_compra:
+                direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_destino_especial_compra, "N/A")
+                pdf_bytes_compra_esp = generar_pdf_orden_compra(df_compra_especial_final, proveedor_especial, tienda_destino_especial_compra, direccion_entrega, nombre_contacto_esp, "Pendiente de ID")
+                col_descarga.download_button(
+                    label="📥 Descargar PDF de la Orden",
+                    data=pdf_bytes_compra_esp,
+                    file_name=f"Orden_Compra_Especial_{datetime.now().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
                 )
 
-                proveedor_especial = st.text_input("Nombre del Proveedor:", key="proveedor_especial_nombre")
-                tienda_destino_especial_compra = st.selectbox("Tienda Destino:", almacenes_disponibles, key="tienda_destino_compra_esp")
-                
-                contacto_info_esp = CONTACTOS_PROVEEDOR.get(proveedor_especial.upper(), {})
-                contacto_tienda_esp = CONTACTOS_TIENDAS.get(tienda_destino_especial_compra, {})
-                email_proveedor_esp = contacto_info_esp.get('email', '')
-                email_tienda_esp = contacto_tienda_esp.get('email', '')
-                emails_predefinidos_compra_esp = list(set(filter(None, [email_proveedor_esp, email_tienda_esp])))
-                email_dest_esp = st.text_input("📧 Correo del proveedor y tienda (separar con coma):", value=", ".join(emails_predefinidos_compra_esp), key="email_compra_esp")
-
-                nombre_contacto_esp = st.text_input("Nombre contacto proveedor:", value=contacto_info_esp.get('nombre', ''), key="nombre_compra_esp")
-                celular_proveedor_esp = st.text_input("Celular proveedor:", value=contacto_info_esp.get('celular', ''), key="celular_compra_esp")
-                
-                c1_esp, c2_esp, c3_esp = st.columns([2, 1, 1])
-                submitted_special_compra = c1_esp.form_submit_button("✅ Enviar y Registrar Compra Especial", use_container_width=True, type="primary")
-                cleared_special_compra = c2_esp.form_submit_button("🗑️ Limpiar Lista", use_container_width=True)
-                
-                df_compra_especial_final = edited_df_compra_especial[edited_df_compra_especial['Borrar'] == False].copy()
-                if not df_compra_especial_final.empty and proveedor_especial and tienda_destino_especial_compra:
-                    direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_destino_especial_compra, "N/A")
-                    pdf_bytes_compra_esp = generar_pdf_orden_compra(df_compra_especial_final, proveedor_especial, tienda_destino_especial_compra, direccion_entrega, nombre_contacto_esp, "Pendiente de ID")
-                    
-                    if pdf_bytes_compra_esp:
-                        c3_esp.download_button(
-                            label="📥 Descargar PDF de la Orden",
-                            data=pdf_bytes_compra_esp,
-                            file_name=f"Orden_Compra_Especial_{datetime.now().strftime('%Y%m%d')}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-
+            # Formulario para el registro y envío
+            with st.form("form_compra_especial_envio"):
+                submitted_special_compra = st.form_submit_button("✅ Enviar y Registrar Compra Especial", use_container_width=True, type="primary")
 
                 if submitted_special_compra:
-                    st.session_state.compra_especial_items = edited_df_compra_especial.to_dict('records')
-                    df_compra_especial_final = edited_df_compra_especial[edited_df_compra_especial['Borrar'] == False].copy()
-
                     if proveedor_especial and tienda_destino_especial_compra and not df_compra_especial_final.empty:
                         with st.spinner("Procesando compra especial..."):
                             exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_compra_especial_final, "Compra Especial", proveedor_nombre=proveedor_especial, tienda_destino=tienda_destino_especial_compra)
@@ -1299,10 +1301,12 @@ if active_tab == tab_titles[2]:
                                 st.error(f"❌ Error al registrar: {msg}")
                     else:
                         st.warning("Debe especificar un proveedor, una tienda de destino y tener al menos un artículo en la lista.")
-                
-                if cleared_special_compra:
-                    st.session_state.compra_especial_items = []
-                    st.rerun()
+            
+            # Botón de limpiar lista (fuera del formulario de envío)
+            if col_limpiar.button("🗑️ Limpiar Lista", key="clear_list_compra_esp", use_container_width=True):
+                st.session_state.compra_especial_items = []
+                st.rerun()
+
     # --- FIN BLOQUE MODIFICADO ---
 
 
