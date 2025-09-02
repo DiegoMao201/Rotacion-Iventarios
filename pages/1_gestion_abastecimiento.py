@@ -764,11 +764,11 @@ if active_tab == tab_titles[1]:
                     if select_all_t:
                         edited_df_traslados['Seleccionar'] = True
                         st.session_state.df_traslados_editor = edited_df_traslados.copy()
-                        st.experimental_rerun() # Rerun to update the data editor state
+                        st.rerun() # Rerun to update the data editor state
                     if deselect_all_t:
                         edited_df_traslados['Seleccionar'] = False
                         st.session_state.df_traslados_editor = edited_df_traslados.copy()
-                        st.experimental_rerun() # Rerun to update the data editor state
+                        st.rerun() # Rerun to update the data editor state
 
                     if submitted:
                         st.session_state.df_traslados_editor = edited_df_traslados
@@ -859,7 +859,7 @@ if active_tab == tab_titles[1]:
                                                 "url": generar_link_whatsapp(numero_wpp, mensaje_wpp),
                                                 "key": f"wpp_traslado_aut_{destino}"
                                             })
-                                    st.experimental_rerun()
+                                    st.rerun()
                                 else:
                                     st.error(f"❌ Error al registrar el traslado en Google Sheets: {msg_registro}")
 
@@ -911,7 +911,7 @@ if active_tab == tab_titles[1]:
                         })
                 st.success(f"{len(new_items)} producto(s) añadidos a la solicitud.")
                 st.session_state['traslado_especial_items_to_add'] = pd.DataFrame() # Clear the staging area
-                st.experimental_rerun()
+                st.rerun()
 
 
         if st.session_state.solicitud_traslado_especial:
@@ -990,13 +990,13 @@ if active_tab == tab_titles[1]:
                                         "label": f"📲 Notificar a {tienda_destino_especial}", "url": generar_link_whatsapp(celular_contacto_especial, mensaje_wpp), "key": "wpp_traslado_esp"
                                     })
                                 st.session_state.solicitud_traslado_especial = []
-                                st.experimental_rerun()
+                                st.rerun()
                             else:
                                 st.error(f"❌ Error al registrar: {msg}")
 
                 if cleared_special:
                     st.session_state.solicitud_traslado_especial = []
-                    st.experimental_rerun()
+                    st.rerun()
     # --- FIN BLOQUE MODIFICADO ---
 
 
@@ -1068,11 +1068,11 @@ if active_tab == tab_titles[2]:
                 if select_all:
                     edited_df['Seleccionar'] = True
                     st.session_state.df_compras_editor = edited_df.copy()
-                    st.experimental_rerun()
+                    st.rerun()
                 if deselect_all:
                     edited_df['Seleccionar'] = False
                     st.session_state.df_compras_editor = edited_df.copy()
-                    st.experimental_rerun()
+                    st.rerun()
                 
                 if confirm_changes:
                     st.session_state.df_compras_editor = edited_df
@@ -1169,7 +1169,7 @@ if active_tab == tab_titles[2]:
                                                 st.session_state.notificaciones_pendientes.append({
                                                     "label": f"📲 Notificar a {proveedor}", "url": generar_link_whatsapp(celular_proveedor, msg_wpp), "key": f"wpp_compra_{proveedor}_{tienda}"
                                                 })
-                                            st.experimental_rerun()
+                                            st.rerun()
                                         else:
                                             st.error(f"Error al registrar: {msg}")
 
@@ -1210,7 +1210,7 @@ if active_tab == tab_titles[2]:
                         st.session_state.compra_especial_items.append(new_item)
                 st.success(f"{len(new_items)} producto(s) añadidos a la compra especial.")
                 st.session_state['compra_especial_items_to_add'] = pd.DataFrame()
-                st.experimental_rerun()
+                st.rerun()
             
 
         if st.session_state.compra_especial_items:
@@ -1294,7 +1294,7 @@ if active_tab == tab_titles[2]:
                                     msg_wpp = f"Hola {nombre_contacto_esp}, te acabamos de enviar la Orden de Compra Especial N° {orden_id_grupo} al correo. Peso total: {peso_total_orden_esp:,.2f} kg. ¡Gracias!"
                                     st.session_state.notificaciones_pendientes.append({ "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"})
                                 st.session_state.compra_especial_items = []
-                                st.experimental_rerun()
+                                st.rerun()
                             else:
                                 st.error(f"❌ Error al registrar: {msg}")
                     else:
@@ -1302,7 +1302,7 @@ if active_tab == tab_titles[2]:
                 
                 if cleared_special_compra:
                     st.session_state.compra_especial_items = []
-                    st.experimental_rerun()
+                    st.rerun()
     # --- FIN BLOQUE MODIFICADO ---
 
 
@@ -1412,7 +1412,7 @@ if active_tab == tab_titles[3]:
                                     st.cache_data.clear()
                                     st.cache_resource.clear()
                                     st.session_state.order_to_edit = None
-                                    st.experimental_rerun()
+                                    st.rerun()
                                 else:
                                     st.error(f"❌ Error al actualizar la hoja de Google: {msg}")
 
@@ -1494,7 +1494,7 @@ if active_tab == tab_titles[3]:
                                     df_new_items = pd.DataFrame(new_items_list)
                                     st.session_state.orden_a_editar_df = pd.concat([current_order, df_new_items], ignore_index=True)
                                     st.success(f"{len(df_new_items)} ítem(s) añadidos. Haga clic en 'Guardar Cambios' para finalizar.")
-                                    st.experimental_rerun()
+                                    st.rerun()
 
                 # Botón para guardar cambios detallados
                 if st.button("💾 Guardar Cambios Detallados (cantidades, ítems añadidos/borrados)", use_container_width=True):
@@ -1513,7 +1513,7 @@ if active_tab == tab_titles[3]:
                             st.success(f"✅ Orden {id_grupo_elegido} actualizada correctamente. La página se recargará.")
                             st.session_state.order_to_edit = None
                             st.cache_data.clear()
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error(f"Error al guardar los cambios: {msg}")
                 
@@ -1598,7 +1598,7 @@ if active_tab == tab_titles[3]:
                                             "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
                                             "key": f"wpp_update_{id_grupo_elegido}"
                                         })
-                                    st.experimental_rerun()
+                                    st.rerun()
 
 # --- BLOQUE FINAL PARA MOSTRAR NOTIFICACIONES PENDIENTES ---
 if st.session_state.notificaciones_pendientes:
@@ -1612,4 +1612,4 @@ if st.session_state.notificaciones_pendientes:
     if st.button("✅ Hecho, Limpiar Notificaciones", key="finalizar_proceso_completo", type="primary"):
         st.session_state.notificaciones_pendientes = []
         st.success("Notificaciones limpiadas. La app se recargará.")
-        st.experimental_rerun()
+        st.rerun()
