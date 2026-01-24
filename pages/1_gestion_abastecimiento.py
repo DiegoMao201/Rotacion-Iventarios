@@ -809,14 +809,20 @@ if active_tab == tab_titles[1]:
                         )
                         
                         # Para TXT por tienda (descarga individual)
-                        for tienda, txt_content in txts_por_tienda.items():
-                            st.download_button(
-                                label=f"📥 Descargar TXT para {tienda}",
-                                data=txt_content,
-                                file_name=f"stockmove_{tienda.replace(' ', '_')}.txt",
-                                mime="text/plain",
-                                use_container_width=True
-                            )
+                        mapping = cargar_maestro_articulos_dropbox()
+                        df_txt = df_seleccionados_traslado_full.copy()
+                        if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
+                            df_txt['referencia'] = df_txt['SKU']
+                        txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
+
+    for tienda, txt_content in txts_por_tienda.items():
+        st.download_button(
+            label=f"📥 Descargar TXT para {tienda}",
+            data=txt_content,
+            file_name=f"stockmove_{tienda.replace(' ', '_')}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
                         
                     with st.form("form_traslado_auto_enviar"):
                         destinos_implicados = df_seleccionados_traslado_full['Tienda Destino'].unique().tolist()
@@ -851,7 +857,10 @@ if active_tab == tab_titles[1]:
                                     # 2. Generar el Excel y los TXT por tienda de origen
                                     excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
                                     mapping = cargar_maestro_articulos_dropbox()
-                                    txts_por_tienda = generar_txts_por_tienda_origen(df_seleccionados_traslado_full, mapping)
+                                    df_txt = df_seleccionados_traslado_full.copy()
+                                    if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
+                                        df_txt['referencia'] = df_txt['SKU']
+                                    txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                                     # 3. Armar la lista de adjuntos
                                     adjuntos = [
@@ -1189,7 +1198,7 @@ if active_tab == tab_titles[2]:
                                 else:
                                     with st.spinner(f"Procesando orden para {proveedor}..."):
                                         df_para_notificar_compra = df_grupo.copy()
-                                        exito, msg, df_reg = registrar_ordenes_en_sheets(client, df_grupo, "Compra Sugerencia")
+                                        exito, msg = registrar_ordenes_en_sheets(client, df_grupo, "Compra Sugerencia")
                                         if exito:
                                             st.success(f"¡Orden registrada! {msg}")
                                             orden_id_grupo = df_reg['ID_Grupo'].iloc[0] if not df_reg.empty else f"OC-{datetime.now().strftime('%f')}"
