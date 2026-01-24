@@ -867,8 +867,8 @@ if active_tab == tab_titles[1]:
                                 if exito_registro:
                                     st.success(f"✅ ¡Traslado registrado exitosamente! {msg_registro}")
                                     if email_dest_traslado:
-                                        excel_bytes_email = generar_excel_dinamico(df_para_notificar_email, "Plan_de_Traslados", "Traslado Automático")
                                         id_grupo_registrado = df_registrado_gsheets['ID_Grupo'].iloc[0]
+                                        excel_bytes_email = generar_excel_dinamico(df_para_notificar_email, "Plan_de_Traslados", "Traslado Automático")
                                         asunto = f"Nuevo Plan de Traslado Interno - {id_grupo_registrado}"
                                         cuerpo_html = f"""<html><body><p>Hola equipo,</p><p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p><p><b>ID de Grupo de Traslado:</b> {id_grupo_registrado}</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"""
                                         adjunto = [{'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}]
