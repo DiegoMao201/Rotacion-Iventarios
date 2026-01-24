@@ -1284,7 +1284,7 @@ if active_tab == tab_titles[2]:
                                 "Uds a Comprar": st.column_config.NumberColumn(min_value=1),
                                 "Seleccionar": st.column_config.CheckboxColumn(required=True)
                             },
-                            disabled=['SKU', 'Descripcion', 'Stock', 'Stock_En_Transito', 'Tiendas_Consolidadas', 'Proveedor', 'Costo_Promedio_UND', 'Peso_Articulo']
+                            disabled=['SKU', 'Descripcion', 'Proveedor', 'Costo_Promedio_UND', 'Peso_Articulo']
                         )
                         
                         if select_all_sp:
