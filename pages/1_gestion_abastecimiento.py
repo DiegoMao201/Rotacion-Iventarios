@@ -863,51 +863,43 @@ if active_tab == tab_titles[1]:
                                 
                                 exito_registro, msg_registro, df_registrado_gsheets = registrar_ordenes_en_sheets(client, df_seleccionados_traslado_full, "Traslado Automático")
                                 if exito_registro:
+                                    # 1. Obtener el ID de grupo registrado
                                     id_grupo_registrado = df_registrado_gsheets['ID_Grupo'].iloc[0]
+
+                                    # 2. Generar el Excel y los TXT por tienda de origen
                                     excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
                                     mapping = cargar_maestro_articulos_dropbox()
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_seleccionados_traslado_full, mapping)
+
+                                    # 3. Armar la lista de adjuntos
                                     adjuntos = [
                                         {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
                                     ]
                                     for tienda, txt_content in txts_por_tienda.items():
                                         nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
                                         adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
-                                    
-                                    if email_dest_traslado:
-                                        id_grupo_registrado = df_registrado_gsheets['ID_Grupo'].iloc[0]
-                                        excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
-                                        mapping = cargar_maestro_articulos_dropbox()
-                                        txts_por_tienda = generar_txts_por_tienda_origen(df_seleccionados_traslado_full, mapping)
-                                        adjuntos = [
-                                            {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
-                                        ]
-                                        for tienda, txt_content in txts_por_tienda.items():
-                                            nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
-                                            adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
-                                    
-                                        asunto = f"Nuevo Plan de Traslado Interno - {id_grupo_registrado}"
-                                        cuerpo_html = f"""<html><body><p>Hola equipo,</p><p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p><p><b>ID de Grupo de Traslado:</b> {id_grupo_registrado}</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"""
-                                        destinatarios_finales = [e.strip() for e in email_dest_traslado.replace(';', ',').split(',') if e.strip()]
-                                        enviado, msg = enviar_correo_con_adjuntos(destinatarios_finales, asunto, cuerpo_html, adjuntos)
-                                        if enviado: st.success(msg)
-                                        else: st.error(msg)
 
-                                    st.session_state.notificaciones_pendientes = []
-                                    for destino, df_grupo_destino in df_para_notificar_email.groupby('Tienda Destino'):
-                                        info_tienda = st.session_state.contacto_manual.get(destino, {})
-                                        numero_wpp = info_tienda.get("celular", "").strip()
-                                        if numero_wpp:
-                                            nombre_contacto = info_tienda.get("nombre", "equipo de " + destino)
-                                            id_grupo_tienda = df_registrado_gsheets['ID_Grupo'].iloc[0] # Usar el ID de grupo único
-                                            peso_total_destino = pd.to_numeric(df_grupo_destino['Peso Total (kg)'], errors='coerce').sum()
-                                            mensaje_wpp = f"Hola {nombre_contacto}, se ha generado una nueva orden de traslado hacia su tienda (Grupo ID: {id_grupo_tienda}). El peso total de la carga es de *{peso_total_destino:,.2f} kg*. Por favor, estar atentos a la recepción. ¡Gracias!"
-                                            st.session_state.notificaciones_pendientes.append({
-                                                "label": f"📲 Notificar a {destino} por WhatsApp",
-                                                "url": generar_link_whatsapp(numero_wpp, mensaje_wpp),
-                                                "key": f"wpp_traslado_aut_{destino}"
-                                            })
-                                    st.rerun()
+                                    # 4. Asunto y cuerpo del correo
+                                    asunto = f"Nuevo Plan de Traslado Interno - {id_grupo_registrado}"
+                                    txt_files_list = "".join([f"<li>{nombre}</li>" for nombre in [f'stockmove_{tienda.replace(" ", "_")}.txt' for tienda in txts_por_tienda]])
+                                    cuerpo_html = f"""<html><body>
+                                        <p>Hola equipo,</p>
+                                        <p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p>
+                                        <p><b>ID de Grupo de Traslado:</b> {id_grupo_registrado}</p>
+                                        <p>Se adjuntan los siguientes archivos TXT para importar en el ERP:</p>
+                                        <ul>{txt_files_list}</ul>
+                                        <p>Gracias por su gestión.</p>
+                                        <p>--<br><b>Sistema de Gestión de Inventarios</b></p>
+                                    </body></html>"""
+
+                                    # 5. Enviar el correo
+                                    destinatarios_finales = [e.strip() for e in email_dest_traslado.replace(';', ',').split(',') if e.strip()]
+                                    enviado, msg = enviar_correo_con_adjuntos(destinatarios_finales, asunto, cuerpo_html, adjuntos)
+                                    if enviado:
+                                        st.success(msg)
+                                    else:
+                                        st.error(msg)
+
                                 else:
                                     st.error(f"❌ Error al registrar el traslado en Google Sheets: {msg_registro}")
 
