@@ -16,6 +16,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import logging
 import os
+from utils import cargar_mapping_maestro_articulos_dropbox, generar_txt_traslados
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 st.set_page_config(page_title="Gestión de Abastecimiento v5.6.0", layout="wide", page_icon="⚙️")
@@ -72,7 +73,7 @@ def load_data_from_sheets(_client, sheet_name):
             df['SKU'] = df['SKU'].astype(str)
         if 'ID_Orden' in df.columns and not df.empty:
             df['ID_Grupo'] = df['ID_Orden'].astype(str).apply(lambda x: '-'.join(x.split('-')[:-1]))
-        logging.info(f"Hoja '{sheet_name}' cargada correctamente con {len(df)} filas.")
+        logging.info(f"Hoja '{sheet_name}' cargada correctamente with {len(df)} filas.")
         return df
     except gspread.exceptions.WorksheetNotFound:
         st.error(f"Error: La hoja de cálculo '{sheet_name}' no fue encontrada. Por favor, créala en tu Google Sheets.")
@@ -806,6 +807,23 @@ if active_tab == tab_titles[1]:
                             mime="application/vnd.ms-excel",
                             use_container_width=True
                         )
+                        
+                        # --- INICIO MODIFICACIÓN: DESCARGA DE TXT PARA TRASLADOS ---
+                        if not df_seleccionados_traslado_full.empty:
+                            # Asegúrate de tener la columna 'referencia' en el DataFrame
+                            df_txt = df_seleccionados_traslado_full.copy()
+                            if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
+                                df_txt['referencia'] = df_txt['SKU']
+                            mapping = cargar_mapping_maestro_articulos_dropbox()
+                            txt_content = generar_txt_traslados(df_txt, mapping)
+                            st.download_button(
+                                label="📥 Descargar Traslados en TXT",
+                                data=txt_content,
+                                file_name=f"traslados_{datetime.now().strftime('%Y%m%d')}.txt",
+                                mime="text/plain",
+                                use_container_width=True
+                            )
+                        # --- FIN MODIFICACIÓN ---
                         
                     with st.form("form_traslado_auto_enviar"):
                         destinos_implicados = df_seleccionados_traslado_full['Tienda Destino'].unique().tolist()

@@ -15,6 +15,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 from google.oauth2.service_account import Credentials
+import dropbox
 
 # --- CONSTANTES Y CONFIGURACIONES (AJUSTADAS A TUS NECESIDADES) ---
 EXPECTED_INVENTORY_COLS = [
@@ -437,3 +438,61 @@ def generar_excel_dinamico(df, nombre_hoja):
         df.to_excel(writer, index=False, sheet_name=nombre_hoja)
         # Aquí se puede añadir formato al excel si se desea
     return output.getvalue()
+
+def cargar_maestro_articulos_dropbox():
+    """
+    Carga el archivo maestro de artículos desde Dropbox y retorna un diccionario {referencia: codigo_articulo}.
+    El archivo debe tener columnas 'referencia' y 'codigo' o 'código'.
+    """
+    dbx_creds = st.secrets["dropbox"]
+    maestro_path = dbx_creds["maestro_articulos_file_path"]  # Define esto en tus secrets
+
+    df_base = None
+    try:
+        with dropbox.Dropbox(app_key=dbx_creds["app_key"], app_secret=dbx_creds["app_secret"], oauth2_refresh_token=dbx_creds["refresh_token"]) as dbx:
+            metadata, res = dbx.files_download(path=maestro_path)
+            with io.BytesIO(res.content) as stream:
+                if maestro_path.endswith('.xlsx'):
+                    df_base = pd.read_excel(stream)
+                else:
+                    df_base = pd.read_csv(stream, sep=None, engine='python')
+    except Exception as e:
+        st.error(f"Error leyendo archivo maestro desde Dropbox: {e}")
+        return {}
+
+    # 2. Normalizar nombres de columnas (todo a minúsculas y sin espacios)
+    df_base.columns = [str(col).strip().lower() for col in df_base.columns]
+
+    # 3. Detectar columnas clave
+    col_referencia = next((c for c in df_base.columns if 'referencia' in c), None)
+    col_codigo = next((c for c in df_base.columns if 'código' in c or 'codigo' in c), None)
+
+    if not col_referencia or not col_codigo:
+        st.error("❌ Faltan columnas 'Referencia' o 'Código' en el archivo maestro.")
+        return {}
+
+    # 4. Limpieza de datos (Quitar espacios, poner minúsculas y quitar '.0' de los códigos)
+    df_base[col_referencia] = df_base[col_referencia].astype(str).str.strip().str.lower()
+    df_base[col_codigo] = df_base[col_codigo].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
+
+    # 5. Crear Diccionario { 'referencia': 'codigo_articulo' }
+    mapping_dict = dict(zip(df_base[col_referencia], df_base[col_codigo]))
+    
+    return mapping_dict
+
+def generar_txt_traslados(df_traslados, mapping_dict):
+    """
+    Genera un archivo TXT para traslados con formato SECUENCIA|CODIGO|.|.|CANTIDAD|0|0|0|
+    - df_traslados: DataFrame con columna 'referencia' y 'Uds a Enviar'
+    - mapping_dict: dict {referencia: codigo_articulo}
+    """
+    lines = []
+    secuencia = 1
+    for _, row in df_traslados.iterrows():
+        ref = str(row['referencia']).strip().lower()
+        codigo = mapping_dict.get(ref, "SIN_CODIGO")
+        cantidad = int(row['Uds a Enviar'])
+        linea = f"{secuencia}|{codigo}|.|.|{cantidad}|0|0|0|"
+        lines.append(linea)
+        secuencia += 1
+    return "\n".join(lines)
