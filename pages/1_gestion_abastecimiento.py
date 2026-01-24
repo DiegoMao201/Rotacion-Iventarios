@@ -808,33 +808,15 @@ if active_tab == tab_titles[1]:
                             use_container_width=True
                         )
                         
-                        # --- INICIO MODIFICACIÓN: DESCARGA DE TXT PARA TRASLADOS ---
-                        if not df_seleccionados_traslado_full.empty:
-                            # Asegúrate de tener la columna 'referencia' en el DataFrame
-                            df_txt = df_seleccionados_traslado_full.copy()
-                            if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
-                                df_txt['referencia'] = df_txt['SKU']
-                            mapping = cargar_maestro_articulos_dropbox()
-                            txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
-
-                            # Antes de armar los adjuntos:
-                            excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
-
-                            adjuntos = [
-                                {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
-                            ]
-                            for tienda, txt_content in txts_por_tienda.items():
-                                nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
-                                adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
-
+                        # Para TXT por tienda (descarga individual)
+                        for tienda, txt_content in txts_por_tienda.items():
                             st.download_button(
-                                label="📥 Descargar Traslados en TXT",
+                                label=f"📥 Descargar TXT para {tienda}",
                                 data=txt_content,
-                                file_name=f"traslados_{datetime.now().strftime('%Y%m%d')}.txt",
+                                file_name=f"stockmove_{tienda.replace(' ', '_')}.txt",
                                 mime="text/plain",
                                 use_container_width=True
                             )
-                        # --- FIN MODIFICACIÓN ---
                         
                     with st.form("form_traslado_auto_enviar"):
                         destinos_implicados = df_seleccionados_traslado_full['Tienda Destino'].unique().tolist()
