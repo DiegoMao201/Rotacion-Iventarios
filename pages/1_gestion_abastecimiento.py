@@ -16,7 +16,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import logging
 import os
-from utils import cargar_mapping_maestro_articulos_dropbox, generar_txt_traslados
+from utils import cargar_maestro_articulos_dropbox, generar_txt_traslados
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 st.set_page_config(page_title="Gestión de Abastecimiento v5.6.0", layout="wide", page_icon="⚙️")
@@ -814,7 +814,7 @@ if active_tab == tab_titles[1]:
                             df_txt = df_seleccionados_traslado_full.copy()
                             if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                                 df_txt['referencia'] = df_txt['SKU']
-                            mapping = cargar_mapping_maestro_articulos_dropbox()
+                            mapping = cargar_maestro_articulos_dropbox()
                             txt_content = generar_txt_traslados(df_txt, mapping)
                             st.download_button(
                                 label="📥 Descargar Traslados en TXT",
@@ -956,7 +956,7 @@ if active_tab == tab_titles[1]:
                     column_config={
                         "Uds a Enviar": st.column_config.NumberColumn(min_value=0, step=1, required=True),
                         "Costo_Promedio_UND": st.column_config.NumberColumn(format="$%.2f", required=True),
-                        "Peso Individual (kg)": st.column_config.NumberColumn(format="%.2f kg", required=True),
+                        "Peso Individual (kg)": st.column_config.NumberColumn(label="Peso Unit. (kg)", format="%.2f kg", required=True),
                         "Borrar": st.column_config.CheckboxColumn(required=True),
                         "Valor del Traslado": st.column_config.NumberColumn(format="$%.2f", disabled=True),
                         "Peso Total (kg)": st.column_config.NumberColumn(format="%.2f kg", disabled=True),
@@ -966,7 +966,7 @@ if active_tab == tab_titles[1]:
                 
                 # Emails y contactos
                 tiendas_origen_especial = edited_df_solicitud['Tienda Origen'].unique().tolist()
-                emails_origenes_especial = [CONTACTOS_TIENDAS.get(o, {}).get('email', '') for o in tiendas_origen_especial]
+                emails_origenes_especial = [CONTACTOS_TIENDAS.get(o, {}).get('email', '') for o in tiendas_origenes_especial]
                 email_destino_especial_list = [CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('email', '')]
                 emails_predefinidos_especial = list(set(filter(None, emails_origenes_especial + email_destino_especial_list)))
                 email_dest_especial = st.text_input("📧 Correo(s) de destinatario(s) (separar con coma):", value=", ".join(emails_predefinidos_especial), key="email_traslado_especial")
@@ -1032,7 +1032,7 @@ if active_tab == tab_titles[2]:
         filtro_tienda_compra = f_c1.selectbox("Filtrar por Tienda:", tiendas_con_sugerencia, key="filtro_tienda_compra")
 
         df_plan_compras_base['Proveedor'] = df_plan_compras_base['Proveedor'].astype(str).str.upper()
-        proveedores_disponibles = ["Todos"] + sorted([p for p in df_plan_compras_base['Proveedor'].unique() if p and p != 'NAN'])
+        proveedores_disponibles = ["Todos"] + sorted([ p for p in df_plan_compras_base['Proveedor'].unique() if p and p != 'NAN'])
         selected_proveedor = f_c2.selectbox("Filtrar por Proveedor:", proveedores_disponibles, key="sb_proveedores")
         
         # --- INICIO DE MODIFICACIÓN: FILTRO DE MARCA A MULTISELECT ---
@@ -1098,7 +1098,7 @@ if active_tab == tab_titles[2]:
                     st.success("Cambios confirmados. Proceda a generar las órdenes a continuación.")
 
             df_seleccionados = st.session_state.df_compras_editor[
-                (st.session_state.df_compras_editor['Seleccionar']) & 
+                (st_session_state.df_compras_editor['Seleccionar']) & 
                 (st.session_state.df_compras_editor['Uds a Comprar'] > 0)
             ].copy()
 
@@ -1252,8 +1252,7 @@ if active_tab == tab_titles[2]:
                             hide_index=True,
                             column_config={
                                 "Uds a Comprar": st.column_config.NumberColumn(min_value=1),
-                                "Seleccionar": st.column_config.CheckboxColumn(required=True),
-                                "Stock": st.column_config.NumberColumn(label="Stock Consolidado")
+                                "Seleccionar": st.column_config.CheckboxColumn(required=True)
                             },
                             disabled=['SKU', 'Descripcion', 'Stock', 'Stock_En_Transito', 'Tiendas_Consolidadas', 'Proveedor', 'Costo_Promedio_UND', 'Peso_Articulo']
                         )
