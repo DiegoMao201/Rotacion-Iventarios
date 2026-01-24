@@ -818,7 +818,7 @@ if active_tab == tab_titles[1]:
                             txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                             # Antes de armar los adjuntos:
-                            excel_bytes_email = generar_excel_dinamico(df_para_notificar_email, "Plan_de_Traslados", "Traslado Automático")
+                            excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
 
                             adjuntos = [
                                 {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
