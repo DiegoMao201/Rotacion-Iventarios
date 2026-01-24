@@ -496,3 +496,17 @@ def generar_txt_traslados(df_traslados, mapping_dict):
         lines.append(linea)
         secuencia += 1
     return "\n".join(lines)
+
+def generar_txts_por_tienda_origen(df_traslados, mapping_dict):
+    """
+    Genera un diccionario {tienda_origen: contenido_txt} para cada tienda de origen.
+    """
+    txts = {}
+    for tienda, df_tienda in df_traslados.groupby('Tienda Origen'):
+        # Asegúrate de tener la columna 'referencia'
+        df_tienda = df_tienda.copy()
+        if 'SKU' in df_tienda.columns and 'referencia' not in df_tienda.columns:
+            df_tienda['referencia'] = df_tienda['SKU']
+        txt_content = generar_txt_traslados(df_tienda, mapping_dict)
+        txts[tienda] = txt_content
+    return txts

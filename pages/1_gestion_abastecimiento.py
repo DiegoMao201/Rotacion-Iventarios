@@ -16,7 +16,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 import logging
 import os
-from utils import cargar_maestro_articulos_dropbox, generar_txt_traslados
+from utils import cargar_maestro_articulos_dropbox, generar_txts_por_tienda_origen
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 st.set_page_config(page_title="Gestión de Abastecimiento v5.6.0", layout="wide", page_icon="⚙️")
@@ -815,7 +815,17 @@ if active_tab == tab_titles[1]:
                             if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                                 df_txt['referencia'] = df_txt['SKU']
                             mapping = cargar_maestro_articulos_dropbox()
-                            txt_content = generar_txt_traslados(df_txt, mapping)
+                            txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
+
+                            adjuntos = [
+                                {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
+                            ]
+
+                            # Agrega un archivo TXT por cada tienda de origen
+                            for tienda, txt_content in txts_por_tienda.items():
+                                nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
+                                adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+
                             st.download_button(
                                 label="📥 Descargar Traslados en TXT",
                                 data=txt_content,
@@ -905,7 +915,8 @@ if active_tab == tab_titles[1]:
                 edited_df_especial = st.data_editor(
                     df_resultados_especial[cols_busqueda], key="editor_traslados_especiales_busqueda", use_container_width=True,
                     column_config={"Uds a Enviar": st.column_config.NumberColumn(min_value=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
-                    disabled=['SKU', 'Descripcion', 'Almacen_Nombre', 'Stock', 'Stock_En_Transito'])
+                    disabled=['SKU', 'Descripcion', 'Almacen_Nombre', 'Stock', 'Stock_En_Transito']
+                )
                 
                 # Check for changes in the data editor
                 df_for_add = edited_df_especial[edited_df_especial['Seleccionar']].copy()
@@ -994,12 +1005,31 @@ if active_tab == tab_titles[1]:
                                 excel_bytes_especial = generar_excel_dinamico(df_solicitud_final, "Traslado_Especial", "Traslado Especial")
                                 asunto = f"Nueva Solicitud de Traslado Especial - {id_grupo_reg}"
                                 cuerpo = f"Se ha generado una nueva solicitud de traslado especial (ID: {id_grupo_reg}) a la tienda {tienda_destino_especial}. Ver detalles en adjunto."
-                                adjuntos = [{'datos': excel_bytes_especial, 'nombre_archivo': f"Traslado_Especial_{id_grupo_reg}.xlsx"}]
+                                
+                                # --- INICIO MODIFICACIÓN: LISTA DE ARCHIVOS TXT EN EL CORREO ---
+                                adjuntos_txt = []
+                                txts_por_tienda = {}
+                                for tienda_origen in df_solicitud_final['Tienda Origen'].unique():
+                                    df_txt_tienda = df_solicitud_final[df_solicitud_final['Tienda Origen'] == tienda_origen]
+                                    if not df_txt_tienda.empty:
+                                        txt_content = generar_txts_por_tienda_origen(df_txt_tienda, cargar_maestro_articulos_dropbox())
+                                        txts_por_tienda[tienda_origen] = txt_content
+                                
+                                txt_files_list = "".join([f"<li>{nombre}</li>" for nombre in [f'stockmove_{tienda.replace(" ", "_")}.txt' for tienda in txts_por_tienda]])
+                                cuerpo += f"<p>Se adjuntan los siguientes archivos TXT para importar en el ERP:</p><ul>{txt_files_list}</ul>"
+                                
+                                for tienda, txt_content in txts_por_tienda.items():
+                                    nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
+                                    adjuntos_txt.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+                                
+                                # --- FIN MODIFICACIÓN ---
+                                
+                                adjuntos = [{'datos': excel_bytes_especial, 'nombre_archivo': f"Traslado_Especial_{id_grupo_reg}.xlsx"}] + adjuntos_txt
+                                
                                 destinatarios = [e.strip() for e in email_dest_especial.split(',') if e.strip()]
-                                if destinatarios:
-                                    enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo, adjuntos)
-                                    if enviado: st.success(msg_envio)
-                                    else: st.error(msg_envio)
+                                enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo, adjuntos)
+                                if enviado: st.success(msg_envio)
+                                else: st.error(msg_envio)
                                 
                                 if celular_contacto_especial:
                                     df_solicitud_final['Peso Total (kg)'] = pd.to_numeric(df_solicitud_final['Uds a Enviar'], errors='coerce') * pd.to_numeric(df_solicitud_final['Peso Individual (kg)'], errors='coerce')
@@ -1256,7 +1286,7 @@ if active_tab == tab_titles[2]:
                             },
                             disabled=['SKU', 'Descripcion', 'Stock', 'Stock_En_Transito', 'Tiendas_Consolidadas', 'Proveedor', 'Costo_Promedio_UND', 'Peso_Articulo']
                         )
-
+                        
                         if select_all_sp:
                             edited_df_busqueda['Seleccionar'] = True
                             st.session_state.df_resultados_busqueda_compra_esp = edited_df_busqueda.copy() # Save state
@@ -1359,15 +1389,15 @@ if active_tab == tab_titles[2]:
                                         df_compra_especial_final['Peso Total (kg)'] = pd.to_numeric(df_compra_especial_final['Uds a Comprar'], errors='coerce') * pd.to_numeric(df_compra_especial_final['Peso_Articulo'], errors='coerce')
                                         peso_total_orden_esp = df_compra_especial_final['Peso Total (kg)'].sum()
                                         msg_wpp = f"Hola {nombre_contacto_esp}, te acabamos de enviar la Orden de Compra Especial N° {orden_id_grupo} al correo. Peso total: {peso_total_orden_esp:,.2f} kg. ¡Gracias!"
-                                        st.session_state.notificaciones_pendientes.append({ "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"})
+                                        st.session_state.notificaciones_pendientes.append({
+                                            "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"
+                                        })
                                     
                                     st.session_state.compra_especial_items = []
                                     st.session_state.tiendas_compra_especial_seleccionadas = []
                                     st.rerun()
                                 else:
                                     st.error(f"❌ Error al registrar: {msg}")
-                        else:
-                            st.warning("Debe especificar un proveedor, un destino final y tener al menos un artículo en la lista.")
                         
                     if cleared_special_compra:
                         st.session_state.compra_especial_items = []
@@ -1375,7 +1405,7 @@ if active_tab == tab_titles[2]:
     # --- FIN BLOQUE MODIFICADO ---
 
 
-# --- INICIO MODIFICACIÓN COMPLETA: PESTAÑA DE SEGUIMIENTO ---
+# --- PESTAÑA 4: SEGUIMIENTO ---
 if active_tab == tab_titles[3]:
     st.subheader("✅ Seguimiento y Gestión de Órdenes")
 
@@ -1650,7 +1680,7 @@ if active_tab == tab_titles[3]:
                                         pdf_bytes = generar_pdf_orden_compra(df_para_notificar, proveedor_orden, tienda_orden, direccion_entrega, nombre_contacto, id_grupo_elegido)
                                         adjuntos.insert(0, {'datos': pdf_bytes, 'nombre_archivo': f"OC_ACT_{id_grupo_elegido}.pdf"}) # Añadir PDF para compras
                                         asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
-                                        cuerpo_html = f"Estimados Sres. {proveedor_orden}, adjunto reenviamos la versión actualizada de la orden de compra N° {id_grupo_elegido}. Agradecemos su gestión."
+                                        cuerpo_html = f"Estimados Sres. {proveedor_orden}, adjunto reenviamos la versión actualizada de la orden de compra N° {orden_id_grupo}. Agradecemos su gestión."
                                         peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
                                         msg_wpp = f"Hola {nombre_contacto}, te reenviamos la OC ACTUALIZADA N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
                                         notif_label = f"📲 Notificar a {proveedor_orden}"
