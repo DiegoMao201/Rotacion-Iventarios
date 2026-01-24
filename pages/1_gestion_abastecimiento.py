@@ -817,6 +817,9 @@ if active_tab == tab_titles[1]:
                             mapping = cargar_maestro_articulos_dropbox()
                             txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
+                            # Antes de armar los adjuntos:
+                            excel_bytes_email = generar_excel_dinamico(df_para_notificar_email, "Plan_de_Traslados", "Traslado Automático")
+
                             adjuntos = [
                                 {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
                             ]
@@ -1598,7 +1601,7 @@ if active_tab == tab_titles[3]:
                 # Botón para guardar cambios detallados
                 if st.button("💾 Guardar Cambios Detallados (cantidades, ítems añadidos/borrados)", use_container_width=True):
                     with st.spinner("Guardando cambios detallados en Google Sheets..."):
-                        df_final_orden = st.session_state.orden_a_editar_df[st.session_state.orden_a_editar_df['Borrar'] == False].copy()
+                        df_final_orden = st.session_state.orden_a_editar_df[st_session_state.orden_a_editar_df['Borrar'] == False].copy()
                         df_final_orden.drop(columns=['Borrar'], inplace=True, errors='ignore')
                         # Recalcular totales antes de guardar
                         df_final_orden['Costo_Total'] = pd.to_numeric(df_final_orden['Cantidad_Solicitada'], errors='coerce') * pd.to_numeric(df_final_orden['Costo_Unitario'], errors='coerce')
