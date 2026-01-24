@@ -823,8 +823,6 @@ if active_tab == tab_titles[1]:
                             adjuntos = [
                                 {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
                             ]
-
-                            # Agrega un archivo TXT por cada tienda de origen
                             for tienda, txt_content in txts_por_tienda.items():
                                 nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
                                 adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
@@ -865,15 +863,33 @@ if active_tab == tab_titles[1]:
                                 
                                 exito_registro, msg_registro, df_registrado_gsheets = registrar_ordenes_en_sheets(client, df_seleccionados_traslado_full, "Traslado Automático")
                                 if exito_registro:
-                                    st.success(f"✅ ¡Traslado registrado exitosamente! {msg_registro}")
+                                    id_grupo_registrado = df_registrado_gsheets['ID_Grupo'].iloc[0]
+                                    excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
+                                    mapping = cargar_maestro_articulos_dropbox()
+                                    txts_por_tienda = generar_txts_por_tienda_origen(df_seleccionados_traslado_full, mapping)
+                                    adjuntos = [
+                                        {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
+                                    ]
+                                    for tienda, txt_content in txts_por_tienda.items():
+                                        nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
+                                        adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+                                    
                                     if email_dest_traslado:
                                         id_grupo_registrado = df_registrado_gsheets['ID_Grupo'].iloc[0]
-                                        excel_bytes_email = generar_excel_dinamico(df_para_notificar_email, "Plan_de_Traslados", "Traslado Automático")
+                                        excel_bytes_email = generar_excel_dinamico(df_seleccionados_traslado_full, "Plan_de_Traslados", "Traslado Automático")
+                                        mapping = cargar_maestro_articulos_dropbox()
+                                        txts_por_tienda = generar_txts_por_tienda_origen(df_seleccionados_traslado_full, mapping)
+                                        adjuntos = [
+                                            {'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}
+                                        ]
+                                        for tienda, txt_content in txts_por_tienda.items():
+                                            nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
+                                            adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+                                    
                                         asunto = f"Nuevo Plan de Traslado Interno - {id_grupo_registrado}"
                                         cuerpo_html = f"""<html><body><p>Hola equipo,</p><p>Se ha registrado un nuevo plan de traslados para ser ejecutado. Por favor, coordinar el movimiento de la mercancía según lo especificado en el archivo adjunto.</p><p><b>ID de Grupo de Traslado:</b> {id_grupo_registrado}</p><p>Gracias por su gestión.</p><p>--<br><b>Sistema de Gestión de Inventarios</b></p></body></html>"""
-                                        adjunto = [{'datos': excel_bytes_email, 'nombre_archivo': f"Plan_Traslado_{id_grupo_registrado}.xlsx"}]
                                         destinatarios_finales = [e.strip() for e in email_dest_traslado.replace(';', ',').split(',') if e.strip()]
-                                        enviado, msg = enviar_correo_con_adjuntos(destinatarios_finales, asunto, cuerpo_html, adjunto)
+                                        enviado, msg = enviar_correo_con_adjuntos(destinatarios_finales, asunto, cuerpo_html, adjuntos)
                                         if enviado: st.success(msg)
                                         else: st.error(msg)
 
@@ -1132,7 +1148,7 @@ if active_tab == tab_titles[2]:
 
             df_seleccionados = st.session_state.df_compras_editor[
                 (st_session_state.df_compras_editor['Seleccionar']) & 
-                (st.session_state.df_compras_editor['Uds a Comprar'] > 0)
+                (st_session_state.df_compras_editor['Uds a Comprar'] > 0)
             ].copy()
 
             if not df_seleccionados.empty:
