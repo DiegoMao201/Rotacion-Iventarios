@@ -785,6 +785,15 @@ if active_tab == tab_titles[1]:
                         # Asegura que la columna 'Tienda Origen' exista
                         if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
                             df_txt['Tienda Origen'] = df_txt['Origen']
+                        # Asegura que exista la columna 'Uds a Enviar'
+                        if 'Uds a Enviar' not in df_txt.columns:
+                            # Intenta mapear desde otras columnas posibles
+                            posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
+                            if posibles:
+                                df_txt['Uds a Enviar'] = df_txt[posibles[0]]
+                            else:
+                                st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
+                                return
                         txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                     for tienda, txt_content in txts_por_tienda.items():
@@ -835,6 +844,15 @@ if active_tab == tab_titles[1]:
                                     # Asegura que la columna 'Tienda Origen' exista
                                     if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
                                         df_txt['Tienda Origen'] = df_txt['Origen']
+                                    # Asegura que exista la columna 'Uds a Enviar'
+                                    if 'Uds a Enviar' not in df_txt.columns:
+                                        # Intenta mapear desde otras columnas posibles
+                                        posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
+                                        if posibles:
+                                            df_txt['Uds a Enviar'] = df_txt[posibles[0]]
+                                        else:
+                                            st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
+                                            return
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                                     # 3. Armar la lista de adjuntos
@@ -890,7 +908,8 @@ if active_tab == tab_titles[1]:
                 # Use a unique key for this data editor
                 edited_df_especial = st.data_editor(
                     df_resultados_especial[cols_busqueda], key="editor_traslados_especiales_busqueda", use_container_width=True,
-                    column_config={"Uds a Enviar": st.column_config.NumberColumn(min_value=1), "Seleccionar": st.column_config.CheckboxColumn(required=True)},
+                    column_config={"Uds a Enviar": st.column_config.NumberColumn(label="Cant. a Enviar", min_value=0, step=1, format="%d"),
+                                   "Seleccionar": st.column_config.CheckboxColumn(required=True)},
                     disabled=['SKU', 'Descripcion', 'Almacen_Nombre', 'Stock', 'Stock_En_Transito']
                 )
                 
@@ -1102,7 +1121,7 @@ if active_tab == tab_titles[2]:
                     st.session_state.df_compras_editor = edited_df
                     st.success("Cambios confirmados. Proceda a generar las órdenes a continuación.")
 
-            # Corregido: st_session_state -> st.session_state
+            # Corregido: st_session_state -> st.session.state
             df_seleccionados = st.session_state.df_compras_editor[
                 (st.session_state.df_compras_editor['Seleccionar']) & 
                 (st.session_state.df_compras_editor['Uds a Comprar'] > 0)
@@ -1653,26 +1672,28 @@ if active_tab == tab_titles[3]:
                                 msg_wpp = ""
 
                                 if is_traslado:
-                                    # --- CORRECCIÓN KEY ERROR 'Tienda Origen' ---
                                     mapping = cargar_maestro_articulos_dropbox()
                                     df_txt = df_para_notificar.copy()
-                                    
-                                    # Asegurar columna referencia para el mapping
                                     if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                                         df_txt['referencia'] = df_txt['SKU']
-                                    
-                                    # Extraer nombre limpio de la tienda origen para crear la columna que espera 'generar_txts_por_tienda_origen'
-                                    tienda_origen_clean = str(proveedor_orden).replace("TRASLADO INTERNO: ", "").strip()
-                                    df_txt['Tienda Origen'] = tienda_origen_clean 
-                                    
-                                    # Generar TXTs
+                                    if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
+                                        df_txt['Tienda Origen'] = df_txt['Origen']
+                                    # Asegura que exista la columna 'Uds a Enviar'
+                                    if 'Uds a Enviar' not in df_txt.columns:
+                                        # Intenta mapear desde otras columnas posibles
+                                        posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
+                                        if posibles:
+                                            df_txt['Uds a Enviar'] = df_txt[posibles[0]]
+                                        else:
+                                            st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
+                                            return
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
                                     for tienda, txt_content in txts_por_tienda.items():
                                         nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
                                         adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
                                     
                                     asunto = f"**RECORDATORIO/ACTUALIZACIÓN TRASLADO** {id_grupo_elegido}"
-                                    txt_list_html = "".join([f"<li>{nombre}</li>" for nombre in [f'stockmove_{t.replace(" ", "_")}.txt' for t in txts_por_tienda]])
+                                    txt_list_html = "".join([f"<li>{nombre}</li>" for nombre in [f'stockmove_{tienda.replace(" ", "_")}.txt' for tienda in txts_por_tienda]])
                                     cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}.<br>Archivos TXT incluidos:<br><ul>{txt_list_html}</ul><br>Por favor, coordinar. Gracias."
                                     
                                     peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
