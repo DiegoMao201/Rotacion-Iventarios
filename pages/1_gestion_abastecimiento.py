@@ -1382,7 +1382,6 @@ if active_tab == tab_titles[2]:
                         st.rerun()
     # --- FIN BLOQUE MODIFICADO ---
 
-
 # --- PESTAÑA 4: SEGUIMIENTO ---
 if active_tab == tab_titles[3]:
     st.subheader("✅ Seguimiento y Gestión de Órdenes")
@@ -1431,13 +1430,13 @@ if active_tab == tab_titles[3]:
                 Estado=('Estado', 'first'),
                 Items=('SKU', 'nunique'),
                 Valor_Total=('Costo_Total', 'sum'),
-                Peso_Total_kg=('Peso_Total_kg', 'sum') # <-- NUEVA AGREGACIÓN
+                Peso_Total_kg=('Peso_Total_kg', 'sum')
             ).reset_index().sort_values(by="Fecha_Emision", ascending=False)
             
             st.dataframe(df_summary, use_container_width=True, hide_index=True,
                          column_config={
                              "Valor_Total": st.column_config.NumberColumn(format="$ {:,.0f}"),
-                             "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg") # <-- NUEVA COLUMNA EN VISTA
+                             "Peso_Total_kg": st.column_config.NumberColumn(label="Peso Total", format="%.2f kg")
                          })
         else:
             st.info("No hay órdenes que coincidan con los filtros seleccionados.")
@@ -1593,107 +1592,116 @@ if active_tab == tab_titles[3]:
                         else:
                             st.error(f"Error al guardar los cambios: {msg}")
                 
-                # --- NOTIFICACIONES Y DESCARGA (EN EXPANDER) ---
-                with st.expander("Descargar y Notificar Orden", expanded=True):
-                    df_para_notificar = st.session_state.orden_a_editar_df.copy()
-                    df_para_notificar = df_para_notificar[df_para_notificar['Borrar'] == False]
+            # --- NOTIFICACIONES Y DESCARGA (EN EXPANDER) ---
+            with st.expander("Descargar y Notificar Orden", expanded=True):
+                df_para_notificar = st.session_state.orden_a_editar_df.copy()
+                df_para_notificar = df_para_notificar[df_para_notificar['Borrar'] == False]
+                
+                # --- Botón de descarga de Excel ---
+                st.markdown("##### Descargar Orden en Formato Excel")
+                excel_bytes_seguimiento = generar_excel_dinamico(df_para_notificar, f"Orden_{id_grupo_elegido}", "Seguimiento")
+                st.download_button(
+                    label=f"📥 Descargar Excel de la Orden {id_grupo_elegido}",
+                    data=excel_bytes_seguimiento,
+                    file_name=f"Orden_{id_grupo_elegido}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.ms-excel",
+                    use_container_width=True
+                )
+                st.markdown("---")
+
+                with st.form(key=f"form_notify_{id_grupo_elegido}"):
+                    st.markdown("##### Reenviar Notificación de la Orden")
+                    st.info("Esta acción reenviará la orden con los últimos datos guardados. Asegúrese de haber guardado cualquier cambio detallado primero.")
                     
-                    # --- Botón de descarga de Excel ---
-                    st.markdown("##### Descargar Orden en Formato Excel")
-                    excel_bytes_seguimiento = generar_excel_dinamico(df_para_notificar, f"Orden_{id_grupo_elegido}", "Seguimiento")
-                    st.download_button(
-                        label=f"📥 Descargar Excel de la Orden {id_grupo_elegido}",
-                        data=excel_bytes_seguimiento,
-                        file_name=f"Orden_{id_grupo_elegido}_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.ms-excel",
-                        use_container_width=True
-                    )
-                    st.markdown("---")
+                    proveedor_orden = df_para_notificar['Proveedor'].iloc[0]
+                    tienda_orden = df_para_notificar['Tienda_Destino'].iloc[0]
+                    
+                    is_traslado = "TRASLADO INTERNO" in str(proveedor_orden)
+                    if is_traslado:
+                        tienda_origen_nombre = str(proveedor_orden).replace("TRASLADO INTERNO: ", "").strip()
+                        # Para traslados, el contacto es la tienda de origen y el celular es de la tienda de destino
+                        contacto_info_origen = CONTACTOS_TIENDAS.get(tienda_origen_nombre, {})
+                        contacto_info_destino = CONTACTOS_TIENDAS.get(tienda_orden, {})
+                        email_val = f"{contacto_info_origen.get('email', '')},{contacto_info_destino.get('email', '')}"
+                        nombre_val = contacto_info_origen.get('nombre', '')
+                        celular_val = contacto_info_destino.get('celular', '') # Notificar al que recibe
+                    else: # Es Compra
+                        contacto_info = CONTACTOS_PROVEEDOR.get(str(proveedor_orden).upper(), {})
+                        email_val = contacto_info.get('email', '')
+                        nombre_val = contacto_info.get('nombre', '')
+                        celular_val = contacto_info.get('celular', '')
 
-                    with st.form(key=f"form_notify_{id_grupo_elegido}"):
-                        st.markdown("##### Reenviar Notificación de la Orden")
-                        st.info("Esta acción reenviará la orden con los últimos datos guardados. Asegúrese de haber guardado cualquier cambio detallado primero.")
-                        
-                        proveedor_orden = df_para_notificar['Proveedor'].iloc[0]
-                        tienda_orden = df_para_notificar['Tienda_Destino'].iloc[0]
-                        
-                        is_traslado = "TRASLADO INTERNO" in proveedor_orden
-                        if is_traslado:
-                            tienda_origen_nombre = proveedor_orden.replace("TRASLADO INTERNO: ", "").strip()
-                            # Para traslados, el contacto es la tienda de origen y el celular es de la tienda de destino
-                            contacto_info_origen = CONTACTOS_TIENDAS.get(tienda_origen_nombre, {})
-                            contacto_info_destino = CONTACTOS_TIENDAS.get(tienda_orden, {})
-                            email_val = f"{contacto_info_origen.get('email', '')},{contacto_info_destino.get('email', '')}"
-                            nombre_val = contacto_info_origen.get('nombre', '')
-                            celular_val = contacto_info_destino.get('celular', '') # Notificar al que recibe
-                        else: # Es Compra
-                            contacto_info = CONTACTOS_PROVEEDOR.get(proveedor_orden.upper(), {})
-                            email_val = contacto_info.get('email', '')
-                            nombre_val = contacto_info.get('nombre', '')
-                            celular_val = contacto_info.get('celular', '')
+                    email_dest = st.text_input("Email(s) para notificación:", value=email_val, key=f"email_notify_{id_grupo_elegido}")
+                    nombre_contacto = st.text_input("Nombre de contacto para notificación:", value=nombre_val, key=f"nombre_notify_{id_grupo_elegido}")
+                    celular_contacto = st.text_input("Celular para notificación WhatsApp:", value=celular_val, key=f"celular_notify_{id_grupo_elegido}")
 
-                        email_dest = st.text_input("Email(s) para notificación:", value=email_val, key=f"email_notify_{id_grupo_elegido}")
-                        nombre_contacto = st.text_input("Nombre de contacto para notificación:", value=nombre_val, key=f"nombre_notify_{id_grupo_elegido}")
-                        celular_contacto = st.text_input("Celular para notificación WhatsApp:", value=celular_val, key=f"celular_notify_{id_grupo_elegido}")
+                    submitted_notify = st.form_submit_button("📩 Reenviar Notificaciones", use_container_width=True)
 
-                        submitted_notify = st.form_submit_button("📩 Reenviar Notificaciones", use_container_width=True)
+                    if submitted_notify:
+                        if df_para_notificar.empty:
+                            st.error("La orden está vacía. No se puede notificar.")
+                        else:
+                            with st.spinner("Enviando notificaciones..."):
+                                # 1. Generar Excel adjunto
+                                excel_bytes_notif = generar_excel_dinamico(df_para_notificar, f"Orden_ACT_{id_grupo_elegido}", "Seguimiento")
+                                adjuntos = [{'datos': excel_bytes_notif, 'nombre_archivo': f"Detalle_Orden_ACT_{id_grupo_elegido}.xlsx"}]
+                                
+                                # Variables para el correo (se llenan en el if/else)
+                                asunto = ""
+                                cuerpo_html = ""
+                                notif_label = ""
+                                msg_wpp = ""
 
-                        if submitted_notify:
-                            if df_para_notificar.empty:
-                                st.error("La orden está vacía. No se puede notificar.")
-                            else:
-                                with st.spinner("Enviando notificaciones..."):
-                                    excel_bytes_notif = generar_excel_dinamico(df_para_notificar, f"Orden_ACT_{id_grupo_elegido}", "Seguimiento")
-                                    adjuntos = [{'datos': excel_bytes_notif, 'nombre_archivo': f"Detalle_Orden_ACT_{id_grupo_elegido}.xlsx"}]
+                                if is_traslado:
+                                    # --- CORRECCIÓN KEY ERROR 'Tienda Origen' ---
+                                    mapping = cargar_maestro_articulos_dropbox()
+                                    df_txt = df_para_notificar.copy()
+                                    
+                                    # Asegurar columna referencia para el mapping
+                                    if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
+                                        df_txt['referencia'] = df_txt['SKU']
+                                    
+                                    # Extraer nombre limpio de la tienda origen para crear la columna que espera 'generar_txts_por_tienda_origen'
+                                    tienda_origen_clean = str(proveedor_orden).replace("TRASLADO INTERNO: ", "").strip()
+                                    df_txt['Tienda Origen'] = tienda_origen_clean 
+                                    
+                                    # Generar TXTs
+                                    txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
+                                    for tienda, txt_content in txts_por_tienda.items():
+                                        nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
+                                        adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+                                    
+                                    asunto = f"**RECORDATORIO/ACTUALIZACIÓN TRASLADO** {id_grupo_elegido}"
+                                    txt_list_html = "".join([f"<li>{nombre}</li>" for nombre in [f'stockmove_{t.replace(" ", "_")}.txt' for t in txts_por_tienda]])
+                                    cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}.<br>Archivos TXT incluidos:<br><ul>{txt_list_html}</ul><br>Por favor, coordinar. Gracias."
+                                    
+                                    peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
+                                    msg_wpp = f"Hola, te reenviamos la información del traslado N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
+                                    notif_label = f"📲 Notificar a {tienda_orden} (Destino)"
+                                
+                                else:
+                                    # Es Compra normal
+                                    asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
+                                    cuerpo_html = f"Hola equipo, se reenvía información sobre la orden de compra N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto. Gracias."
+                                    
+                                    peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
+                                    msg_wpp = f"Hola, te reenviamos la información de la orden de compra N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
+                                    notif_label = f"📲 Notificar a {proveedor_orden} (Proveedor)"
 
-                                    if is_traslado:
-                                        # Generar los archivos TXT por tienda de origen
-                                        mapping = cargar_maestro_articulos_dropbox()
-                                        df_txt = df_para_notificar.copy()
-                                        if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
-                                            df_txt['referencia'] = df_txt['SKU']
-                                        if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
-                                            df_txt['Tienda Origen'] = df_txt['Origen']
-                                        txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
-                                        for tienda, txt_content in txts_por_tienda.items():
-                                            nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
-                                            adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+                                # 2. Enviar correo (ahora asunto y cuerpo_html están garantizados)
+                                destinatarios = [e.strip() for e in email_dest.replace(';',',').split(',') if e.strip()]
+                                enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
+                                
+                                if enviado: 
+                                    st.success(f"Correo reenviado: {msg_envio}")
+                                else: 
+                                    st.error(f"Error al reenviar correo: {msg_envio}")
 
-                                        asunto = f"**RECORDATORIO/ACTUALIZACIÓN TRASLADO** {id_grupo_elegido}"
-                                        cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto y los TXT para el ERP. Gracias."
-                                        peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
-                                        msg_wpp = f"Hola, te reenviamos la información del traslado N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
-                                        notif_label = f"📲 Notificar a {tienda_orden} (Destino)"
-                                    else:
-                                        asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
-                                        cuerpo_html = f"Hola equipo, se reenvía información sobre la orden de compra N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto. Gracias."
-                                        peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
-                                        msg_wpp = f"Hola, te reenviamos la información de la orden de compra N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
-                                        notif_label = f"📲 Notificar a {proveedor_orden} (Proveedor)"
-
-            destinatarios = [e.strip() for e in email_dest.replace(';',',').split(',') if e.strip()]
-            enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
-            if enviado: st.success(f"Correo reenviado: {msg_envio}")
-            else: st.error(f"Error al reenviar correo: {msg_envio}")
-
-            if celular_contacto:
-                st.session_state.notificaciones_pendientes.append({
-                    "label": notif_label, 
-                    "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
-                    "key": f"wpp_update_{id_grupo_elegido}"
-                })
-            st.rerun()
-
-# --- BLOQUE FINAL PARA MOSTRAR NOTIFICACIONES PENDIENTES ---
-if st.session_state.notificaciones_pendientes:
-    st.markdown("---")
-    st.subheader("🔔 Notificaciones Pendientes de Envío")
-    st.info("La orden ha sido registrada/actualizada. Haz clic en los botones para enviar las notificaciones por WhatsApp.")
-
-    for notif in st.session_state.notificaciones_pendientes:
-        whatsapp_button(notif["label"], notif["url"], notif["key"])
-
-    if st.button("✅ Hecho, Limpiar Notificaciones", key="finalizar_proceso_completo", type="primary"):
-        st.session_state.notificaciones_pendientes = []
-        st.success("Notificaciones limpiadas. La app se recargará.")
-        st.rerun()
+                                # 3. Preparar notificación WPP
+                                if celular_contacto:
+                                    st.session_state.notificaciones_pendientes.append({
+                                        "label": notif_label, 
+                                        "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
+                                        "key": f"wpp_update_{id_grupo_elegido}"
+                                    })
+                                    st.rerun()
