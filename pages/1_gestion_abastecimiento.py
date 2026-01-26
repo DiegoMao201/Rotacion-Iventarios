@@ -782,6 +782,9 @@ if active_tab == tab_titles[1]:
                         df_txt = df_seleccionados_traslado_full.copy()
                         if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                             df_txt['referencia'] = df_txt['SKU']
+                        # Asegura que la columna 'Tienda Origen' exista
+                        if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
+                            df_txt['Tienda Origen'] = df_txt['Origen']
                         txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                     for tienda, txt_content in txts_por_tienda.items():
@@ -829,6 +832,9 @@ if active_tab == tab_titles[1]:
                                     df_txt = df_seleccionados_traslado_full.copy()
                                     if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                                         df_txt['referencia'] = df_txt['SKU']
+                                    # Asegura que la columna 'Tienda Origen' exista
+                                    if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
+                                        df_txt['Tienda Origen'] = df_txt['Origen']
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                                     # 3. Armar la lista de adjuntos
@@ -1646,6 +1652,9 @@ if active_tab == tab_titles[3]:
                                         df_txt = df_para_notificar.copy()
                                         if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                                             df_txt['referencia'] = df_txt['SKU']
+                                        # Asegura que la columna 'Tienda Origen' exista
+                                        if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
+                                            df_txt['Tienda Origen'] = df_txt['Origen']
                                         txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
                                         for tienda, txt_content in txts_por_tienda.items():
                                             nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
@@ -1657,8 +1666,11 @@ if active_tab == tab_titles[3]:
                                         msg_wpp = f"Hola, te reenviamos la información del traslado N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
                                         notif_label = f"📲 Notificar a {tienda_orden} (Destino)"
                                     else:
-                                        # ...existing code for compras...
-                                        pass
+                                        asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
+                                        cuerpo_html = f"Hola equipo, se reenvía información sobre la orden de compra N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto. Gracias."
+                                        peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
+                                        msg_wpp = f"Hola, te reenviamos la información de la orden de compra N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
+                                        notif_label = f"📲 Notificar a {proveedor_orden} (Proveedor)"
 
             destinatarios = [e.strip() for e in email_dest.replace(';',',').split(',') if e.strip()]
             enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
