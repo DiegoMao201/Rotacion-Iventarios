@@ -1681,12 +1681,16 @@ if active_tab == tab_titles[3]:
 
                                     # Tienda Origen
                                     if 'Tienda Origen' not in df_txt.columns:
-                                        posibles_origen = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['tiendaorigen','origen','almacen_nombre']]
-                                        if posibles_origen:
-                                            df_txt['Tienda Origen'] = df_txt[posibles_origen[0]]
+                                        # Caso especial: viene en 'Proveedor' como 'TRASLADO INTERNO: Tienda'
+                                        if 'Proveedor' in df_txt.columns and df_txt['Proveedor'].astype(str).str.startswith('TRASLADO INTERNO:').any():
+                                            df_txt['Tienda Origen'] = df_txt['Proveedor'].astype(str).str.replace('TRASLADO INTERNO:', '').str.strip()
                                         else:
-                                            st.error("No se encontró la columna de tienda de origen para los TXT.")
-                                            st.stop()
+                                            posibles_origen = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['tiendaorigen','origen','almacen_nombre']]
+                                            if posibles_origen:
+                                                df_txt['Tienda Origen'] = df_txt[posibles_origen[0]]
+                                            else:
+                                                st.error("No se encontró la columna de tienda de origen para los TXT.")
+                                                st.stop()
 
                                     # Uds a Enviar
                                     if 'Uds a Enviar' not in df_txt.columns:
