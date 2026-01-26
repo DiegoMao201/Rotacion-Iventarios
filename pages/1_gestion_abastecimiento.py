@@ -946,7 +946,7 @@ if active_tab == tab_titles[1]:
                 
                 # Emails y contactos
                 tiendas_origen_especial = edited_df_solicitud['Tienda Origen'].unique().tolist()
-                emails_origenes_especial = [CONTACTOS_TIENDAS.get(o, {}).get('email', '') for o in tiendas_origen_especial]
+                emails_origenes_especial = [CONTACTOS_TIENDAS.get(o, {}).get('email', '') for o in tiendas_origenes_especial]
                 email_destino_especial_list = [CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('email', '')]
                 emails_predefinidos_especial = list(set(filter(None, emails_origenes_especial + email_destino_especial_list)))
                 email_dest_especial = st.text_input("📧 Correo(s) de destinatario(s) (separar con coma):", value=", ".join(emails_predefinidos_especial), key="email_traslado_especial")
@@ -1639,36 +1639,39 @@ if active_tab == tab_titles[3]:
                                 with st.spinner("Enviando notificaciones..."):
                                     excel_bytes_notif = generar_excel_dinamico(df_para_notificar, f"Orden_ACT_{id_grupo_elegido}", "Seguimiento")
                                     adjuntos = [{'datos': excel_bytes_notif, 'nombre_archivo': f"Detalle_Orden_ACT_{id_grupo_elegido}.xlsx"}]
-                                    
+
                                     if is_traslado:
+                                        # Generar los archivos TXT por tienda de origen
+                                        mapping = cargar_maestro_articulos_dropbox()
+                                        df_txt = df_para_notificar.copy()
+                                        if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
+                                            df_txt['referencia'] = df_txt['SKU']
+                                        txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
+                                        for tienda, txt_content in txts_por_tienda.items():
+                                            nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
+                                            adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
+
                                         asunto = f"**RECORDATORIO/ACTUALIZACIÓN TRASLADO** {id_grupo_elegido}"
-                                        cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto. Gracias."
+                                        cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto y los TXT para el ERP. Gracias."
                                         peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
                                         msg_wpp = f"Hola, te reenviamos la información del traslado N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
                                         notif_label = f"📲 Notificar a {tienda_orden} (Destino)"
-                                    else: # Es Compra
-                                        direccion_entrega = DIRECCIONES_TIENDAS.get(tienda_orden, "N/A")
-                                        pdf_bytes = generar_pdf_orden_compra(df_para_notificar, proveedor_orden, tienda_orden, direccion_entrega, nombre_contacto, id_grupo_elegido)
-                                        adjuntos.insert(0, {'datos': pdf_bytes, 'nombre_archivo': f"OC_ACT_{id_grupo_elegido}.pdf"}) # Añadir PDF para compras
-                                        asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
-                                        cuerpo_html = f"Estimados Sres. {proveedor_orden}, adjunto reenviamos la versión actualizada de la orden de compra N° {id_grupo_elegido}. Agradecemos su gestión."
-                                        peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
-                                        msg_wpp = f"Hola {nombre_contacto}, te reenviamos la OC ACTUALIZADA N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
-                                        notif_label = f"📲 Notificar a {proveedor_orden}"
-                                    
-                                    if email_dest:
-                                        destinatarios = [e.strip() for e in email_dest.replace(';',',').split(',') if e.strip()]
-                                        enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
-                                        if enviado: st.success(f"Correo reenviado: {msg_envio}")
-                                        else: st.error(f"Error al reenviar correo: {msg_envio}")
-                                    
-                                    if celular_contacto:
-                                        st.session_state.notificaciones_pendientes.append({
-                                            "label": notif_label, 
-                                            "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
-                                            "key": f"wpp_update_{id_grupo_elegido}"
-                                        })
-                                    st.rerun()
+                                    else:
+                                        # ...existing code for compras...
+                                        pass
+
+            destinatarios = [e.strip() for e in email_dest.replace(';',',').split(',') if e.strip()]
+            enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
+            if enviado: st.success(f"Correo reenviado: {msg_envio}")
+            else: st.error(f"Error al reenviar correo: {msg_envio}")
+
+            if celular_contacto:
+                st.session_state.notificaciones_pendientes.append({
+                    "label": notif_label, 
+                    "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
+                    "key": f"wpp_update_{id_grupo_elegido}"
+                })
+            st.rerun()
 
 # --- BLOQUE FINAL PARA MOSTRAR NOTIFICACIONES PENDIENTES ---
 if st.session_state.notificaciones_pendientes:
