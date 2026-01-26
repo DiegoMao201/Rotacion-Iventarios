@@ -1652,7 +1652,6 @@ if active_tab == tab_titles[3]:
                                         df_txt = df_para_notificar.copy()
                                         if 'SKU' in df_txt.columns and 'referencia' not in df_txt.columns:
                                             df_txt['referencia'] = df_txt['SKU']
-                                        # Asegura que la columna 'Tienda Origen' exista
                                         if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
                                             df_txt['Tienda Origen'] = df_txt['Origen']
                                         txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
