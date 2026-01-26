@@ -792,8 +792,7 @@ if active_tab == tab_titles[1]:
                             if posibles:
                                 df_txt['Uds a Enviar'] = df_txt[posibles[0]]
                             else:
-                                st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
-                                return
+                                   st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
                         txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                     for tienda, txt_content in txts_por_tienda.items():
@@ -850,9 +849,8 @@ if active_tab == tab_titles[1]:
                                         posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
                                         if posibles:
                                             df_txt['Uds a Enviar'] = df_txt[posibles[0]]
-                                        else:
-                                            st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
-                                            return
+                                    else:
+                                        st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                                     # 3. Armar la lista de adjuntos
@@ -1661,15 +1659,8 @@ if active_tab == tab_titles[3]:
                             st.error("La orden está vacía. No se puede notificar.")
                         else:
                             with st.spinner("Enviando notificaciones..."):
-                                # 1. Generar Excel adjunto
                                 excel_bytes_notif = generar_excel_dinamico(df_para_notificar, f"Orden_ACT_{id_grupo_elegido}", "Seguimiento")
                                 adjuntos = [{'datos': excel_bytes_notif, 'nombre_archivo': f"Detalle_Orden_ACT_{id_grupo_elegido}.xlsx"}]
-                                
-                                # Variables para el correo (se llenan en el if/else)
-                                asunto = ""
-                                cuerpo_html = ""
-                                notif_label = ""
-                                msg_wpp = ""
 
                                 if is_traslado:
                                     mapping = cargar_maestro_articulos_dropbox()
@@ -1678,51 +1669,42 @@ if active_tab == tab_titles[3]:
                                         df_txt['referencia'] = df_txt['SKU']
                                     if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
                                         df_txt['Tienda Origen'] = df_txt['Origen']
-                                    # Asegura que exista la columna 'Uds a Enviar'
                                     if 'Uds a Enviar' not in df_txt.columns:
-                                        # Intenta mapear desde otras columnas posibles
                                         posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
                                         if posibles:
                                             df_txt['Uds a Enviar'] = df_txt[posibles[0]]
                                         else:
                                             st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
-                                            return
+                                            st.stop()
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
                                     for tienda, txt_content in txts_por_tienda.items():
                                         nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
                                         adjuntos.append({'datos': txt_content.encode('utf-8'), 'nombre_archivo': nombre_archivo})
-                                    
+
                                     asunto = f"**RECORDATORIO/ACTUALIZACIÓN TRASLADO** {id_grupo_elegido}"
-                                    txt_list_html = "".join([f"<li>{nombre}</li>" for nombre in [f'stockmove_{tienda.replace(" ", "_")}.txt' for tienda in txts_por_tienda]])
+                                    txt_list_html = "".join([f"<li>stockmove_{tienda.replace(' ', '_')}.txt</li>" for tienda in txts_por_tienda])
                                     cuerpo_html = f"Hola equipo, se reenvía información sobre el plan de traslado N° {id_grupo_elegido}.<br>Archivos TXT incluidos:<br><ul>{txt_list_html}</ul><br>Por favor, coordinar. Gracias."
-                                    
                                     peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
                                     msg_wpp = f"Hola, te reenviamos la información del traslado N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
                                     notif_label = f"📲 Notificar a {tienda_orden} (Destino)"
-                                
                                 else:
-                                    # Es Compra normal
                                     asunto = f"**RECORDATORIO/ACTUALIZACIÓN ORDEN DE COMPRA** {id_grupo_elegido}"
                                     cuerpo_html = f"Hola equipo, se reenvía información sobre la orden de compra N° {id_grupo_elegido}. Por favor, ver detalles en el archivo adjunto. Gracias."
-                                    
                                     peso_total_notif = pd.to_numeric(df_para_notificar['Peso_Total_kg'], errors='coerce').sum()
                                     msg_wpp = f"Hola, te reenviamos la información de la orden de compra N° {id_grupo_elegido}. Peso total: {peso_total_notif:,.2f} kg."
                                     notif_label = f"📲 Notificar a {proveedor_orden} (Proveedor)"
 
-                                # 2. Enviar correo (ahora asunto y cuerpo_html están garantizados)
                                 destinatarios = [e.strip() for e in email_dest.replace(';',',').split(',') if e.strip()]
                                 enviado, msg_envio = enviar_correo_con_adjuntos(destinatarios, asunto, cuerpo_html, adjuntos)
-                                
-                                if enviado: 
+                                if enviado:
                                     st.success(f"Correo reenviado: {msg_envio}")
-                                else: 
+                                else:
                                     st.error(f"Error al reenviar correo: {msg_envio}")
 
-                                # 3. Preparar notificación WPP
                                 if celular_contacto:
                                     st.session_state.notificaciones_pendientes.append({
                                         "label": notif_label, 
                                         "url": generar_link_whatsapp(celular_contacto, msg_wpp), 
                                         "key": f"wpp_update_{id_grupo_elegido}"
                                     })
-                                    st.rerun()
+            # --- FIN DE GESTIÓN DE ORDEN ESPECÍFICA ---
