@@ -788,11 +788,12 @@ if active_tab == tab_titles[1]:
                         # Asegura que exista la columna 'Uds a Enviar'
                         if 'Uds a Enviar' not in df_txt.columns:
                             # Intenta mapear desde otras columnas posibles
-                            posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
+                            posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar','cantidadsolicitada']]
                             if posibles:
                                 df_txt['Uds a Enviar'] = df_txt[posibles[0]]
                             else:
-                                   st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
+                                st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
+                                st.stop()
                         txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                     for tienda, txt_content in txts_por_tienda.items():
@@ -846,11 +847,12 @@ if active_tab == tab_titles[1]:
                                     # Asegura que exista la columna 'Uds a Enviar'
                                     if 'Uds a Enviar' not in df_txt.columns:
                                         # Intenta mapear desde otras columnas posibles
-                                        posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
+                                        posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar','cantidadsolicitada']]
                                         if posibles:
                                             df_txt['Uds a Enviar'] = df_txt[posibles[0]]
                                     else:
                                         st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
+                                        st.stop()
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
 
                                     # 3. Armar la lista de adjuntos
@@ -1670,12 +1672,10 @@ if active_tab == tab_titles[3]:
                                     if 'Tienda Origen' not in df_txt.columns and 'Origen' in df_txt.columns:
                                         df_txt['Tienda Origen'] = df_txt['Origen']
                                     if 'Uds a Enviar' not in df_txt.columns:
-                                        posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar']]
+                                        # Intenta mapear desde otras columnas posibles
+                                        posibles = [col for col in df_txt.columns if col.lower().replace('_','').replace(' ','') in ['udsaanviar','cantidad','cantidadenviar','cantidadsolicitada']]
                                         if posibles:
                                             df_txt['Uds a Enviar'] = df_txt[posibles[0]]
-                                        else:
-                                            st.error("No se encontró la columna 'Uds a Enviar' necesaria para generar los TXT de traslado.")
-                                            st.stop()
                                     txts_por_tienda = generar_txts_por_tienda_origen(df_txt, mapping)
                                     for tienda, txt_content in txts_por_tienda.items():
                                         nombre_archivo = f"stockmove_{tienda.replace(' ', '_')}.txt"
