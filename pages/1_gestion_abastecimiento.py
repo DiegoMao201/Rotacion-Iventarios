@@ -971,7 +971,7 @@ if active_tab == tab_titles[1]:
                 
                 # Emails y contactos
                 tiendas_origen_especial = edited_df_solicitud['Tienda Origen'].unique().tolist()
-                emails_origenes_especial = [CONTACTOS_TIENDAS.get(o, {}).get('email', '') for o in tiendas_origenes_especial]
+                emails_origenes_especial = [CONTACTOS_TIENDAS.get(o, {}).get('email', '') for o in tiendas_origen_especial]
                 email_destino_especial_list = [CONTACTOS_TIENDAS.get(tienda_destino_especial, {}).get('email', '')]
                 emails_predefinidos_especial = list(set(filter(None, emails_origenes_especial + email_destino_especial_list)))
                 email_dest_especial = st.text_input("📧 Correo(s) de destinatario(s) (separar con coma):", value=", ".join(emails_predefinidos_especial), key="email_traslado_especial")
