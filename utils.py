@@ -92,7 +92,7 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     df.rename(columns=column_mapping, inplace=True)
     
     df['SKU'] = df['SKU'].astype(str)
-    almacen_map = {'158':'Opalo', '155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox'}
+    almacen_map = {'158':'Opalo', '155':'Cedi','156':'Armenia','157':'Manizales','189':'Olaya','238':'Laureles','439':'FerreBox','463':'Cerritos'}
     df['Almacen_Nombre'] = df['Almacen'].astype(str).map(almacen_map).fillna(df['Almacen'])
     
     numeric_cols = ['Ventas_60_Dias', 'Costo_Promedio_UND', 'Stock', 'Peso_Articulo', 'Lead_Time_Proveedor']
