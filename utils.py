@@ -480,18 +480,96 @@ def cargar_maestro_articulos_dropbox():
     
     return mapping_dict
 
+def _normalizar_nombre_columna(nombre_columna):
+    return str(nombre_columna).strip().lower().replace('_', '').replace(' ', '')
+
+def _buscar_columna_equivalente(df, aliases):
+    aliases_normalizados = {_normalizar_nombre_columna(alias) for alias in aliases}
+    for columna in df.columns:
+        if _normalizar_nombre_columna(columna) in aliases_normalizados:
+            return columna
+    return None
+
+def preparar_traslados_para_txt(df_traslados):
+    """
+    Normaliza un DataFrame de traslados para la generación de TXT.
+    Retorna (exito, mensaje, dataframe_preparado).
+    """
+    if df_traslados is None or df_traslados.empty:
+        return False, "No hay traslados válidos para generar archivos TXT.", pd.DataFrame()
+
+    df_txt = df_traslados.copy()
+
+    columna_referencia = _buscar_columna_equivalente(df_txt, ['referencia', 'sku'])
+    if columna_referencia is None:
+        return False, "No se encontró la columna 'SKU' o 'referencia' para generar los TXT.", pd.DataFrame()
+    df_txt['referencia'] = df_txt[columna_referencia]
+
+    if 'Tienda Origen' not in df_txt.columns:
+        columna_origen = _buscar_columna_equivalente(df_txt, ['tienda origen', 'origen', 'almacen nombre'])
+        if columna_origen is not None:
+            df_txt['Tienda Origen'] = df_txt[columna_origen]
+        elif 'Proveedor' in df_txt.columns:
+            origen_desde_proveedor = df_txt['Proveedor'].astype(str).str.extract(r'TRASLADO INTERNO:\s*(.*)', expand=False)
+            if origen_desde_proveedor.notna().any():
+                df_txt['Tienda Origen'] = origen_desde_proveedor
+
+    if 'Tienda Origen' not in df_txt.columns:
+        return False, "No se encontró la tienda de origen necesaria para generar los TXT.", pd.DataFrame()
+
+    columna_cantidad = _buscar_columna_equivalente(
+        df_txt,
+        ['uds a enviar', 'cantidad', 'cantidad enviar', 'cantidad solicitada']
+    )
+    if columna_cantidad is None:
+        return False, "No se encontró la columna de cantidad necesaria para generar los TXT.", pd.DataFrame()
+    df_txt['Uds a Enviar'] = df_txt[columna_cantidad]
+
+    df_txt['referencia'] = (
+        df_txt['referencia']
+        .astype(str)
+        .str.replace(r'\.0$', '', regex=True)
+        .str.strip()
+        .str.lower()
+    )
+    df_txt['Tienda Origen'] = df_txt['Tienda Origen'].astype(str).str.strip()
+    df_txt['Uds a Enviar'] = pd.to_numeric(df_txt['Uds a Enviar'], errors='coerce').fillna(0)
+
+    df_txt = df_txt[
+        (df_txt['referencia'].ne('')) &
+        (df_txt['referencia'].ne('nan')) &
+        (df_txt['Tienda Origen'].ne('')) &
+        (df_txt['Tienda Origen'].ne('nan')) &
+        (df_txt['Uds a Enviar'] > 0)
+    ].copy()
+
+    if df_txt.empty:
+        return False, "No quedaron filas válidas para construir los archivos TXT de traslado.", pd.DataFrame()
+
+    df_txt['Uds a Enviar'] = np.ceil(df_txt['Uds a Enviar']).astype(int)
+    return True, "", df_txt
+
 def generar_txt_traslados(df_traslados, mapping_dict):
     """
     Genera un archivo TXT para traslados con formato SECUENCIA|CODIGO|.|.|CANTIDAD|0|0|0|
     - df_traslados: DataFrame con columna 'referencia' y 'Uds a Enviar'
     - mapping_dict: dict {referencia: codigo_articulo}
     """
+    if df_traslados is None or df_traslados.empty:
+        return ""
+
+    if 'referencia' not in df_traslados.columns or 'Uds a Enviar' not in df_traslados.columns:
+        return ""
+
     lines = []
     secuencia = 1
     for _, row in df_traslados.iterrows():
         ref = str(row['referencia']).strip().lower()
         codigo = mapping_dict.get(ref, "SIN_CODIGO")
-        cantidad = int(row['Uds a Enviar'])
+        cantidad = pd.to_numeric(row['Uds a Enviar'], errors='coerce')
+        if pd.isna(cantidad) or cantidad <= 0:
+            continue
+        cantidad = int(np.ceil(cantidad))
         linea = f"{secuencia}|{codigo}|.|.|{cantidad}|0|0|0|"
         lines.append(linea)
         secuencia += 1
@@ -501,12 +579,13 @@ def generar_txts_por_tienda_origen(df_traslados, mapping_dict):
     """
     Genera un diccionario {tienda_origen: contenido_txt} para cada tienda de origen.
     """
+    exito, _, df_preparado = preparar_traslados_para_txt(df_traslados)
+    if not exito:
+        return {}
+
     txts = {}
-    for tienda, df_tienda in df_traslados.groupby('Tienda Origen'):
-        # Asegúrate de tener la columna 'referencia'
-        df_tienda = df_tienda.copy()
-        if 'SKU' in df_tienda.columns and 'referencia' not in df_tienda.columns:
-            df_tienda['referencia'] = df_tienda['SKU']
+    for tienda, df_tienda in df_preparado.groupby('Tienda Origen', sort=True):
         txt_content = generar_txt_traslados(df_tienda, mapping_dict)
-        txts[tienda] = txt_content
+        if txt_content:
+            txts[tienda] = txt_content
     return txts
