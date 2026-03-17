@@ -17,6 +17,7 @@ from google.oauth2.service_account import Credentials
 import logging
 import os
 import time
+import unicodedata
 
 # --- IMPORTACIÓN DE UTILS (Manejo de errores si falta el archivo) ---
 try:
@@ -241,13 +242,86 @@ def whatsapp_button(label, url, key):
         </div>
     </a>""", unsafe_allow_html=True)
 
+def normalizar_texto_clave(valor):
+    if pd.isna(valor):
+        return ""
+    texto = str(valor).strip()
+    if not texto or texto.lower() == 'nan':
+        return ""
+    texto = unicodedata.normalize('NFKD', texto)
+    texto = ''.join(char for char in texto if not unicodedata.combining(char))
+    return texto.lower().strip()
+
+def normalizar_sku_clave(valor):
+    texto = normalizar_texto_clave(valor)
+    if texto.endswith('.0'):
+        texto = texto[:-2]
+    return texto
+
+def normalizar_estado_orden(valor):
+    estado = normalizar_texto_clave(valor)
+    equivalencias = {
+        'pendiente': 'Pendiente',
+        'pendientes': 'Pendiente',
+        'en transito': 'En Tránsito',
+        'entransito': 'En Tránsito',
+        'transito': 'En Tránsito',
+        'recibido': 'Recibido',
+        'recibida': 'Recibido',
+        'cancelado': 'Cancelado',
+        'cancelada': 'Cancelado'
+    }
+    return equivalencias.get(estado, str(valor).strip() if pd.notna(valor) else '')
+
+def construir_mapa_tiendas_canonicas(df_base):
+    tiendas = []
+    if df_base is not None and not df_base.empty and 'Almacen_Nombre' in df_base.columns:
+        tiendas = sorted({str(tienda).strip() for tienda in df_base['Almacen_Nombre'].dropna() if str(tienda).strip()})
+    return {normalizar_texto_clave(tienda): tienda for tienda in tiendas}
+
+def normalizar_tienda_canonica(valor, mapa_tiendas):
+    clave = normalizar_texto_clave(valor)
+    if not clave:
+        return ""
+    return mapa_tiendas.get(clave, str(valor).strip())
+
+def preparar_ordenes_abiertas_para_calculo(df_ordenes, mapa_tiendas):
+    columnas_requeridas = {'SKU', 'Tienda_Destino', 'Cantidad_Solicitada', 'Estado'}
+    if df_ordenes is None or df_ordenes.empty or not columnas_requeridas.issubset(set(df_ordenes.columns)):
+        return pd.DataFrame(columns=['SKU', 'Tienda_Destino', 'Cantidad_Solicitada', 'Estado', 'Es_Traslado', 'Tienda_Origen'])
+
+    df_abiertas = df_ordenes.copy()
+    df_abiertas['SKU'] = df_abiertas['SKU'].apply(normalizar_sku_clave)
+    df_abiertas['Estado'] = df_abiertas['Estado'].apply(normalizar_estado_orden)
+    df_abiertas = df_abiertas[df_abiertas['Estado'].isin(['Pendiente', 'En Tránsito'])].copy()
+    if df_abiertas.empty:
+        return pd.DataFrame(columns=['SKU', 'Tienda_Destino', 'Cantidad_Solicitada', 'Estado', 'Es_Traslado', 'Tienda_Origen'])
+
+    df_abiertas['Cantidad_Solicitada'] = pd.to_numeric(df_abiertas['Cantidad_Solicitada'], errors='coerce').fillna(0)
+    df_abiertas = df_abiertas[df_abiertas['Cantidad_Solicitada'] > 0].copy()
+    if df_abiertas.empty:
+        return pd.DataFrame(columns=['SKU', 'Tienda_Destino', 'Cantidad_Solicitada', 'Estado', 'Es_Traslado', 'Tienda_Origen'])
+
+    df_abiertas['Tienda_Destino'] = df_abiertas['Tienda_Destino'].apply(lambda valor: normalizar_tienda_canonica(valor, mapa_tiendas))
+    proveedor_normalizado = df_abiertas.get('Proveedor', pd.Series('', index=df_abiertas.index)).astype(str)
+    df_abiertas['Es_Traslado'] = proveedor_normalizado.str.upper().str.startswith('TRASLADO INTERNO:')
+    df_abiertas['Tienda_Origen'] = proveedor_normalizado.str.extract(r'TRASLADO INTERNO:\s*(.*)', expand=False).fillna('')
+    df_abiertas['Tienda_Origen'] = df_abiertas['Tienda_Origen'].apply(lambda valor: normalizar_tienda_canonica(valor, mapa_tiendas))
+    df_abiertas = df_abiertas[(df_abiertas['SKU'] != '') & (df_abiertas['Tienda_Destino'] != '')].copy()
+    return df_abiertas
+
 @st.cache_data
 def generar_plan_traslados_inteligente(_df_analisis):
     """Algoritmo para generar un plan de traslados óptimo basado en excedentes y necesidades."""
     if _df_analisis is None or _df_analisis.empty: return pd.DataFrame()
 
     df_origen = _df_analisis[_df_analisis['Excedente_Trasladable'] > 0].sort_values(by='Excedente_Trasladable', ascending=False).copy()
-    df_destino = _df_analisis[_df_analisis['Necesidad_Ajustada_Por_Transito'] > 0].sort_values(by='Necesidad_Ajustada_Por_Transito', ascending=False).copy()
+    sort_destino_cols = ['Necesidad_Ajustada_Por_Transito']
+    ascending_destino = [False]
+    if 'Cobertura_Dias_Proyectada' in _df_analisis.columns:
+        sort_destino_cols = ['Cobertura_Dias_Proyectada', 'Necesidad_Ajustada_Por_Transito']
+        ascending_destino = [True, False]
+    df_destino = _df_analisis[_df_analisis['Necesidad_Ajustada_Por_Transito'] > 0].sort_values(by=sort_destino_cols, ascending=ascending_destino).copy()
 
     if df_origen.empty or df_destino.empty: return pd.DataFrame()
 
@@ -274,6 +348,7 @@ def generar_plan_traslados_inteligente(_df_analisis):
                     'Tienda Origen': tienda_origen, 'Stock en Origen': origen_row['Stock'],
                     'Tienda Destino': tienda_necesitada, 'Stock en Destino': necesidad_row['Stock'],
                     'Necesidad en Destino': necesidad_row['Necesidad_Ajustada_Por_Transito'],
+                    'Cobertura Proyectada Destino (días)': necesidad_row.get('Cobertura_Dias_Proyectada', 0),
                     'Uds a Enviar': unidades_a_enviar,
                     'Peso Individual (kg)': necesidad_row.get('Peso_Articulo', 0),
                     'Costo_Promedio_UND': necesidad_row['Costo_Promedio_UND']
@@ -530,28 +605,63 @@ df_ordenes_historico = load_data_from_sheets(client, "Registro_Ordenes")
 def calcular_estado_inventario_completo(df_base, df_ordenes):
     """Función central que calcula el estado completo del inventario."""
     df_maestro = df_base.copy()
+    mapa_tiendas = construir_mapa_tiendas_canonicas(df_maestro)
 
-    if not df_ordenes.empty and 'Estado' in df_ordenes.columns:
-        df_pendientes = df_ordenes[df_ordenes['Estado'] == 'Pendiente'].copy()
-        if not df_pendientes.empty:
-            df_pendientes['Cantidad_Solicitada'] = pd.to_numeric(df_pendientes['Cantidad_Solicitada'], errors='coerce').fillna(0)
-            stock_en_transito_agg = df_pendientes.groupby(['SKU', 'Tienda_Destino'])['Cantidad_Solicitada'].sum().reset_index()
-            stock_en_transito_agg.rename(columns={'Cantidad_Solicitada': 'Stock_En_Transito', 'Tienda_Destino': 'Almacen_Nombre'}, inplace=True)
-            df_maestro = pd.merge(df_maestro, stock_en_transito_agg, on=['SKU', 'Almacen_Nombre'], how='left')
-            df_maestro['Stock_En_Transito'].fillna(0, inplace=True)
-        else:
-            df_maestro['Stock_En_Transito'] = 0
-    else:
-        df_maestro['Stock_En_Transito'] = 0
+    if 'SKU' in df_maestro.columns:
+        df_maestro['SKU'] = df_maestro['SKU'].apply(normalizar_sku_clave)
+    if 'Almacen_Nombre' in df_maestro.columns:
+        df_maestro['Almacen_Nombre'] = df_maestro['Almacen_Nombre'].apply(lambda valor: normalizar_tienda_canonica(valor, mapa_tiendas))
 
-    numeric_cols = ['Stock', 'Costo_Promedio_UND', 'Necesidad_Total', 'Excedente_Trasladable', 'Precio_Venta_Estimado', 'Demanda_Diaria_Promedio', 'Peso_Articulo']
+    df_ordenes_abiertas = preparar_ordenes_abiertas_para_calculo(df_ordenes, mapa_tiendas)
+    df_maestro['Stock_En_Transito'] = 0
+    df_maestro['Stock_Saliente_Reservado'] = 0
+
+    if not df_ordenes_abiertas.empty:
+        entradas_abiertas = df_ordenes_abiertas.groupby(['SKU', 'Tienda_Destino'])['Cantidad_Solicitada'].sum().reset_index()
+        entradas_abiertas.rename(columns={'Cantidad_Solicitada': 'Stock_En_Transito', 'Tienda_Destino': 'Almacen_Nombre'}, inplace=True)
+        df_maestro = pd.merge(df_maestro, entradas_abiertas, on=['SKU', 'Almacen_Nombre'], how='left', suffixes=('', '_Entrada'))
+        if 'Stock_En_Transito_Entrada' in df_maestro.columns:
+            df_maestro['Stock_En_Transito'] = df_maestro['Stock_En_Transito'].add(df_maestro['Stock_En_Transito_Entrada'].fillna(0))
+            df_maestro.drop(columns=['Stock_En_Transito_Entrada'], inplace=True)
+
+        salidas_abiertas = df_ordenes_abiertas[df_ordenes_abiertas['Es_Traslado'] & (df_ordenes_abiertas['Tienda_Origen'] != '')].copy()
+        if not salidas_abiertas.empty:
+            salidas_abiertas = salidas_abiertas.groupby(['SKU', 'Tienda_Origen'])['Cantidad_Solicitada'].sum().reset_index()
+            salidas_abiertas.rename(columns={'Cantidad_Solicitada': 'Stock_Saliente_Reservado', 'Tienda_Origen': 'Almacen_Nombre'}, inplace=True)
+            df_maestro = pd.merge(df_maestro, salidas_abiertas, on=['SKU', 'Almacen_Nombre'], how='left', suffixes=('', '_Salida'))
+            if 'Stock_Saliente_Reservado_Salida' in df_maestro.columns:
+                df_maestro['Stock_Saliente_Reservado'] = df_maestro['Stock_Saliente_Reservado'].add(df_maestro['Stock_Saliente_Reservado_Salida'].fillna(0))
+                df_maestro.drop(columns=['Stock_Saliente_Reservado_Salida'], inplace=True)
+
+    numeric_cols = ['Stock', 'Costo_Promedio_UND', 'Necesidad_Total', 'Excedente_Trasladable', 'Precio_Venta_Estimado', 'Demanda_Diaria_Promedio', 'Peso_Articulo', 'Stock_Objetivo', 'Punto_Reorden', 'Stock_En_Transito', 'Stock_Saliente_Reservado']
     for col in numeric_cols:
         if col in df_maestro.columns:
             df_maestro[col] = pd.to_numeric(df_maestro[col], errors='coerce').fillna(0)
         else: 
             df_maestro[col] = 0
 
-    df_maestro['Necesidad_Ajustada_Por_Transito'] = (df_maestro.get('Necesidad_Total', 0) - df_maestro.get('Stock_En_Transito', 0)).clip(lower=0)
+    df_maestro['Stock_Disponible_Actual'] = (df_maestro['Stock'] - df_maestro['Stock_Saliente_Reservado']).clip(lower=0)
+    df_maestro['Objetivo_Abastecimiento'] = np.maximum(
+        df_maestro.get('Stock_Objetivo', 0),
+        df_maestro.get('Punto_Reorden', 0)
+    )
+    objetivo_fallback = (df_maestro['Stock'] + df_maestro['Necesidad_Total']).clip(lower=0)
+    df_maestro['Objetivo_Abastecimiento'] = np.where(
+        df_maestro['Objetivo_Abastecimiento'] > 0,
+        df_maestro['Objetivo_Abastecimiento'],
+        objetivo_fallback
+    )
+    df_maestro['Stock_Disponible_Proyectado'] = df_maestro['Stock_Disponible_Actual'] + df_maestro['Stock_En_Transito']
+    df_maestro['Necesidad_Ajustada_Por_Transito'] = (df_maestro['Objetivo_Abastecimiento'] - df_maestro['Stock_Disponible_Proyectado']).clip(lower=0)
+    df_maestro['Excedente_Trasladable'] = np.minimum(
+        df_maestro.get('Excedente_Trasladable', 0),
+        (df_maestro['Stock_Disponible_Actual'] - df_maestro['Objetivo_Abastecimiento']).clip(lower=0)
+    )
+    df_maestro['Cobertura_Dias_Proyectada'] = np.where(
+        df_maestro['Demanda_Diaria_Promedio'] > 0,
+        df_maestro['Stock_Disponible_Proyectado'] / df_maestro['Demanda_Diaria_Promedio'],
+        9999
+    )
     df_plan_maestro = generar_plan_traslados_inteligente(df_maestro)
 
     if not df_plan_maestro.empty:
@@ -562,8 +672,16 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
     else:
         df_maestro['Cubierto_Por_Traslado'] = 0
 
-    df_maestro['Sugerencia_Compra'] = (df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)
-    df_maestro['Stock_Disponible_Proyectado'] = df_maestro['Stock'] + df_maestro['Stock_En_Transito']
+    df_maestro['Sugerencia_Compra'] = np.ceil((df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)).astype(int)
+    df_maestro['Prioridad_Abastecimiento'] = np.select(
+        [
+            (df_maestro['Necesidad_Ajustada_Por_Transito'] > 0) & (df_maestro['Cobertura_Dias_Proyectada'] <= 7),
+            (df_maestro['Necesidad_Ajustada_Por_Transito'] > 0) & (df_maestro['Cobertura_Dias_Proyectada'] <= 15),
+            df_maestro['Necesidad_Ajustada_Por_Transito'] > 0
+        ],
+        ['Crítica', 'Alta', 'Media'],
+        default='Estable'
+    )
 
     if 'Precio_Venta_Estimado' not in df_maestro.columns or df_maestro['Precio_Venta_Estimado'].sum() == 0:
         df_maestro['Precio_Venta_Estimado'] = df_maestro['Costo_Promedio_UND'] * 1.30
@@ -1031,6 +1149,15 @@ if active_tab == tab_titles[2]:
     st.header("🛒 Plan de Compras")
     with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
         df_plan_compras_base = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
+        if not df_plan_compras_base.empty and 'Prioridad_Abastecimiento' in df_plan_compras_base.columns:
+            orden_prioridad = {'Crítica': 0, 'Alta': 1, 'Media': 2, 'Estable': 3}
+            df_plan_compras_base['Orden_Prioridad'] = df_plan_compras_base['Prioridad_Abastecimiento'].map(orden_prioridad).fillna(99)
+            columnas_orden = ['Orden_Prioridad', 'Sugerencia_Compra']
+            ascendente_orden = [True, False]
+            if 'Cobertura_Dias_Proyectada' in df_plan_compras_base.columns:
+                columnas_orden = ['Orden_Prioridad', 'Cobertura_Dias_Proyectada', 'Sugerencia_Compra']
+                ascendente_orden = [True, True, False]
+            df_plan_compras_base = df_plan_compras_base.sort_values(by=columnas_orden, ascending=ascendente_orden).drop(columns=['Orden_Prioridad'])
 
         st.markdown("##### Filtros Avanzados de Compras")
         f_c1, f_c2, f_c3 = st.columns(3)
@@ -1117,7 +1244,9 @@ if active_tab == tab_titles[2]:
                 
                 df_stock_global = df_maestro[df_maestro['SKU'].isin(selected_skus)].copy()
                 
-                df_display_stock = df_stock_global[['SKU', 'Descripcion', 'Almacen_Nombre', 'Stock', 'Stock_En_Transito', 'Estado_Inventario']]
+                columnas_stock_global = ['SKU', 'Descripcion', 'Almacen_Nombre', 'Stock', 'Stock_Saliente_Reservado', 'Stock_En_Transito', 'Stock_Disponible_Proyectado', 'Estado_Inventario']
+                columnas_stock_global = [col for col in columnas_stock_global if col in df_stock_global.columns]
+                df_display_stock = df_stock_global[columnas_stock_global]
                 
                 st.dataframe(
                     df_display_stock,
@@ -1126,7 +1255,9 @@ if active_tab == tab_titles[2]:
                     column_config={
                         "Almacen_Nombre": "Tienda",
                         "Stock": st.column_config.NumberColumn(format="%d"),
-                        "Stock_En_Transito": st.column_config.NumberColumn(format="%d")
+                        "Stock_Saliente_Reservado": st.column_config.NumberColumn(label="Reservado Salida", format="%d"),
+                        "Stock_En_Transito": st.column_config.NumberColumn(format="%d"),
+                        "Stock_Disponible_Proyectado": st.column_config.NumberColumn(label="Disponible Proyectado", format="%d")
                     }
                 )
 
