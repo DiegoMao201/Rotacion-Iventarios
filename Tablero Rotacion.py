@@ -123,16 +123,14 @@ def limpiar_duplicados_sku_por_almacen(df):
     # Agrupar por las columnas clave y sumar o tomar la primera aparición
     agg_funcs = {
         'DEPARTAMENTO': 'first',
-        'REFERENCIA': 'first',
         'DESCRIPCION': 'first',
         'MARCA': 'first',
         'PESO_ARTICULO': 'first',
         'UNIDADES_VENDIDAS': 'sum',
         'STOCK': 'sum',
         'COSTO_PROMEDIO_UND': 'first', # Asumimos que el costo promedio es el mismo
-        'CODALMACEN': 'first',
         'LEAD_TIME_PROVEEDOR': 'first',
-        'HISTORIAL_VENTAS': lambda x: ','.join(x.astype(str).unique()) # Combina los historiales de ventas únicos
+        'HISTORIAL_VENTAS': lambda x: ','.join(x.dropna().astype(str).unique()) # Combina los historiales de ventas únicos
     }
 
     # Eliminar 'HISTORIAL_VENTAS' si todas sus filas son nulas, para evitar errores en la lambda
