@@ -210,7 +210,7 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     ).reset_index()
     sku_summary['Total_Traslados_Posibles_SKU'] = np.minimum(sku_summary['Total_Necesidad_SKU'], sku_summary['Total_Excedente_SKU'])
     df = df.merge(sku_summary.drop(columns=['Total_Necesidad_SKU']), on='SKU', how='left')
-    df['Unidades_Traslado_Sugeridas'] = 0
+    df['Unidades_Traslado_Sugeridas'] = 0.0
     mask_necesidad = (df['Necesidad_Total'] > 0) & (df.groupby('SKU')['Necesidad_Total'].transform('sum') > 0)
     df.loc[mask_necesidad, 'Unidades_Traslado_Sugeridas'] = (df['Necesidad_Total'] / df.groupby('SKU')['Necesidad_Total'].transform('sum')) * df['Total_Traslados_Posibles_SKU']
     df['Sugerencia_Compra'] = np.ceil(df['Necesidad_Total'] - df['Unidades_Traslado_Sugeridas'].fillna(0))
