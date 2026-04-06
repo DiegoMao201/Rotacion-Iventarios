@@ -319,9 +319,15 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     # Velocidad de venta: cambio periodo actual vs anterior
     df['Precio_Venta_Estimado'] = df['Costo_Promedio_UND'] * 1.30
 
-    df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
+    # Objetivo real: el mayor entre stock_objetivo y punto_reorden (cubre lead times largos)
+    df['Objetivo_Abastecimiento'] = np.maximum(df['Stock_Objetivo'], df['Punto_Reorden'])
+    # Necesidad proactiva: anticipa el consumo durante el lead time del proveedor
+    df['Necesidad_Total'] = np.maximum(0,
+        df['Objetivo_Abastecimiento'] - df['Stock']
+        + (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor'])
+    )
     # Excedente_Trasladable: stock que esta tienda puede ceder a otras
-    # - Excedente: todo lo que sobra por encima del Stock_Objetivo
+    # - Excedente: todo lo que sobra por encima del Objetivo_Abastecimiento
     # - Baja Rotación: TODO el stock (si no vende aquí, que venda en otra sede)
     # - Normal/Bajo Stock/Quiebre: no ceden stock
     df['Excedente_Trasladable'] = np.select(
@@ -330,7 +336,7 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
             df['Estado_Inventario'] == 'Baja Rotación / Obsoleto',
         ],
         [
-            np.maximum(0, df['Stock'] - df['Stock_Objetivo']),
+            np.maximum(0, df['Stock'] - df['Objetivo_Abastecimiento']),
             df['Stock'],  # Todo el stock sin rotación es trasladable
         ],
         default=0

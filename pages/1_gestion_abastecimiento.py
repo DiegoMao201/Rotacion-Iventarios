@@ -649,7 +649,7 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
                 df_maestro['Stock_Saliente_Reservado'] = df_maestro['Stock_Saliente_Reservado'].add(df_maestro['Stock_Saliente_Reservado_Salida'].fillna(0))
                 df_maestro.drop(columns=['Stock_Saliente_Reservado_Salida'], inplace=True)
 
-    numeric_cols = ['Stock', 'Costo_Promedio_UND', 'Necesidad_Total', 'Excedente_Trasladable', 'Precio_Venta_Estimado', 'Demanda_Diaria_Promedio', 'Peso_Articulo', 'Stock_Objetivo', 'Punto_Reorden', 'Stock_En_Transito', 'Stock_Saliente_Reservado']
+    numeric_cols = ['Stock', 'Costo_Promedio_UND', 'Necesidad_Total', 'Excedente_Trasladable', 'Precio_Venta_Estimado', 'Demanda_Diaria_Promedio', 'Peso_Articulo', 'Stock_Objetivo', 'Punto_Reorden', 'Stock_En_Transito', 'Stock_Saliente_Reservado', 'Lead_Time_Proveedor']
     for col in numeric_cols:
         if col in df_maestro.columns:
             df_maestro[col] = pd.to_numeric(df_maestro[col], errors='coerce').fillna(0)
@@ -674,7 +674,11 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
         objetivo_fallback
     )
     df_maestro['Stock_Disponible_Proyectado'] = df_maestro['Stock_Disponible_Actual'] + df_maestro['Stock_En_Transito']
-    df_maestro['Necesidad_Ajustada_Por_Transito'] = (df_maestro['Objetivo_Abastecimiento'] - df_maestro['Stock_Disponible_Proyectado']).clip(lower=0)
+    df_maestro['Necesidad_Ajustada_Por_Transito'] = (
+        df_maestro['Objetivo_Abastecimiento']
+        - df_maestro['Stock_Disponible_Proyectado']
+        + df_maestro['Demanda_Diaria_Promedio'] * df_maestro['Lead_Time_Proveedor']
+    ).clip(lower=0)
     # Excedente_Trasladable recalculado con órdenes abiertas:
     # - Con demanda: solo lo que sobra por encima del objetivo
     # - Sin demanda (Baja Rotación): todo el stock disponible es trasladable
