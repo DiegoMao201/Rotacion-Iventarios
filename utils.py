@@ -172,6 +172,9 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     else:
         df['Demanda_Diaria_Promedio'] = 0
     df['Demanda_Diaria_Promedio'].fillna(0, inplace=True)
+    # FALLBACK: Si Historial_Ventas no parsó pero hay ventas reportadas, usar ese dato
+    mask_fallback = (df['Demanda_Diaria_Promedio'] == 0) & (df['Ventas_60_Dias'] > 0)
+    df.loc[mask_fallback, 'Demanda_Diaria_Promedio'] = df.loc[mask_fallback, 'Ventas_60_Dias'] / 60
     df['Valor_Inventario'] = df['Stock'] * df['Costo_Promedio_UND']
     df['Stock_Seguridad'] = df['Demanda_Diaria_Promedio'] * dias_seguridad
     df['Punto_Reorden'] = (df['Demanda_Diaria_Promedio'] * df['Lead_Time_Proveedor']) + df['Stock_Seguridad']
@@ -208,7 +211,21 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     df['Precio_Venta_Estimado'] = df['Costo_Promedio_UND'] * 1.30
 
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
-    df['Excedente_Trasladable'] = np.where(df['Estado_Inventario'] == 'Excedente', np.maximum(0, df['Stock'] - df['Stock_Objetivo']), 0)
+    # Excedente_Trasladable: stock que esta tienda puede ceder a otras
+    # - Excedente: todo lo que sobra por encima del Stock_Objetivo
+    # - Baja Rotación: TODO el stock (si no vende aquí, que venda en otra sede)
+    # - Normal/Bajo Stock/Quiebre: no ceden stock
+    df['Excedente_Trasladable'] = np.select(
+        [
+            df['Estado_Inventario'] == 'Excedente',
+            df['Estado_Inventario'] == 'Baja Rotación / Obsoleto',
+        ],
+        [
+            np.maximum(0, df['Stock'] - df['Stock_Objetivo']),
+            df['Stock'],  # Todo el stock sin rotación es trasladable
+        ],
+        default=0
+    )
     
     # --- MANEJO ROBUSTO DE PROVEEDORES ---
     if validate_dataframe(_df_proveedores, EXPECTED_PROVIDERS_COLS, "archivo de proveedores"):

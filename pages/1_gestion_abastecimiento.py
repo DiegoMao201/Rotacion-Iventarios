@@ -661,7 +661,13 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
         df_maestro.get('Stock_Objetivo', 0),
         df_maestro.get('Punto_Reorden', 0)
     )
-    objetivo_fallback = (df_maestro['Stock'] + df_maestro['Necesidad_Total']).clip(lower=0)
+    # Para productos sin demanda, el objetivo es 0 (no necesitan stock aquí, que se traslade)
+    # Para productos con demanda cuyo objetivo base sea 0, usar fallback conservador
+    objetivo_fallback = np.where(
+        df_maestro['Demanda_Diaria_Promedio'] > 0,
+        (df_maestro['Stock'] + df_maestro['Necesidad_Total']).clip(lower=1),
+        0  # Sin demanda → objetivo 0 → todo su stock es excedente trasladable
+    )
     df_maestro['Objetivo_Abastecimiento'] = np.where(
         df_maestro['Objetivo_Abastecimiento'] > 0,
         df_maestro['Objetivo_Abastecimiento'],
@@ -669,9 +675,14 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
     )
     df_maestro['Stock_Disponible_Proyectado'] = df_maestro['Stock_Disponible_Actual'] + df_maestro['Stock_En_Transito']
     df_maestro['Necesidad_Ajustada_Por_Transito'] = (df_maestro['Objetivo_Abastecimiento'] - df_maestro['Stock_Disponible_Proyectado']).clip(lower=0)
-    df_maestro['Excedente_Trasladable'] = np.minimum(
-        df_maestro.get('Excedente_Trasladable', 0),
-        (df_maestro['Stock_Disponible_Actual'] - df_maestro['Objetivo_Abastecimiento']).clip(lower=0)
+    # Excedente_Trasladable recalculado con órdenes abiertas:
+    # - Con demanda: solo lo que sobra por encima del objetivo
+    # - Sin demanda (Baja Rotación): todo el stock disponible es trasladable
+    excedente_por_stock = (df_maestro['Stock_Disponible_Actual'] - df_maestro['Objetivo_Abastecimiento']).clip(lower=0)
+    df_maestro['Excedente_Trasladable'] = np.where(
+        df_maestro['Demanda_Diaria_Promedio'] <= 0,
+        df_maestro['Stock_Disponible_Actual'].clip(lower=0),
+        excedente_por_stock
     )
     df_maestro['Cobertura_Dias_Proyectada'] = np.where(
         df_maestro['Demanda_Diaria_Promedio'] > 0,
