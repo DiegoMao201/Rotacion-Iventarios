@@ -8,6 +8,7 @@ from fpdf import FPDF
 from datetime import datetime
 import smtplib
 import urllib.parse
+import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
@@ -72,6 +73,42 @@ def convertir_serie_a_entero_seguro(serie):
     serie_numerica = pd.to_numeric(serie, errors='coerce')
     serie_limpia = serie_numerica.replace([np.inf, -np.inf], np.nan).fillna(0)
     return np.ceil(serie_limpia).astype(int)
+
+
+def _detectar_empaque(descripcion):
+    """Detecta la unidad de empaque según la descripción del producto.
+    Retorna el tamaño de empaque (int) o 1 si no aplica."""
+    desc = str(descripcion).upper()
+    # Excluir Aerocolor 0.4 (se maneja por separado como filtro)
+    # ZP Montana → empaque 6
+    if 'ZP' in desc and 'MONTANA' in desc:
+        return 6
+    # Aerosol 0.3L → empaque 12 (excluye aerocolor 0.4)
+    if re.search(r'AEROSOL|\b0[.,]3\s*L', desc):
+        return 12
+    # Galón 3.79L → empaque 4
+    if re.search(r'GALON|GALÓN|3[.,]79|\b1/1\b|\bGL\b', desc) and not re.search(r'CUÑETE|CUNETE|BALDE|18[.,]93|9[.,]46', desc):
+        return 4
+    # Cuarto 0.95L / 1.2L → empaque 9
+    if re.search(r'CUARTO|1/4|\b0[.,]95|\b1[.,]2\s*L', desc):
+        return 9
+    # Cuñete 18.93L y Balde 9.46L → sin empaque especial
+    # Resto → sin empaque especial
+    return 1
+
+
+def _es_aerocolor_excluido(descripcion):
+    """Retorna True si el producto es Aerocolor 0.4 (excluido de compras)."""
+    desc = str(descripcion).upper()
+    return bool(re.search(r'AEROCOLOR.*0[.,]4|0[.,]4.*AEROCOLOR', desc))
+
+
+def calcular_ud_empaque(sugerencia, empaque):
+    """Redondea la sugerencia al múltiplo superior de la unidad de empaque."""
+    if empaque <= 1 or sugerencia <= 0:
+        return int(sugerencia)
+    return int(np.ceil(sugerencia / empaque) * empaque)
+
 
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -1214,7 +1251,10 @@ if active_tab == tab_titles[1]:
 if active_tab == tab_titles[2]:
     st.header("🛒 Plan de Compras")
     with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
-        df_plan_compras_base = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
+        df_plan_compras_base = df_filtered[
+            (df_filtered['Sugerencia_Compra'] > 0)
+            & (~df_filtered['Descripcion'].apply(_es_aerocolor_excluido))
+        ].copy()
         if not df_plan_compras_base.empty and 'Prioridad_Abastecimiento' in df_plan_compras_base.columns:
             orden_prioridad = {'Crítica': 0, 'Alta': 1, 'Media': 2, 'Estable': 3}
             df_plan_compras_base['Orden_Prioridad'] = df_plan_compras_base['Prioridad_Abastecimiento'].map(orden_prioridad).fillna(99)
@@ -1255,6 +1295,11 @@ if active_tab == tab_titles[2]:
             
             df_a_mostrar = df_temp.copy()
             df_a_mostrar['Uds a Comprar'] = convertir_serie_a_entero_seguro(df_a_mostrar['Sugerencia_Compra'])
+            df_a_mostrar['_empaque'] = df_a_mostrar['Descripcion'].apply(_detectar_empaque)
+            df_a_mostrar['Ud Empaque'] = df_a_mostrar.apply(
+                lambda r: calcular_ud_empaque(r['Uds a Comprar'], r['_empaque']), axis=1
+            )
+            df_a_mostrar.drop(columns=['_empaque'], inplace=True)
             df_a_mostrar['Seleccionar'] = False 
             df_a_mostrar_final = df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'})
             st.session_state.df_compras_editor = df_a_mostrar_final.copy()
@@ -1267,12 +1312,13 @@ if active_tab == tab_titles[2]:
             with st.form(key="compras_sugerencia_form"):
                 st.markdown("Marque los artículos y ajuste las cantidades. **Haga clic en 'Confirmar Cambios' para procesar.**")
                 
-                cols = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock', 'Stock_En_Transito', 'Uds a Comprar', 'Costo_Promedio_UND', 'Peso_Articulo']
+                cols = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock', 'Stock_En_Transito', 'Uds a Comprar', 'Ud Empaque', 'Costo_Promedio_UND', 'Peso_Articulo']
                 cols_existentes = [c for c in cols if c in st.session_state.df_compras_editor.columns]
 
                 edited_df = st.data_editor(st.session_state.df_compras_editor[cols_existentes], hide_index=True, use_container_width=True,
                     column_config={
                         "Uds a Comprar": st.column_config.NumberColumn(min_value=0), 
+                        "Ud Empaque": st.column_config.NumberColumn(label="Ud Empaque", format="%d", help="Cantidad ajustada a unidad de empaque"),
                         "Seleccionar": st.column_config.CheckboxColumn(required=True),
                         "Peso_Articulo": st.column_config.NumberColumn(label="Peso Unit. (kg)", format="%.2f kg"),
                         "Stock": st.column_config.NumberColumn(label="Stock Actual", format="%d")
@@ -1351,7 +1397,9 @@ if active_tab == tab_titles[2]:
                 for (proveedor, tienda), df_grupo in grouped:
                     with st.container(border=True):
                         st.markdown(f"#### Orden para **{proveedor}** ➡️ Destino: **{tienda}**")
-                        st.dataframe(df_grupo[['SKU', 'Descripcion', 'Uds a Comprar', 'Costo_Promedio_UND', 'Valor de la Compra', 'Peso Total (kg)']], use_container_width=True)
+                        cols_orden = ['SKU', 'Descripcion', 'Uds a Comprar', 'Ud Empaque', 'Costo_Promedio_UND', 'Valor de la Compra', 'Peso Total (kg)']
+                        cols_orden = [c for c in cols_orden if c in df_grupo.columns]
+                        st.dataframe(df_grupo[cols_orden], use_container_width=True)
 
                         with st.form(key=f"form_{proveedor.replace(' ', '_')}_{tienda.replace(' ', '_')}"):
                             contacto_info = CONTACTOS_PROVEEDOR.get(proveedor, {})
