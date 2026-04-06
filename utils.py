@@ -17,6 +17,13 @@ from email import encoders
 from google.oauth2.service_account import Credentials
 import dropbox
 
+
+def convertir_serie_a_entero_seguro(serie):
+    """Convierte una serie numérica a entero evitando fallos por NaN o infinitos."""
+    serie_numerica = pd.to_numeric(serie, errors='coerce')
+    serie_limpia = serie_numerica.replace([np.inf, -np.inf], np.nan).fillna(0)
+    return np.ceil(serie_limpia).astype(int)
+
 # --- CONSTANTES Y CONFIGURACIONES (AJUSTADAS A TUS NECESIDADES) ---
 EXPECTED_INVENTORY_COLS = [
     'DEPARTAMENTO', 'REFERENCIA', 'DESCRIPCION', 'MARCA', 'PESO_ARTICULO',
@@ -246,8 +253,8 @@ def calcular_sugerencias_finales(_df_base, _df_ordenes):
         df_maestro = pd.merge(df_maestro, unidades_cubiertas, on=['SKU', 'Almacen_Nombre'], how='left')
         df_maestro['Cubierto_Por_Traslado'] = df_maestro['Cubierto_Por_Traslado'].add(df_maestro['Cubierto_Por_Traslado_Nuevas'].fillna(0))
         df_maestro.drop(columns=['Cubierto_Por_Traslado_Nuevas'], inplace=True)
-    df_maestro['Sugerencia_Compra'] = np.ceil(df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)
-    df_maestro['Sugerencia_Compra'] = df_maestro['Sugerencia_Compra'].astype(int)
+    sugerencia_compra = (df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)
+    df_maestro['Sugerencia_Compra'] = convertir_serie_a_entero_seguro(sugerencia_compra)
     return df_maestro, df_plan_maestro
 
 @st.cache_data
@@ -275,7 +282,7 @@ def generar_plan_traslados_inteligente(_df_analisis):
                 if necesidad <= 0: break
     if not plan_final: return pd.DataFrame()
     df_resultado = pd.DataFrame(plan_final)
-    df_resultado['Uds a Enviar'] = df_resultado['Uds a Enviar'].astype(int)
+    df_resultado['Uds a Enviar'] = convertir_serie_a_entero_seguro(df_resultado['Uds a Enviar'])
     df_resultado['Valor del Traslado'] = pd.to_numeric(df_resultado['Uds a Enviar']) * pd.to_numeric(df_resultado['Costo_Promedio_UND'])
     return df_resultado[df_resultado['Uds a Enviar'] > 0].sort_values(by=['Valor del Traslado'], ascending=False).reset_index(drop=True)
 
@@ -546,7 +553,7 @@ def preparar_traslados_para_txt(df_traslados):
     if df_txt.empty:
         return False, "No quedaron filas válidas para construir los archivos TXT de traslado.", pd.DataFrame()
 
-    df_txt['Uds a Enviar'] = np.ceil(df_txt['Uds a Enviar']).astype(int)
+    df_txt['Uds a Enviar'] = convertir_serie_a_entero_seguro(df_txt['Uds a Enviar'])
     return True, "", df_txt
 
 def generar_txt_traslados(df_traslados, mapping_dict):

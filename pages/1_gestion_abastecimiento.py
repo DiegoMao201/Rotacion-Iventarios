@@ -57,6 +57,13 @@ for key, default_value in keys_to_initialize.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
 
+
+def convertir_serie_a_entero_seguro(serie):
+    """Convierte una serie numérica a entero evitando fallos por NaN o infinitos."""
+    serie_numerica = pd.to_numeric(serie, errors='coerce')
+    serie_limpia = serie_numerica.replace([np.inf, -np.inf], np.nan).fillna(0)
+    return np.ceil(serie_limpia).astype(int)
+
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -672,7 +679,8 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
     else:
         df_maestro['Cubierto_Por_Traslado'] = 0
 
-    df_maestro['Sugerencia_Compra'] = np.ceil((df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)).astype(int)
+    sugerencia_compra = (df_maestro['Necesidad_Ajustada_Por_Transito'] - df_maestro['Cubierto_Por_Traslado']).clip(lower=0)
+    df_maestro['Sugerencia_Compra'] = convertir_serie_a_entero_seguro(sugerencia_compra)
     df_maestro['Prioridad_Abastecimiento'] = np.select(
         [
             (df_maestro['Necesidad_Ajustada_Por_Transito'] > 0) & (df_maestro['Cobertura_Dias_Proyectada'] <= 7),
@@ -1188,7 +1196,7 @@ if active_tab == tab_titles[2]:
             # --- FIN DE MODIFICACIÓN ---
             
             df_a_mostrar = df_temp.copy()
-            df_a_mostrar['Uds a Comprar'] = df_a_mostrar['Sugerencia_Compra'].apply(np.ceil).astype(int)
+            df_a_mostrar['Uds a Comprar'] = convertir_serie_a_entero_seguro(df_a_mostrar['Sugerencia_Compra'])
             df_a_mostrar['Seleccionar'] = False 
             df_a_mostrar_final = df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'})
             st.session_state.df_compras_editor = df_a_mostrar_final.copy()
