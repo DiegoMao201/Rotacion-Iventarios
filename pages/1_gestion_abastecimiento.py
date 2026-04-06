@@ -569,24 +569,30 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
         'Peso Total (kg)': 'Peso_Total_kg',
         'Costo_Promedio_UND': 'Costo_Unitario',
         'Valor del Traslado': 'Costo_Total', 'Valor de la Compra': 'Costo_Total',
+        'Ud Empaque': 'Ud_Empaque',
+        'Cantidad_Final': 'Cantidad',
     }
 
     df_excel.rename(columns=rename_map, inplace=True)
 
-    if 'Cantidad' in df_excel.columns:
+    # Si existe Ud_Empaque, usarla como Cantidad
+    if 'Ud_Empaque' in df_excel.columns:
+        df_excel['Cantidad'] = pd.to_numeric(df_excel['Ud_Empaque'], errors='coerce').fillna(0)
+    elif 'Cantidad' in df_excel.columns:
         df_excel['Cantidad'] = pd.to_numeric(df_excel['Cantidad'], errors='coerce').fillna(0)
-        
-        if 'Peso_Unitario_kg' in df_excel.columns:
-            df_excel['Peso_Unitario_kg'] = pd.to_numeric(df_excel['Peso_Unitario_kg'], errors='coerce').fillna(0)
-            if 'Peso_Total_kg' not in df_excel.columns:
-                df_excel['Peso_Total_kg'] = df_excel['Cantidad'] * df_excel['Peso_Unitario_kg']
 
-        if 'Costo_Unitario' in df_excel.columns:
-            df_excel['Costo_Unitario'] = pd.to_numeric(df_excel['Costo_Unitario'], errors='coerce').fillna(0)
-            if 'Costo_Total' not in df_excel.columns:
-                df_excel['Costo_Total'] = df_excel['Cantidad'] * df_excel['Costo_Unitario']
+    if 'Peso_Unitario_kg' in df_excel.columns:
+        df_excel['Peso_Unitario_kg'] = pd.to_numeric(df_excel['Peso_Unitario_kg'], errors='coerce').fillna(0)
+        if 'Peso_Total_kg' not in df_excel.columns:
+            df_excel['Peso_Total_kg'] = df_excel['Cantidad'] * df_excel['Peso_Unitario_kg']
 
-    COLS_FINALES_EXCEL = ['SKU', 'Descripcion', 'Cantidad', 'Origen', 'Destino', 'Peso_Unitario_kg', 'Peso_Total_kg', 'Costo_Unitario', 'Costo_Total']
+    if 'Costo_Unitario' in df_excel.columns:
+        df_excel['Costo_Unitario'] = pd.to_numeric(df_excel['Costo_Unitario'], errors='coerce').fillna(0)
+        if 'Costo_Total' not in df_excel.columns:
+            df_excel['Costo_Total'] = df_excel['Cantidad'] * df_excel['Costo_Unitario']
+
+    # Siempre incluir Ud_Empaque si existe
+    COLS_FINALES_EXCEL = ['SKU', 'Descripcion', 'Cantidad', 'Ud_Empaque', 'Origen', 'Destino', 'Peso_Unitario_kg', 'Peso_Total_kg', 'Costo_Unitario', 'Costo_Total']
     cols_existentes_en_df = [col for col in COLS_FINALES_EXCEL if col in df_excel.columns]
     df_final = df_excel[cols_existentes_en_df].fillna('')
     
@@ -1315,15 +1321,21 @@ if active_tab == tab_titles[2]:
                 cols = ['Seleccionar', 'Tienda', 'Proveedor', 'SKU', 'SKU_Proveedor', 'Descripcion', 'Stock', 'Stock_En_Transito', 'Uds a Comprar', 'Ud Empaque', 'Costo_Promedio_UND', 'Peso_Articulo']
                 cols_existentes = [c for c in cols if c in st.session_state.df_compras_editor.columns]
 
-                edited_df = st.data_editor(st.session_state.df_compras_editor[cols_existentes], hide_index=True, use_container_width=True,
+                # Ahora Ud Empaque también es editable
+                edited_df = st.data_editor(
+                    st.session_state.df_compras_editor[cols_existentes],
+                    hide_index=True,
+                    use_container_width=True,
                     column_config={
-                        "Uds a Comprar": st.column_config.NumberColumn(min_value=0), 
-                        "Ud Empaque": st.column_config.NumberColumn(label="Ud Empaque", format="%d", help="Cantidad ajustada a unidad de empaque"),
+                        "Uds a Comprar": st.column_config.NumberColumn(min_value=0),
+                        "Ud Empaque": st.column_config.NumberColumn(label="Ud Empaque", format="%d", help="Cantidad ajustada a unidad de empaque", min_value=0),
                         "Seleccionar": st.column_config.CheckboxColumn(required=True),
                         "Peso_Articulo": st.column_config.NumberColumn(label="Peso Unit. (kg)", format="%.2f kg"),
                         "Stock": st.column_config.NumberColumn(label="Stock Actual", format="%d")
-                        },
-                    disabled=[c for c in cols_existentes if c not in ['Seleccionar', 'Uds a Comprar']], key="editor_principal")
+                    },
+                    disabled=[c for c in cols_existentes if c not in ['Seleccionar', 'Uds a Comprar', 'Ud Empaque']],
+                    key="editor_principal"
+                )
                 
                 form_c1, form_c2, form_c3 = st.columns([1,1.2,4])
                 select_all = form_c1.form_submit_button("Seleccionar Todos")
@@ -1375,10 +1387,13 @@ if active_tab == tab_titles[2]:
 
             if not df_seleccionados.empty:
                 df_seleccionados['Uds a Comprar'] = pd.to_numeric(df_seleccionados['Uds a Comprar'], errors='coerce').fillna(0)
+                df_seleccionados['Ud Empaque'] = pd.to_numeric(df_seleccionados['Ud Empaque'], errors='coerce').fillna(0)
                 df_seleccionados['Costo_Promedio_UND'] = pd.to_numeric(df_seleccionados['Costo_Promedio_UND'], errors='coerce').fillna(0)
                 df_seleccionados['Peso_Articulo'] = pd.to_numeric(df_seleccionados['Peso_Articulo'], errors='coerce').fillna(0)
-                df_seleccionados['Valor de la Compra'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
-                df_seleccionados['Peso Total (kg)'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Peso_Articulo']
+                # Para los cálculos, usar Ud Empaque si existe y es >0, si no Uds a Comprar
+                df_seleccionados['Cantidad_Final'] = np.where(df_seleccionados['Ud Empaque'] > 0, df_seleccionados['Ud Empaque'], df_seleccionados['Uds a Comprar'])
+                df_seleccionados['Valor de la Compra'] = df_seleccionados['Cantidad_Final'] * df_seleccionados['Costo_Promedio_UND']
+                df_seleccionados['Peso Total (kg)'] = df_seleccionados['Cantidad_Final'] * df_seleccionados['Peso_Articulo']
                 
                 valor_total = df_seleccionados['Valor de la Compra'].sum()
                 peso_total_compra = df_seleccionados['Peso Total (kg)'] .sum()
