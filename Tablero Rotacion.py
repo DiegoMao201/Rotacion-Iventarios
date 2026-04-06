@@ -523,14 +523,19 @@ if df_crudo is not None and not df_crudo.empty:
     st.markdown('<p class="section-header">🔍 Consulta de Inventario por Producto</p>', unsafe_allow_html=True)
     search_term = st.text_input("Buscar producto por SKU, Descripción o cualquier palabra clave:", placeholder="Ej: 'ESTUCO', '102030', 'ACRILICO BLANCO'")
     if search_term:
-        df_search_initial = df_analisis_completo[
+        # Solo productos con stock > 0 en cualquier tienda
+        mask_match = (
             df_analisis_completo['SKU'].astype(str).str.contains(search_term, case=False, na=False) |
             df_analisis_completo['Descripcion'].astype(str).str.contains(search_term, case=False, na=False)
-        ]
+        )
+        # Agrupar por SKU y ver si hay stock en alguna tienda
+        skus_con_stock = df_analisis_completo[df_analisis_completo['Stock'] > 0]['SKU'].unique()
+        df_search_initial = df_analisis_completo[mask_match & df_analisis_completo['SKU'].isin(skus_con_stock)]
         if df_search_initial.empty:
-            st.warning("No se encontraron productos que coincidan con la búsqueda.")
+            st.warning("No se encontraron productos con stock que coincidan con la búsqueda.")
         else:
             found_skus = df_search_initial['SKU'].unique()
+            # Mostrar inventario en todas las tiendas para esos SKUs
             df_stock_completo = df_analisis_completo[df_analisis_completo['SKU'].isin(found_skus)]
 
             tab_stock, tab_detalle = st.tabs(["📊 Matriz de Stock por Tienda", "📋 Detalle Completo"])
@@ -542,6 +547,8 @@ if df_crudo is not None and not df_crudo.empty:
                     values='Stock',
                     fill_value=0
                 )
+                # Solo mostrar filas donde el total de stock > 0
+                pivot_stock = pivot_stock[pivot_stock.sum(axis=1) > 0]
                 st.dataframe(pivot_stock, use_container_width=True)
 
             with tab_detalle:
@@ -550,6 +557,7 @@ if df_crudo is not None and not df_crudo.empty:
                                 'Excedente_Trasladable', 'Costo_Promedio_UND', 'Proveedor']
                 cols_existentes = [c for c in cols_detalle if c in df_stock_completo.columns]
                 df_detalle_display = df_stock_completo[cols_existentes].copy()
+                df_detalle_display = df_detalle_display[df_detalle_display['Stock'] > 0]
                 df_detalle_display['Cobertura_Dias'] = df_detalle_display['Cobertura_Dias'].clip(upper=999).astype(int)
                 st.dataframe(
                     df_detalle_display,
