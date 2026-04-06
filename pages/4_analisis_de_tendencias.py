@@ -6,7 +6,15 @@ from datetime import datetime, timedelta
 import io
 
 # --- 0. Configuración de la Página ---
-st.set_page_config(page_title="Análisis de Tendencias", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Ferreinox | Tendencias", layout="wide", page_icon="🔴")
+
+# --- IDENTIDAD VISUAL FERREINOX ---
+try:
+    from utils import aplicar_estilo_ferreinox, mostrar_footer_ferreinox
+    aplicar_estilo_ferreinox()
+except ImportError:
+    pass
+
 st.title("🎯 Panel Estratégico de Tendencias")
 st.markdown("De los datos a las decisiones. Identifica, clasifica y actúa sobre las tendencias de tus productos para maximizar la rentabilidad y minimizar los riesgos.")
 
@@ -113,8 +121,8 @@ def clasificar_producto(row):
 # --- 2. Lógica Principal de la Página ---
 
 if 'df_analisis' not in st.session_state or st.session_state['df_analisis'].empty:
-    st.error("Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
-    st.page_link("app.py", label="Ir a la Página Principal", icon="🏠")
+    st.error("Los datos no se han cargado. Por favor, ve a la página principal primero.")
+    st.page_link("Tablero Rotacion.py", label="Ir a la Página Principal", icon="🏠")
 else:
     df_analisis_completo = st.session_state['df_analisis'].reset_index()
 
@@ -263,3 +271,9 @@ else:
                     file_name=f"riesgos_decremento_{selected_almacen_nombre.replace(' ', '_')}.xlsx",
                     mime="application/vnd.ms-excel"
                 )
+
+# --- FOOTER ---
+try:
+    mostrar_footer_ferreinox()
+except NameError:
+    pass

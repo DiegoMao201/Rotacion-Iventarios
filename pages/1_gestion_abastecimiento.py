@@ -30,8 +30,15 @@ except ImportError:
     def preparar_traslados_para_txt(df): return False, "No fue posible preparar los TXT porque faltan utilidades.", pd.DataFrame()
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
-st.set_page_config(page_title="Gestión de Abastecimiento v5.6.0", layout="wide", page_icon="⚙️")
+st.set_page_config(page_title="Ferreinox | Abastecimiento", layout="wide", page_icon="🔴")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- IDENTIDAD VISUAL FERREINOX ---
+try:
+    from utils import aplicar_estilo_ferreinox, mostrar_footer_ferreinox
+    aplicar_estilo_ferreinox()
+except ImportError:
+    pass
 
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
 keys_to_initialize = {
@@ -52,6 +59,8 @@ keys_to_initialize = {
     'df_seguimiento_editor': pd.DataFrame(),  # DF persistente para el editor de seguimiento
     'last_filters_seguimiento': None,  # Guarda el estado de los filtros de seguimiento para saber cuándo refrescar
     'tiendas_compra_especial_seleccionadas': [],  # Almacena las tiendas para la compra especial consolidada
+    'last_confirmed_traslado_especial': None,  # Datos de descarga del último traslado especial confirmado
+    'last_confirmed_compra_especial': None,  # Datos de descarga de la última compra especial confirmada
 }
 for key, default_value in keys_to_initialize.items():
     if key not in st.session_state:
@@ -1141,6 +1150,13 @@ if active_tab == tab_titles[1]:
                                     st.session_state.notificaciones_pendientes.append({
                                         "label": f"📲 Notificar a {tienda_destino_especial}", "url": generar_link_whatsapp(celular_contacto_especial, mensaje_wpp), "key": "wpp_traslado_esp"
                                     })
+                                # Guardar datos para descarga post-confirmación
+                                st.session_state['last_confirmed_traslado_especial'] = {
+                                    'excel_data': excel_bytes_especial,
+                                    'filename': f"Traslado_Especial_{id_grupo_reg}.xlsx",
+                                    'id': id_grupo_reg,
+                                    'txts': {t: (txt.encode('utf-8') if isinstance(txt, str) else txt) for t, txt in txts_por_tienda.items()}
+                                }
                                 st.session_state.solicitud_traslado_especial = []
                                 st.rerun()
                             else:
@@ -1149,6 +1165,33 @@ if active_tab == tab_titles[1]:
                 if cleared_special:
                     st.session_state.solicitud_traslado_especial = []
                     st.rerun()
+
+    # --- DESCARGA POST-CONFIRMACIÓN: TRASLADO ESPECIAL ---
+    if st.session_state.get('last_confirmed_traslado_especial'):
+        dl_info = st.session_state['last_confirmed_traslado_especial']
+        with st.container(border=True):
+            st.success(f"✅ Traslado especial **{dl_info['id']}** confirmado y registrado. Descargue los archivos a continuación:")
+            dl_col1, dl_col2 = st.columns([3, 1])
+            with dl_col1:
+                st.download_button(
+                    label=f"📥 Descargar Excel del Traslado Especial ({dl_info['id']})",
+                    data=dl_info['excel_data'],
+                    file_name=dl_info['filename'],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            with dl_col2:
+                if st.button("Limpiar descarga", key="limpiar_dl_traslado_esp"):
+                    st.session_state['last_confirmed_traslado_especial'] = None
+                    st.rerun()
+            for tienda_dl, txt_data_dl in dl_info.get('txts', {}).items():
+                st.download_button(
+                    label=f"📥 Descargar TXT para {tienda_dl}",
+                    data=txt_data_dl,
+                    file_name=f"stockmove_{tienda_dl.replace(' ', '_')}.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
     # --- FIN BLOQUE MODIFICADO ---
 
 
@@ -1512,6 +1555,15 @@ if active_tab == tab_titles[2]:
                                             "label": f"📲 Notificar a {proveedor_especial}", "url": generar_link_whatsapp(celular_proveedor_esp, msg_wpp), "key": f"wpp_compra_esp_{proveedor_especial}"
                                         })
                                     
+                                    # Guardar datos para descarga post-confirmación
+                                    st.session_state['last_confirmed_compra_especial'] = {
+                                        'excel_data': excel_bytes_oc_esp,
+                                        'pdf_data': pdf_bytes,
+                                        'excel_filename': f"Detalle_OC_Especial_{orden_id_grupo}.xlsx",
+                                        'pdf_filename': f"OC_{orden_id_grupo}.pdf",
+                                        'id': orden_id_grupo,
+                                        'proveedor': proveedor_especial
+                                    }
                                     st.session_state.compra_especial_items = []
                                     st.session_state.tiendas_compra_especial_seleccionadas = []
                                     st.rerun()
@@ -1521,6 +1573,34 @@ if active_tab == tab_titles[2]:
                     if cleared_special_compra:
                         st.session_state.compra_especial_items = []
                         st.rerun()
+
+    # --- DESCARGA POST-CONFIRMACIÓN: COMPRA ESPECIAL ---
+    if st.session_state.get('last_confirmed_compra_especial'):
+        dl_info = st.session_state['last_confirmed_compra_especial']
+        with st.container(border=True):
+            st.success(f"✅ Compra especial **{dl_info['id']}** ({dl_info['proveedor']}) confirmada y registrada. Descargue los archivos:")
+            dl_col1, dl_col2, dl_col3 = st.columns([2, 2, 1])
+            with dl_col1:
+                st.download_button(
+                    label=f"📥 Descargar Excel de la Compra Especial",
+                    data=dl_info['excel_data'],
+                    file_name=dl_info['excel_filename'],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            with dl_col2:
+                if dl_info.get('pdf_data'):
+                    st.download_button(
+                        label=f"📥 Descargar PDF de la Orden de Compra",
+                        data=dl_info['pdf_data'],
+                        file_name=dl_info['pdf_filename'],
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+            with dl_col3:
+                if st.button("Limpiar descarga", key="limpiar_dl_compra_esp"):
+                    st.session_state['last_confirmed_compra_especial'] = None
+                    st.rerun()
     # --- FIN BLOQUE MODIFICADO ---
 
 # --- PESTAÑA 4: SEGUIMIENTO ---
@@ -1822,3 +1902,13 @@ if active_tab == tab_titles[3]:
                                         "key": f"wpp_update_{id_grupo_elegido}"
                                     })
             # --- FIN DE GESTIÓN DE ORDEN ESPECÍFICA ---
+
+# --- NOTIFICACIONES WHATSAPP PENDIENTES ---
+if st.session_state.get('notificaciones_pendientes'):
+    st.markdown("---")
+    st.subheader("📲 Notificaciones WhatsApp Pendientes")
+    for notif in st.session_state.notificaciones_pendientes:
+        whatsapp_button(notif['label'], notif['url'], notif['key'])
+    if st.button("Limpiar notificaciones", key="limpiar_notificaciones_global"):
+        st.session_state.notificaciones_pendientes = []
+        st.rerun()

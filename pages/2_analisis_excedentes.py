@@ -8,7 +8,15 @@ import io
 from datetime import datetime
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Diagnóstico de Excedentes", layout="wide", page_icon="💡")
+st.set_page_config(page_title="Ferreinox | Excedentes", layout="wide", page_icon="🔴")
+
+# --- IDENTIDAD VISUAL FERREINOX ---
+try:
+    from utils import aplicar_estilo_ferreinox, mostrar_footer_ferreinox
+    aplicar_estilo_ferreinox()
+except ImportError:
+    pass
+
 st.title("💡 Diagnóstico y Acción sobre Excedentes")
 st.markdown("Un tablero inteligente que te dice dónde está tu capital inmovilizado y qué hacer para liberarlo.")
 
@@ -135,10 +143,13 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             st.success("✅ **¡Inventario Saludable!** Tus niveles de excedente están bajo control. ¡Excelente trabajo!", icon="✅")
 
         # --- KPIs ---
-        kpi1, kpi2, kpi3 = st.columns(3)
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         kpi1.metric("💰 Capital Inmovilizado", f"${valor_excedente_total:,.0f}", f"{porc_excedente:.1f}% del total")
         kpi2.metric("📦 SKUs con Excedente", f"{skus_excedente}")
-        kpi3.metric("⏳ Antigüedad Promedio del Excedente", f"{antiguedad_promedio:.0f} días" if pd.notna(antiguedad_promedio) else "N/A")
+        kpi3.metric("⏳ Antigüedad Promedio", f"{antiguedad_promedio:.0f} días" if pd.notna(antiguedad_promedio) else "N/A")
+        # Nuevo: Cobertura promedio de excedentes (cuántos días le duraría ese stock)
+        cobertura_avg = df_excedentes['Cobertura_Dias'].replace(9999, np.nan).mean() if 'Cobertura_Dias' in df_excedentes.columns and not df_excedentes.empty else np.nan
+        kpi4.metric("📅 Cobertura Promedio Excedente", f"{cobertura_avg:.0f} días" if pd.notna(cobertura_avg) else "Sin demanda", help="Días que duraría el stock al ritmo de venta actual")
 
         st.markdown("---")
 
@@ -183,7 +194,7 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
                 column_order=[
                     "Sugerencia_Accion", "SKU", "Descripcion", "Almacen_Nombre", "Marca_Nombre",
                     "Stock", "Valor_Inventario", "Dias_Desde_Ultima_Venta"
-                ],
+                ] + (["Cobertura_Dias"] if "Cobertura_Dias" in df_excedentes.columns else []),
                 hide_index=True,
                 use_container_width=True
             )
@@ -200,5 +211,11 @@ if 'df_analisis' in st.session_state and not st.session_state['df_analisis'].emp
             st.success("¡Felicidades! No se encontraron productos con excedente según los filtros aplicados.")
 
 else:
-    st.error("🔴 Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
-    st.page_link("app.py", label="Ir a la página principal", icon="🏠")
+    st.error("🔴 Los datos no se han cargado. Por favor, ve a la página principal primero.")
+    st.page_link("Tablero Rotacion.py", label="Ir a la página principal", icon="🏠")
+
+# --- FOOTER ---
+try:
+    mostrar_footer_ferreinox()
+except NameError:
+    pass

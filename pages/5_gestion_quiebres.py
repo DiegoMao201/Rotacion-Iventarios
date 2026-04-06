@@ -5,7 +5,14 @@ import io
 import math
 
 # --- Configuración de la Página ---
-st.set_page_config(page_title="Gestión de Quiebres de Stock", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Ferreinox | Quiebres", layout="wide", page_icon="🔴")
+
+# --- IDENTIDAD VISUAL FERREINOX ---
+try:
+    from utils import aplicar_estilo_ferreinox, mostrar_footer_ferreinox
+    aplicar_estilo_ferreinox()
+except ImportError:
+    pass
 
 # --- Título y Descripción ---
 st.title("🚀 Tablero de Control y Acción para Quiebres de Stock")
@@ -137,8 +144,7 @@ def preparar_plan_quiebres(df_maestro, almacen_seleccionado):
             "Valor Requerido": uds_a_solicitar * row['Costo_Promedio_UND'],
             "Clase ABC": row['Segmento_ABC'],
             "Marca": row['Marca_Nombre'],
-            # Se asume que 'Proveedor_Nombre' existe en el df_maestro. Si no, comentar la línea.
-            "Proveedor": row.get('Proveedor_Nombre', 'No definido')
+            "Proveedor": row.get('Proveedor', 'No Asignado')
         })
 
     if not plan_list:
@@ -152,7 +158,7 @@ def preparar_plan_quiebres(df_maestro, almacen_seleccionado):
 
 if 'df_analisis_maestro' not in st.session_state or st.session_state.get('df_analisis_maestro', pd.DataFrame()).empty:
     st.error("🔴 Los datos no se han cargado. Por favor, vuelve a la página principal y carga el archivo maestro.")
-    st.page_link("app.py", label="Ir a la página principal", icon="🏠")
+    st.page_link("Tablero Rotacion.py", label="Ir a la página principal", icon="🏠")
     st.stop()
 
 df_maestro = st.session_state['df_analisis_maestro']
@@ -194,6 +200,15 @@ if df_plan_filtrado.empty:
     st.success(f"🎉 ¡Felicidades! No hay quiebres de stock para la selección actual: **{almacen_sel}**.")
     st.balloons()
 else:
+    # --- KPI DE VENTA PERDIDA ESTIMADA ---
+    venta_perdida_total = 0
+    if 'Venta_Perdida_Estimada_30d' in df_maestro.columns:
+        skus_en_plan = df_plan_filtrado['SKU'].unique()
+        venta_perdida_total = df_maestro[df_maestro['SKU'].isin(skus_en_plan)]['Venta_Perdida_Estimada_30d'].sum()
+    
+    if venta_perdida_total > 0:
+        st.error(f"💸 **Venta perdida estimada por estos quiebres: ${venta_perdida_total:,.0f}/mes** — Prioriza los de Clase A para recuperar ingresos rápidamente.")
+
     # Definir las pestañas de análisis
     tab1, tab2, tab3, tab4 = st.tabs([
         "📝 **Plan de Acción Interactivo**",
@@ -311,3 +326,9 @@ else:
                              })
             else:
                 st.info("No hay acciones de 'Solicitar Traslado' en tu selección actual.")
+
+# --- FOOTER ---
+try:
+    mostrar_footer_ferreinox()
+except NameError:
+    pass

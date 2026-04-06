@@ -17,6 +17,45 @@ from email import encoders
 from google.oauth2.service_account import Credentials
 import dropbox
 
+# --- IDENTIDAD VISUAL FERREINOX ---
+FERREINOX_CSS = """
+<style>
+    :root { --ferreinox-rojo: #D42027; --ferreinox-gris: #444444; --ferreinox-azul: #4F81BD; }
+    header[data-testid="stHeader"] { border-bottom: 3px solid var(--ferreinox-rojo); }
+    section[data-testid="stSidebar"] { border-right: 3px solid var(--ferreinox-rojo) !important; }
+    .section-header { color: var(--ferreinox-rojo); font-weight: 700; font-size: 1.15rem; border-bottom: 2px solid var(--ferreinox-rojo); padding-bottom: 6px; margin-bottom: 16px; }
+    .stAlert { border-radius: 10px; }
+    div[data-testid="stButton"] > button[kind="primary"],
+    div[data-testid="stFormSubmitButton"] > button[kind="primary"] { background-color: var(--ferreinox-rojo) !important; color: white !important; font-weight: 700; border-radius: 8px; border: none !important; }
+    div[data-testid="stButton"] > button[kind="primary"]:hover,
+    div[data-testid="stFormSubmitButton"] > button[kind="primary"]:hover { background-color: #B01A20 !important; }
+    div[data-testid="stButton"] > button { border-radius: 8px; font-weight: 600; }
+    .stTabs [data-baseweb="tab"] { font-weight: 600; }
+    .stTabs [aria-selected="true"] { border-bottom-color: var(--ferreinox-rojo) !important; color: var(--ferreinox-rojo) !important; }
+    div[data-testid="stMetric"] { background-color: #FAFAFA; border: 1px solid #E8E8E8; border-left: 4px solid var(--ferreinox-rojo); border-radius: 8px; padding: 12px 16px; }
+    div[data-testid="stMetric"] label { font-weight: 600; color: var(--ferreinox-gris); }
+    div[data-testid="stDownloadButton"] > button { background-color: var(--ferreinox-azul) !important; color: white !important; border-radius: 8px; font-weight: 600; }
+    .ferreinox-footer { text-align: center; color: #999; font-size: 0.78rem; padding: 2rem 0 1rem 0; border-top: 1px solid #eee; margin-top: 3rem; }
+</style>
+"""
+
+FERREINOX_SIDEBAR_LOGO = """
+<div style="text-align: center; padding: 0.5rem 0;">
+    <img src="https://www.ferreinox.co/cdn-cgi/image/w=200/upload/logo/logo_header_ferreinox_1723217791.webp" style="max-width: 160px;">
+</div>
+"""
+
+FERREINOX_FOOTER = '<div class="ferreinox-footer">Ferreinox SAS BIC — NIT 800.224.617 | Sistema de Control de Inventarios | www.ferreinox.co</div>'
+
+def aplicar_estilo_ferreinox():
+    """Inyecta CSS corporativo, logo en sidebar y footer placeholder."""
+    st.markdown(FERREINOX_CSS, unsafe_allow_html=True)
+    st.sidebar.markdown(FERREINOX_SIDEBAR_LOGO, unsafe_allow_html=True)
+
+def mostrar_footer_ferreinox():
+    """Muestra footer corporativo al final de la página."""
+    st.markdown(FERREINOX_FOOTER, unsafe_allow_html=True)
+
 
 def convertir_serie_a_entero_seguro(serie):
     """Convierte una serie numérica a entero evitando fallos por NaN o infinitos."""
@@ -49,7 +88,8 @@ DIRECCIONES_TIENDAS = {
     'FerreBox': 'Calle 20 12 32',
     'Laureles': 'Av. Laureles #35-13',
     'Opalo': 'Cra. 10 #70-52',
-    'Cedi': 'Bodega Principal Vía Condina'
+    'Cedi': 'Bodega Principal Vía Condina',
+    'Cerritos': 'Av. 30 de agosto 105-42'
 }
 
 CONTACTOS_PROVEEDOR = {
@@ -66,7 +106,8 @@ CONTACTOS_TIENDAS = {
     'Laureles': {'email': 'tiendapintucolaureles@ferreinox.co', 'celular': '573104779389'},
     'Opalo': {'email': 'tiendapintucodosquebradas@ferreinox.co', 'celular': '573108561506'},
     'FerreBox': {'email': 'compras@ferreinox.co', 'celular': '573127574279'},
-    'Cedi': {'email': 'bodega@ferreinox.co', 'celular': '573123456789'}
+    'Cedi': {'email': 'bodega@ferreinox.co', 'celular': '573123456789'},
+    'Cerritos': {'email': 'tiendapintucocerritos@ferreinox.co', 'celular': '573102806605'}
 }
 
 # --- VALIDACIÓN DE DATOS ---
@@ -148,6 +189,24 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
     conditions = [(df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0), (df['Stock'] > 0) & (df['Demanda_Diaria_Promedio'] <= 0), (df['Stock'] > 0) & (df['Stock'] < df['Punto_Reorden']), (df['Stock'] > df['Stock_Objetivo']),]
     choices_estado = ['Quiebre de Stock', 'Baja Rotación / Obsoleto', 'Bajo Stock (Riesgo)', 'Excedente']
     df['Estado_Inventario'] = np.select(conditions, choices_estado, default='Normal')
+    # --- MÉTRICAS AVANZADAS DE ROTACIÓN ---
+    df['Cobertura_Dias'] = np.where(
+        df['Demanda_Diaria_Promedio'] > 0,
+        df['Stock'] / df['Demanda_Diaria_Promedio'],
+        9999
+    )
+    df['Rotacion_Inventario'] = np.where(
+        df['Valor_Inventario'] > 0,
+        (df['Valor_Venta_60_Dias'] / df['Valor_Inventario']) * 6,
+        0
+    )
+    df['Venta_Perdida_Estimada_30d'] = np.where(
+        (df['Stock'] <= 0) & (df['Demanda_Diaria_Promedio'] > 0),
+        df['Demanda_Diaria_Promedio'] * 30 * df['Costo_Promedio_UND'] * 1.30,
+        0
+    )
+    df['Precio_Venta_Estimado'] = df['Costo_Promedio_UND'] * 1.30
+
     df['Necesidad_Total'] = np.maximum(0, df['Stock_Objetivo'] - df['Stock'])
     df['Excedente_Trasladable'] = np.where(df['Estado_Inventario'] == 'Excedente', np.maximum(0, df['Stock'] - df['Stock_Objetivo']), 0)
     
@@ -156,6 +215,7 @@ def analizar_inventario_completo(_df_crudo, _df_proveedores, dias_seguridad=7, d
         df_proveedores_limpio = _df_proveedores[EXPECTED_PROVIDERS_COLS].copy()
         df_proveedores_limpio.rename(columns={'REFERENCIA': 'SKU', 'PROVEEDOR': 'Proveedor', 'COD PROVEEDOR': 'SKU_Proveedor'}, inplace=True)
         df_proveedores_limpio['SKU'] = df_proveedores_limpio['SKU'].astype(str)
+        df_proveedores_limpio = df_proveedores_limpio.drop_duplicates(subset=['SKU'], keep='first')
         df = pd.merge(df, df_proveedores_limpio, on='SKU', how='left')
     
     if 'Proveedor' not in df.columns: df['Proveedor'] = 'No Asignado'

@@ -5,7 +5,15 @@ import numpy as np
 import io
 
 # --- 0. CONFIGURACIÓN DE LA PÁGINA ---
-st.set_page_config(page_title="Análisis de Marca y Categoría", layout="wide", page_icon="🎯")
+st.set_page_config(page_title="Ferreinox | Marcas", layout="wide", page_icon="🔴")
+
+# --- IDENTIDAD VISUAL FERREINOX ---
+try:
+    from utils import aplicar_estilo_ferreinox, mostrar_footer_ferreinox
+    aplicar_estilo_ferreinox()
+except ImportError:
+    pass
+
 st.title("🎯 Análisis Estratégico de Marca y Categoría")
 st.markdown("Una herramienta poderosa para evaluar el rendimiento y tomar decisiones informadas con tus proveedores.")
 
@@ -23,8 +31,8 @@ def convert_df_to_excel(df):
 
 # --- 2. LÓGICA PRINCIPAL DE LA PÁGINA ---
 if 'df_analisis' not in st.session_state or st.session_state['df_analisis'].empty:
-    st.error("Los datos no se han cargado. Por favor, ve a la página principal '🚀 Resumen Ejecutivo de Inventario' primero.")
-    st.page_link("app.py", label="Ir a la Página Principal", icon="🏠")
+    st.error("Los datos no se han cargado. Por favor, ve a la página principal primero.")
+    st.page_link("Tablero Rotacion.py", label="Ir a la Página Principal", icon="🏠")
 else:
     df_analisis_completo = st.session_state['df_analisis']
     
@@ -188,3 +196,9 @@ else:
                 file_name=f"analisis_{selected_item.replace(' ', '_')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+# --- FOOTER ---
+try:
+    mostrar_footer_ferreinox()
+except NameError:
+    pass
