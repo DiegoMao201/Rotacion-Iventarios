@@ -627,6 +627,9 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
     
     df_excel = df.copy()
     cantidad_col = resolver_columna_cantidad(df_excel)
+    cantidad_series = None
+    if cantidad_col and cantidad_col in df_excel.columns:
+        cantidad_series = pd.to_numeric(df_excel[cantidad_col], errors='coerce').fillna(0)
     
     rename_map = {
         'Uds a Enviar': 'Cantidad', 'Uds a Comprar': 'Cantidad', 'Cantidad_Solicitada': 'Cantidad',
@@ -642,8 +645,11 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
 
     df_excel.rename(columns=rename_map, inplace=True)
 
-    if cantidad_col and cantidad_col in df_excel.columns:
-        df_excel['Cantidad'] = pd.to_numeric(df_excel[cantidad_col], errors='coerce').fillna(0)
+    if df_excel.columns.duplicated().any():
+        df_excel = df_excel.loc[:, ~df_excel.columns.duplicated(keep='first')].copy()
+
+    if cantidad_series is not None:
+        df_excel['Cantidad'] = cantidad_series
     elif 'Cantidad' in df_excel.columns:
         df_excel['Cantidad'] = pd.to_numeric(df_excel['Cantidad'], errors='coerce').fillna(0)
 
