@@ -139,6 +139,25 @@ def explicar_estado_abastecimiento(row):
     return 'Sin hallazgos relevantes en el flujo.'
 
 
+def construir_firma_dataframe(df, columnas_clave):
+    """Genera una firma estable para refrescar vistas cuando cambia el contenido real."""
+    if df is None or df.empty:
+        return 'empty'
+
+    columnas_presentes = [col for col in columnas_clave if col in df.columns]
+    if not columnas_presentes:
+        return f'rows:{len(df)}'
+
+    df_firma = df[columnas_presentes].copy().fillna('')
+    if {'SKU', 'Almacen_Nombre'}.issubset(df_firma.columns):
+        df_firma = df_firma.sort_values(by=['SKU', 'Almacen_Nombre']).reset_index(drop=True)
+    else:
+        df_firma = df_firma.sort_values(by=columnas_presentes).reset_index(drop=True)
+
+    hashed = pd.util.hash_pandas_object(df_firma, index=False)
+    return str(int(hashed.sum()))
+
+
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -841,6 +860,10 @@ with st.sidebar:
         st.cache_data.clear()
         st.cache_resource.clear()
         st.session_state.notificaciones_pendientes = [] # Limpiar notificaciones al recargar
+        st.session_state.df_compras_editor = pd.DataFrame()
+        st.session_state.df_traslados_editor = pd.DataFrame()
+        st.session_state.last_filters_compras = None
+        st.session_state.last_filters_traslados = None
         st.rerun()
         
     if st.button("Sincronizar 'Estado_Inventario' en GSheets"):
@@ -862,12 +885,13 @@ with st.expander("🔎 Rastreo puntual de SKU", expanded=False):
             st.warning(f"No se encontró el SKU {sku_rastreo_normalizado} en el análisis actual.")
         else:
             df_sku['Diagnostico_Flujo'] = df_sku.apply(explicar_estado_abastecimiento, axis=1)
+            df_sku['Aparece_En_Compra'] = np.where(pd.to_numeric(df_sku['Sugerencia_Compra'], errors='coerce').fillna(0) > 0, 'Sí', 'No')
             columnas_sku = [
                 'SKU', 'Descripcion', 'Proveedor', 'Almacen_Nombre', 'Estado_Inventario',
                 'Stock', 'Stock_Saliente_Reservado', 'Stock_En_Transito', 'Stock_Disponible_Actual',
                 'Stock_Disponible_Proyectado', 'Demanda_Diaria_Promedio', 'Objetivo_Abastecimiento',
                 'Necesidad_Ajustada_Por_Transito', 'Excedente_Trasladable', 'Cubierto_Por_Traslado',
-                'Sugerencia_Compra', 'Prioridad_Abastecimiento', 'Diagnostico_Flujo'
+                'Sugerencia_Compra', 'Prioridad_Abastecimiento', 'Aparece_En_Compra', 'Diagnostico_Flujo'
             ]
             columnas_sku = [col for col in columnas_sku if col in df_sku.columns]
             st.markdown("##### Estado del SKU por tienda")
@@ -1356,6 +1380,10 @@ if active_tab == tab_titles[2]:
             (df_filtered['Sugerencia_Compra'] > 0)
             & (~df_filtered['Descripcion'].apply(_es_aerocolor_excluido))
         ].copy()
+        firma_plan_compras = construir_firma_dataframe(
+            df_plan_compras_base,
+            ['SKU', 'Almacen_Nombre', 'Sugerencia_Compra', 'Proveedor', 'Marca_Nombre', 'Estado_Inventario', 'Prioridad_Abastecimiento']
+        )
         if not df_plan_compras_base.empty and 'Prioridad_Abastecimiento' in df_plan_compras_base.columns:
             orden_prioridad = {'Crítica': 0, 'Alta': 1, 'Media': 2, 'Estable': 3}
             df_plan_compras_base['Orden_Prioridad'] = df_plan_compras_base['Prioridad_Abastecimiento'].map(orden_prioridad).fillna(99)
@@ -1381,7 +1409,7 @@ if active_tab == tab_titles[2]:
         filtro_marca_compra = f_c3.multiselect("Filtrar por Marca(s):", marcas_con_sugerencia, default=marcas_con_sugerencia, key="filtro_marca_compra_multi")
         # --- FIN DE MODIFICACIÓN ---
         
-        current_filters = f"{filtro_tienda_compra}-{selected_proveedor}-{filtro_marca_compra}"
+        current_filters = f"{filtro_tienda_compra}-{selected_proveedor}-{filtro_marca_compra}-{firma_plan_compras}"
         if st.session_state.last_filters_compras != current_filters:
             df_temp = df_plan_compras_base.copy()
             if filtro_tienda_compra != "Todas":
