@@ -41,6 +41,87 @@ try:
 except ImportError:
     pass
 
+st.markdown("""
+<style>
+    .bi-page-hero {
+        background: linear-gradient(135deg, rgba(212,32,39,0.10), rgba(79,129,189,0.10));
+        border: 1px solid rgba(212,32,39,0.18);
+        border-radius: 18px;
+        padding: 1rem 1.2rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.06);
+    }
+    .bi-filter-summary {
+        background: linear-gradient(160deg, #0f172a, #1e293b 58%, #334155);
+        color: white;
+        border-radius: 18px;
+        padding: 1rem;
+        margin: 0.75rem 0 1rem 0;
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.22);
+        border: 1px solid rgba(255,255,255,0.08);
+    }
+    .bi-filter-summary h4 {
+        margin: 0 0 0.65rem 0;
+        color: #f8fafc;
+        font-size: 1rem;
+        letter-spacing: 0.3px;
+    }
+    .bi-filter-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+    }
+    .bi-filter-stat {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 14px;
+        padding: 0.7rem 0.75rem;
+    }
+    .bi-filter-stat-label {
+        display: block;
+        color: #cbd5e1;
+        font-size: 0.74rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 0.2rem;
+    }
+    .bi-filter-stat-value {
+        display: block;
+        color: #ffffff;
+        font-size: 1.05rem;
+        font-weight: 700;
+    }
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stMultiSelect label,
+    section[data-testid="stSidebar"] .stRadio label {
+        color: #0f172a;
+        font-weight: 700;
+    }
+    section[data-testid="stSidebar"] div[data-baseweb="select"] {
+        border-radius: 14px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+        border: 1px solid rgba(212,32,39,0.15);
+    }
+    section[data-testid="stSidebar"] [data-baseweb="tag"] {
+        background: linear-gradient(135deg, #ef4444, #fb7185) !important;
+        color: white !important;
+        border-radius: 999px !important;
+        border: none !important;
+        font-weight: 700;
+    }
+    div[data-testid="stExpander"] {
+        border-radius: 18px;
+        border: 1px solid #e2e8f0;
+        overflow: hidden;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+    }
+    div[data-testid="stDataFrame"] {
+        border-radius: 16px;
+        overflow: hidden;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- INICIALIZACIÓN DEL ESTADO DE SESIÓN ---
 keys_to_initialize = {
     'df_analisis_maestro': pd.DataFrame(),
@@ -174,6 +255,38 @@ def calcular_sugerencia_compra_operativa(df):
         return pd.Series(convertir_serie_a_entero_seguro(df['Sugerencia_Compra']), index=df.index)
 
     return pd.Series(0, index=df.index, dtype=int)
+
+
+def preparar_dataframe_compra(df):
+    """Construye un DataFrame consistente para visualización y operación de compras."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    df_compra = df.copy()
+    df_compra['Sugerencia_Compra_Operativa'] = calcular_sugerencia_compra_operativa(df_compra)
+
+    if 'Sugerencia_Compra' in df_compra.columns:
+        sugerencia_guardada = pd.to_numeric(df_compra['Sugerencia_Compra'], errors='coerce').fillna(0)
+        df_compra['Sugerencia_Compra_UI'] = np.maximum(sugerencia_guardada, df_compra['Sugerencia_Compra_Operativa'])
+    else:
+        df_compra['Sugerencia_Compra_UI'] = df_compra['Sugerencia_Compra_Operativa']
+
+    df_compra['Uds a Comprar'] = convertir_serie_a_entero_seguro(df_compra['Sugerencia_Compra_UI'])
+    df_compra['_empaque'] = df_compra['Descripcion'].apply(_detectar_empaque) if 'Descripcion' in df_compra.columns else 1
+    df_compra['Ud Empaque'] = df_compra.apply(
+        lambda row: calcular_ud_empaque(row['Uds a Comprar'], row['_empaque']), axis=1
+    )
+
+    df_compra['Costo_Promedio_UND'] = pd.to_numeric(df_compra.get('Costo_Promedio_UND', 0), errors='coerce').fillna(0)
+    df_compra['Peso_Articulo'] = pd.to_numeric(df_compra.get('Peso_Articulo', 0), errors='coerce').fillna(0)
+    df_compra['Cantidad_Final'] = np.where(df_compra['Ud Empaque'] > 0, df_compra['Ud Empaque'], df_compra['Uds a Comprar'])
+    df_compra['Valor_Compra_Base'] = df_compra['Uds a Comprar'] * df_compra['Costo_Promedio_UND']
+    df_compra['Valor_Compra_Ajustada'] = df_compra['Cantidad_Final'] * df_compra['Costo_Promedio_UND']
+    df_compra['Impacto_Empaque'] = df_compra['Valor_Compra_Ajustada'] - df_compra['Valor_Compra_Base']
+    df_compra['Peso_Total_Base'] = df_compra['Uds a Comprar'] * df_compra['Peso_Articulo']
+    df_compra['Peso_Total_Ajustado'] = df_compra['Cantidad_Final'] * df_compra['Peso_Articulo']
+    df_compra.drop(columns=['_empaque'], inplace=True)
+    return df_compra
 
 
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
@@ -873,6 +986,37 @@ with st.sidebar:
     else:
         df_filtered = df_vista.copy()
 
+    total_skus_filtrados = df_filtered['SKU'].nunique() if 'SKU' in df_filtered.columns else 0
+    total_registros_filtrados = len(df_filtered)
+    tiendas_visibles = df_filtered['Almacen_Nombre'].nunique() if 'Almacen_Nombre' in df_filtered.columns else 0
+    quiebres_visibles = int((df_filtered['Estado_Inventario'] == 'Quiebre de Stock').sum()) if 'Estado_Inventario' in df_filtered.columns else 0
+    st.markdown(
+        f"""
+        <div class="bi-filter-summary">
+            <h4>Centro de Control BI</h4>
+            <div class="bi-filter-grid">
+                <div class="bi-filter-stat">
+                    <span class="bi-filter-stat-label">Vista</span>
+                    <span class="bi-filter-stat-value">{selected_almacen_nombre if selected_almacen_nombre != opcion_consolidado else 'Consolidado'}</span>
+                </div>
+                <div class="bi-filter-stat">
+                    <span class="bi-filter-stat-label">Marcas Activas</span>
+                    <span class="bi-filter-stat-value">{len(selected_marcas)}</span>
+                </div>
+                <div class="bi-filter-stat">
+                    <span class="bi-filter-stat-label">SKUs Visibles</span>
+                    <span class="bi-filter-stat-value">{total_skus_filtrados}</span>
+                </div>
+                <div class="bi-filter-stat">
+                    <span class="bi-filter-stat-label">Quiebres</span>
+                    <span class="bi-filter-stat-value">{quiebres_visibles}</span>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
     st.markdown("---")
     st.header("Menú Principal")
     tab_titles = ["📊 Diagnóstico", "🔄 Traslados", "🛒 Compras", "✅ Seguimiento"]
@@ -966,7 +1110,15 @@ with st.expander("🔎 Rastreo puntual de SKU", expanded=False):
 if active_tab == tab_titles[0]:
     st.subheader(f"Diagnóstico para: {selected_almacen_nombre}")
 
-    necesidad_compra_total = (df_filtered['Sugerencia_Compra'] * df_filtered['Costo_Promedio_UND']).sum()
+    df_compra_diagnostico = preparar_dataframe_compra(df_filtered)
+    if not df_compra_diagnostico.empty:
+        df_compra_diagnostico = df_compra_diagnostico[
+            (df_compra_diagnostico['Sugerencia_Compra_UI'] > 0)
+            & (~df_compra_diagnostico['Descripcion'].apply(_es_aerocolor_excluido))
+        ].copy()
+
+    necesidad_compra_total = df_compra_diagnostico['Valor_Compra_Base'].sum() if not df_compra_diagnostico.empty else 0
+    necesidad_compra_operativa = df_compra_diagnostico['Valor_Compra_Ajustada'].sum() if not df_compra_diagnostico.empty else 0
     oportunidad_ahorro = 0
     if not df_plan_maestro.empty:
         df_plan_filtrado = df_plan_maestro.copy()
@@ -977,17 +1129,21 @@ if active_tab == tab_titles[0]:
     df_quiebre = df_filtered[df_filtered['Estado_Inventario'] == 'Quiebre de Stock']
     venta_perdida = (df_quiebre['Demanda_Diaria_Promedio'] * 30 * df_quiebre['Precio_Venta_Estimado']).sum()
 
-    kpi1, kpi2, kpi3 = st.columns(3)
-    kpi1.metric(label="💰 Valor Compra Requerida (Post-Traslados)", value=f"${necesidad_compra_total:,.0f}")
-    kpi2.metric(label="💸 Ahorro por Traslados", value=f"${oportunidad_ahorro:,.0f}")
-    kpi3.metric(label="📉 Venta Potencial Perdida (30 días)", value=f"${venta_perdida:,.0f}")
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric(label="💰 Compra Base (Post-Traslados)", value=f"${necesidad_compra_total:,.0f}")
+    kpi2.metric(label="📦 Compra Operativa (Empaque)", value=f"${necesidad_compra_operativa:,.0f}")
+    kpi3.metric(label="💸 Ahorro por Traslados", value=f"${oportunidad_ahorro:,.0f}")
+    kpi4.metric(label="📉 Venta Potencial Perdida (30 días)", value=f"${venta_perdida:,.0f}")
 
     with st.container(border=True):
         if venta_perdida > 0: st.markdown(f"**🚨 Alerta:** Se estima una pérdida de venta de **${venta_perdida:,.0f}** por **{len(df_quiebre)}** productos en quiebre.")
         if oportunidad_ahorro > 0: st.markdown(f"**💸 Oportunidad:** Puedes ahorrar **${oportunidad_ahorro:,.0f}** solicitando traslados. Revisa la pestaña 'Traslados'.")
+        if necesidad_compra_operativa > necesidad_compra_total:
+            delta_empaque = necesidad_compra_operativa - necesidad_compra_total
+            st.markdown(f"**📦 Lectura BI:** La compra operativa supera la base en **${delta_empaque:,.0f}** por ajustes de unidad de empaque. Así se explica la diferencia entre diagnóstico y selección en compras.")
         if necesidad_compra_total > 0:
-            df_compras_prioridad = df_filtered[df_filtered['Sugerencia_Compra'] > 0].copy()
-            df_compras_prioridad['Valor_Compra'] = df_compras_prioridad['Sugerencia_Compra'] * df_compras_prioridad['Costo_Promedio_UND']
+            df_compras_prioridad = df_compra_diagnostico.copy()
+            df_compras_prioridad['Valor_Compra'] = df_compras_prioridad['Valor_Compra_Base']
             if not df_compras_prioridad.empty:
                 top_categoria = df_compras_prioridad.groupby('Segmento_ABC')['Valor_Compra'].sum().idxmax()
                 st.markdown(f"**🎯 Enfoque:** Tu principal necesidad de inversión se concentra en productos de **Clase '{top_categoria}'**.")
@@ -1400,15 +1556,7 @@ if active_tab == tab_titles[1]:
 if active_tab == tab_titles[2]:
     st.header("🛒 Plan de Compras")
     with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
-        df_compra_vigente = df_filtered.copy()
-        df_compra_vigente['Sugerencia_Compra_Operativa'] = calcular_sugerencia_compra_operativa(df_compra_vigente)
-        if 'Sugerencia_Compra' in df_compra_vigente.columns:
-            df_compra_vigente['Sugerencia_Compra_UI'] = np.maximum(
-                pd.to_numeric(df_compra_vigente['Sugerencia_Compra'], errors='coerce').fillna(0),
-                df_compra_vigente['Sugerencia_Compra_Operativa']
-            )
-        else:
-            df_compra_vigente['Sugerencia_Compra_UI'] = df_compra_vigente['Sugerencia_Compra_Operativa']
+        df_compra_vigente = preparar_dataframe_compra(df_filtered)
 
         df_plan_compras_base = df_compra_vigente[
             (df_compra_vigente['Sugerencia_Compra_UI'] > 0)
@@ -1457,12 +1605,6 @@ if active_tab == tab_titles[2]:
             # --- FIN DE MODIFICACIÓN ---
             
             df_a_mostrar = df_temp.copy()
-            df_a_mostrar['Uds a Comprar'] = convertir_serie_a_entero_seguro(df_a_mostrar['Sugerencia_Compra_UI'])
-            df_a_mostrar['_empaque'] = df_a_mostrar['Descripcion'].apply(_detectar_empaque)
-            df_a_mostrar['Ud Empaque'] = df_a_mostrar.apply(
-                lambda r: calcular_ud_empaque(r['Uds a Comprar'], r['_empaque']), axis=1
-            )
-            df_a_mostrar.drop(columns=['_empaque'], inplace=True)
             df_a_mostrar['Seleccionar'] = False 
             df_a_mostrar_final = df_a_mostrar.rename(columns={'Almacen_Nombre': 'Tienda'})
             st.session_state.df_compras_editor = df_a_mostrar_final.copy()
@@ -1549,16 +1691,25 @@ if active_tab == tab_titles[2]:
                 df_seleccionados['Peso_Articulo'] = pd.to_numeric(df_seleccionados['Peso_Articulo'], errors='coerce').fillna(0)
                 # Para los cálculos, usar Ud Empaque si existe y es >0, si no Uds a Comprar
                 df_seleccionados['Cantidad_Final'] = np.where(df_seleccionados['Ud Empaque'] > 0, df_seleccionados['Ud Empaque'], df_seleccionados['Uds a Comprar'])
+                df_seleccionados['Valor Compra Base'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
                 df_seleccionados['Valor de la Compra'] = df_seleccionados['Cantidad_Final'] * df_seleccionados['Costo_Promedio_UND']
+                df_seleccionados['Impacto_Empaque'] = df_seleccionados['Valor de la Compra'] - df_seleccionados['Valor Compra Base']
                 df_seleccionados['Peso Total (kg)'] = df_seleccionados['Cantidad_Final'] * df_seleccionados['Peso_Articulo']
                 
+                valor_total_base = df_seleccionados['Valor Compra Base'].sum()
                 valor_total = df_seleccionados['Valor de la Compra'].sum()
+                delta_total = df_seleccionados['Impacto_Empaque'].sum()
                 peso_total_compra = df_seleccionados['Peso Total (kg)'] .sum()
                 st.markdown("---")
 
-                col1, col2 = st.columns([3, 1])
-                col1.subheader(f"Resumen de la Selección: ${valor_total:,.2f} | Peso Total: {peso_total_compra:,.2f} kg")
+                res_c1, res_c2, res_c3, res_c4 = st.columns([1.2, 1.2, 1.1, 1.3])
+                res_c1.metric("Compra Base", f"${valor_total_base:,.0f}")
+                res_c2.metric("Compra Operativa", f"${valor_total:,.0f}")
+                res_c3.metric("Impacto Empaque", f"${delta_total:,.0f}")
+                res_c4.metric("Peso Operativo", f"{peso_total_compra:,.2f} kg")
+                st.caption("Compra Base = sugerencia post-traslados. Compra Operativa = cantidad final ajustada por unidad de empaque. Así ambos paneles quedan conectados y comparables.")
                 
+                col1, col2 = st.columns([3, 1])
                 excel_bytes = generar_excel_dinamico(df_seleccionados, "Seleccion_de_Compra", "Compra Sugerencia")
                 col2.download_button("📥 Descargar Selección en Excel", data=excel_bytes, file_name="seleccion_compra.xlsx", use_container_width=True)
 
@@ -1569,7 +1720,7 @@ if active_tab == tab_titles[2]:
                 for (proveedor, tienda), df_grupo in grouped:
                     with st.container(border=True):
                         st.markdown(f"#### Orden para **{proveedor}** ➡️ Destino: **{tienda}**")
-                        cols_orden = ['SKU', 'Descripcion', 'Uds a Comprar', 'Ud Empaque', 'Costo_Promedio_UND', 'Valor de la Compra', 'Peso Total (kg)']
+                        cols_orden = ['SKU', 'Descripcion', 'Uds a Comprar', 'Ud Empaque', 'Cantidad_Final', 'Costo_Promedio_UND', 'Valor Compra Base', 'Valor de la Compra', 'Peso Total (kg)']
                         cols_orden = [c for c in cols_orden if c in df_grupo.columns]
                         st.dataframe(df_grupo[cols_orden], use_container_width=True)
 
