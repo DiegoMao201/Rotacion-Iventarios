@@ -110,6 +110,35 @@ def calcular_ud_empaque(sugerencia, empaque):
     return int(np.ceil(sugerencia / empaque) * empaque)
 
 
+def resolver_columna_cantidad(df):
+    """Define la columna de cantidad efectiva a usar en documentos y registros."""
+    return next((col for col in ['Cantidad_Final', 'Uds a Comprar', 'Uds a Enviar', 'Cantidad_Solicitada'] if col in df.columns), None)
+
+
+def explicar_estado_abastecimiento(row):
+    """Resume por qué un SKU termina en traslado, compra o sin acción."""
+    necesidad = pd.to_numeric(pd.Series([row.get('Necesidad_Ajustada_Por_Transito', row.get('Necesidad_Total', 0))]), errors='coerce').fillna(0).iloc[0]
+    cubierto = pd.to_numeric(pd.Series([row.get('Cubierto_Por_Traslado', 0)]), errors='coerce').fillna(0).iloc[0]
+    sugerencia = pd.to_numeric(pd.Series([row.get('Sugerencia_Compra', 0)]), errors='coerce').fillna(0).iloc[0]
+    demanda = pd.to_numeric(pd.Series([row.get('Demanda_Diaria_Promedio', 0)]), errors='coerce').fillna(0).iloc[0]
+    stock_proyectado = pd.to_numeric(pd.Series([row.get('Stock_Disponible_Proyectado', row.get('Stock', 0))]), errors='coerce').fillna(0).iloc[0]
+    stock_transito = pd.to_numeric(pd.Series([row.get('Stock_En_Transito', 0)]), errors='coerce').fillna(0).iloc[0]
+
+    if sugerencia > 0:
+        return 'Genera compra: el faltante no queda cubierto por traslados.'
+    if necesidad > 0 and cubierto > 0:
+        return 'No genera compra: la necesidad queda cubierta por traslados sugeridos.'
+    if necesidad <= 0 and stock_transito > 0:
+        return 'No genera compra: el sistema ve unidades en tránsito u orden abierta.'
+    if necesidad <= 0 and demanda <= 0:
+        return 'No genera compra: no hay demanda vigente en esta tienda.'
+    if necesidad <= 0 and stock_proyectado > 0:
+        return 'No genera compra: el stock proyectado cubre el objetivo.'
+    if necesidad > 0:
+        return 'Hay necesidad sin compra: revisar órdenes abiertas, demanda y parámetros del SKU.'
+    return 'Sin hallazgos relevantes en el flujo.'
+
+
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -189,7 +218,7 @@ def registrar_ordenes_en_sheets(client, df_orden, tipo_orden, proveedor_nombre=N
     df_registro = df_orden.copy()
 
     # Identificar columnas de cantidad, costo y peso dinámicamente
-    cantidad_col = next((col for col in ['Uds a Comprar', 'Uds a Enviar', 'Cantidad_Solicitada'] if col in df_orden.columns), None)
+    cantidad_col = resolver_columna_cantidad(df_orden)
     costo_col = next((col for col in ['Costo_Promedio_UND', 'Costo_Unitario'] if col in df_orden.columns), None)
     peso_col = next((col for col in ['Peso_Articulo', 'Peso Individual (kg)', 'Peso_Unitario_kg'] if col in df_orden.columns), None)
     
@@ -515,7 +544,7 @@ def generar_pdf_orden_compra(df_seleccion, proveedor_nombre, tienda_nombre, dire
     pdf.set_font(font_name, '', 8); pdf.set_text_color(0, 0, 0)
     subtotal = 0
 
-    cantidad_col = next((c for c in ['Uds a Comprar', 'Uds a Enviar', 'Cantidad_Solicitada'] if c in df_seleccion.columns), None)
+    cantidad_col = resolver_columna_cantidad(df_seleccion)
     costo_col = next((c for c in ['Costo_Promedio_UND', 'Costo_Unitario'] if c in df_seleccion.columns), None)
     if not cantidad_col or not costo_col: return None
 
@@ -560,6 +589,7 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
     nombre_hoja_truncado = nombre_hoja[:31]
     
     df_excel = df.copy()
+    cantidad_col = resolver_columna_cantidad(df_excel)
     
     rename_map = {
         'Uds a Enviar': 'Cantidad', 'Uds a Comprar': 'Cantidad', 'Cantidad_Solicitada': 'Cantidad',
@@ -575,11 +605,13 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
 
     df_excel.rename(columns=rename_map, inplace=True)
 
-    # Si existe Ud_Empaque, usarla como Cantidad
-    if 'Ud_Empaque' in df_excel.columns:
-        df_excel['Cantidad'] = pd.to_numeric(df_excel['Ud_Empaque'], errors='coerce').fillna(0)
+    if cantidad_col and cantidad_col in df_excel.columns:
+        df_excel['Cantidad'] = pd.to_numeric(df_excel[cantidad_col], errors='coerce').fillna(0)
     elif 'Cantidad' in df_excel.columns:
         df_excel['Cantidad'] = pd.to_numeric(df_excel['Cantidad'], errors='coerce').fillna(0)
+
+    if 'Ud_Empaque' in df_excel.columns:
+        df_excel['Ud_Empaque'] = pd.to_numeric(df_excel['Ud_Empaque'], errors='coerce').fillna(0)
 
     if 'Peso_Unitario_kg' in df_excel.columns:
         df_excel['Peso_Unitario_kg'] = pd.to_numeric(df_excel['Peso_Unitario_kg'], errors='coerce').fillna(0)
@@ -602,7 +634,7 @@ def generar_excel_dinamico(df, nombre_hoja, tipo_orden):
             writer.sheets[nombre_hoja_truncado].set_column('A:A', 70)
             return output.getvalue()
 
-        df_final.to_excel(writer, index=False, sheet_name=nombre_hoja_truncado, startrow=1)
+        df_final.to_excel(writer, index=False, header=False, sheet_name=nombre_hoja_truncado, startrow=1)
         workbook, worksheet = writer.book, writer.sheets[nombre_hoja_truncado]
         
         header_format = workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top', 'fg_color': '#4F81BD', 'font_color': 'white', 'border': 1, 'align': 'center'})
@@ -764,6 +796,8 @@ def calcular_estado_inventario_completo(df_base, df_ordenes):
     return df_maestro, df_plan_maestro
 
 df_maestro, df_plan_maestro = calcular_estado_inventario_completo(df_maestro_base, df_ordenes_historico)
+mapa_tiendas_debug = construir_mapa_tiendas_canonicas(df_maestro)
+df_ordenes_abiertas_debug = preparar_ordenes_abiertas_para_calculo(df_ordenes_historico, mapa_tiendas_debug)
 
 # --- 4. NAVEGACIÓN Y FILTROS EN SIDEBAR ---
 with st.sidebar:
@@ -816,6 +850,67 @@ with st.sidebar:
             exito, msg = update_sheet(client, "Estado_Inventario", df_to_sync)
             if exito: st.success(msg)
             else: st.error(msg)
+
+with st.expander("🔎 Rastreo puntual de SKU", expanded=False):
+    sku_rastreo = st.text_input("SKU a rastrear en todo el flujo:", value="5891273", key="sku_rastreo_flujo")
+    sku_rastreo_normalizado = normalizar_sku_clave(sku_rastreo)
+
+    if sku_rastreo_normalizado:
+        df_sku = df_maestro[df_maestro['SKU'] == sku_rastreo_normalizado].copy()
+
+        if df_sku.empty:
+            st.warning(f"No se encontró el SKU {sku_rastreo_normalizado} en el análisis actual.")
+        else:
+            df_sku['Diagnostico_Flujo'] = df_sku.apply(explicar_estado_abastecimiento, axis=1)
+            columnas_sku = [
+                'SKU', 'Descripcion', 'Proveedor', 'Almacen_Nombre', 'Estado_Inventario',
+                'Stock', 'Stock_Saliente_Reservado', 'Stock_En_Transito', 'Stock_Disponible_Actual',
+                'Stock_Disponible_Proyectado', 'Demanda_Diaria_Promedio', 'Objetivo_Abastecimiento',
+                'Necesidad_Ajustada_Por_Transito', 'Excedente_Trasladable', 'Cubierto_Por_Traslado',
+                'Sugerencia_Compra', 'Prioridad_Abastecimiento', 'Diagnostico_Flujo'
+            ]
+            columnas_sku = [col for col in columnas_sku if col in df_sku.columns]
+            st.markdown("##### Estado del SKU por tienda")
+            st.dataframe(
+                df_sku[columnas_sku],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Almacen_Nombre': 'Tienda',
+                    'Demanda_Diaria_Promedio': st.column_config.NumberColumn('Demanda/Día', format='%.2f'),
+                    'Stock': st.column_config.NumberColumn(format='%d'),
+                    'Stock_Saliente_Reservado': st.column_config.NumberColumn('Reservado Salida', format='%d'),
+                    'Stock_En_Transito': st.column_config.NumberColumn('En Tránsito', format='%d'),
+                    'Stock_Disponible_Actual': st.column_config.NumberColumn('Disponible Actual', format='%d'),
+                    'Stock_Disponible_Proyectado': st.column_config.NumberColumn('Disponible Proyectado', format='%d'),
+                    'Objetivo_Abastecimiento': st.column_config.NumberColumn('Objetivo', format='%d'),
+                    'Necesidad_Ajustada_Por_Transito': st.column_config.NumberColumn('Necesidad Neta', format='%d'),
+                    'Excedente_Trasladable': st.column_config.NumberColumn('Excedente Trasladable', format='%d'),
+                    'Cubierto_Por_Traslado': st.column_config.NumberColumn('Cubierto por Traslado', format='%d'),
+                    'Sugerencia_Compra': st.column_config.NumberColumn('Sug. Compra', format='%d')
+                }
+            )
+
+            df_sku_traslados = df_plan_maestro[df_plan_maestro['SKU'] == sku_rastreo_normalizado].copy() if not df_plan_maestro.empty else pd.DataFrame()
+            st.markdown("##### Traslados sugeridos para el SKU")
+            if df_sku_traslados.empty:
+                st.info("Este SKU no tiene traslados automáticos sugeridos en el cálculo actual.")
+            else:
+                columnas_traslado = [
+                    'SKU', 'Tienda Origen', 'Tienda Destino', 'Stock en Origen', 'Stock en Destino',
+                    'Necesidad en Destino', 'Uds a Enviar', 'Proveedor'
+                ]
+                columnas_traslado = [col for col in columnas_traslado if col in df_sku_traslados.columns]
+                st.dataframe(df_sku_traslados[columnas_traslado], use_container_width=True, hide_index=True)
+
+            df_sku_abiertas = df_ordenes_abiertas_debug[df_ordenes_abiertas_debug['SKU'] == sku_rastreo_normalizado].copy() if not df_ordenes_abiertas_debug.empty else pd.DataFrame()
+            st.markdown("##### Órdenes abiertas que afectan el SKU")
+            if df_sku_abiertas.empty:
+                st.info("No hay órdenes abiertas en Google Sheets para este SKU.")
+            else:
+                columnas_abiertas = ['SKU', 'Tienda_Origen', 'Tienda_Destino', 'Cantidad_Solicitada', 'Estado', 'Es_Traslado']
+                columnas_abiertas = [col for col in columnas_abiertas if col in df_sku_abiertas.columns]
+                st.dataframe(df_sku_abiertas[columnas_abiertas], use_container_width=True, hide_index=True)
 
 # --- 5. CONTENIDO DE LAS PESTAÑAS ---
 
