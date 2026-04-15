@@ -158,6 +158,24 @@ def construir_firma_dataframe(df, columnas_clave):
     return str(int(hashed.sum()))
 
 
+def calcular_sugerencia_compra_operativa(df):
+    """Recalcula la compra requerida desde la necesidad neta actual del SKU."""
+    if df is None or df.empty:
+        return pd.Series(dtype=int)
+
+    if {'Necesidad_Ajustada_Por_Transito', 'Cubierto_Por_Traslado'}.issubset(df.columns):
+        faltante = (
+            pd.to_numeric(df['Necesidad_Ajustada_Por_Transito'], errors='coerce').fillna(0)
+            - pd.to_numeric(df['Cubierto_Por_Traslado'], errors='coerce').fillna(0)
+        ).clip(lower=0)
+        return pd.Series(convertir_serie_a_entero_seguro(faltante), index=df.index)
+
+    if 'Sugerencia_Compra' in df.columns:
+        return pd.Series(convertir_serie_a_entero_seguro(df['Sugerencia_Compra']), index=df.index)
+
+    return pd.Series(0, index=df.index, dtype=int)
+
+
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -1376,21 +1394,31 @@ if active_tab == tab_titles[1]:
 if active_tab == tab_titles[2]:
     st.header("🛒 Plan de Compras")
     with st.expander("✅ **Generar Órdenes de Compra por Sugerencia**", expanded=True):
-        df_plan_compras_base = df_filtered[
-            (df_filtered['Sugerencia_Compra'] > 0)
+        df_compra_vigente = df_filtered.copy()
+        df_compra_vigente['Sugerencia_Compra_Operativa'] = calcular_sugerencia_compra_operativa(df_compra_vigente)
+        if 'Sugerencia_Compra' in df_compra_vigente.columns:
+            df_compra_vigente['Sugerencia_Compra_UI'] = np.maximum(
+                pd.to_numeric(df_compra_vigente['Sugerencia_Compra'], errors='coerce').fillna(0),
+                df_compra_vigente['Sugerencia_Compra_Operativa']
+            )
+        else:
+            df_compra_vigente['Sugerencia_Compra_UI'] = df_compra_vigente['Sugerencia_Compra_Operativa']
+
+        df_plan_compras_base = df_compra_vigente[
+            (df_compra_vigente['Sugerencia_Compra_UI'] > 0)
             & (~df_filtered['Descripcion'].apply(_es_aerocolor_excluido))
         ].copy()
         firma_plan_compras = construir_firma_dataframe(
             df_plan_compras_base,
-            ['SKU', 'Almacen_Nombre', 'Sugerencia_Compra', 'Proveedor', 'Marca_Nombre', 'Estado_Inventario', 'Prioridad_Abastecimiento']
+            ['SKU', 'Almacen_Nombre', 'Sugerencia_Compra_UI', 'Proveedor', 'Marca_Nombre', 'Estado_Inventario', 'Prioridad_Abastecimiento']
         )
         if not df_plan_compras_base.empty and 'Prioridad_Abastecimiento' in df_plan_compras_base.columns:
             orden_prioridad = {'Crítica': 0, 'Alta': 1, 'Media': 2, 'Estable': 3}
             df_plan_compras_base['Orden_Prioridad'] = df_plan_compras_base['Prioridad_Abastecimiento'].map(orden_prioridad).fillna(99)
-            columnas_orden = ['Orden_Prioridad', 'Sugerencia_Compra']
+            columnas_orden = ['Orden_Prioridad', 'Sugerencia_Compra_UI']
             ascendente_orden = [True, False]
             if 'Cobertura_Dias_Proyectada' in df_plan_compras_base.columns:
-                columnas_orden = ['Orden_Prioridad', 'Cobertura_Dias_Proyectada', 'Sugerencia_Compra']
+                columnas_orden = ['Orden_Prioridad', 'Cobertura_Dias_Proyectada', 'Sugerencia_Compra_UI']
                 ascendente_orden = [True, True, False]
             df_plan_compras_base = df_plan_compras_base.sort_values(by=columnas_orden, ascending=ascendente_orden).drop(columns=['Orden_Prioridad'])
 
@@ -1423,7 +1451,7 @@ if active_tab == tab_titles[2]:
             # --- FIN DE MODIFICACIÓN ---
             
             df_a_mostrar = df_temp.copy()
-            df_a_mostrar['Uds a Comprar'] = convertir_serie_a_entero_seguro(df_a_mostrar['Sugerencia_Compra'])
+            df_a_mostrar['Uds a Comprar'] = convertir_serie_a_entero_seguro(df_a_mostrar['Sugerencia_Compra_UI'])
             df_a_mostrar['_empaque'] = df_a_mostrar['Descripcion'].apply(_detectar_empaque)
             df_a_mostrar['Ud Empaque'] = df_a_mostrar.apply(
                 lambda r: calcular_ud_empaque(r['Uds a Comprar'], r['_empaque']), axis=1
