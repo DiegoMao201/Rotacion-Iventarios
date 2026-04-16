@@ -276,10 +276,13 @@ def preparar_dataframe_compra(df):
     df_compra['Ud Empaque'] = df_compra.apply(
         lambda row: calcular_ud_empaque(row['Uds a Comprar'], row['_empaque']), axis=1
     )
+    df_compra['Uds a Comprar Sugerida'] = df_compra['Uds a Comprar']
+    df_compra['Ud Empaque Sugerida'] = df_compra['Ud Empaque']
 
     df_compra['Costo_Promedio_UND'] = pd.to_numeric(df_compra.get('Costo_Promedio_UND', 0), errors='coerce').fillna(0)
     df_compra['Peso_Articulo'] = pd.to_numeric(df_compra.get('Peso_Articulo', 0), errors='coerce').fillna(0)
     df_compra['Cantidad_Final'] = np.where(df_compra['Ud Empaque'] > 0, df_compra['Ud Empaque'], df_compra['Uds a Comprar'])
+    df_compra['Fuente_Cantidad'] = np.where(df_compra['Ud Empaque'] > 0, 'Ud Empaque', 'Uds a Comprar')
     df_compra['Valor_Compra_Base'] = df_compra['Uds a Comprar'] * df_compra['Costo_Promedio_UND']
     df_compra['Valor_Compra_Ajustada'] = df_compra['Cantidad_Final'] * df_compra['Costo_Promedio_UND']
     df_compra['Impacto_Empaque'] = df_compra['Valor_Compra_Ajustada'] - df_compra['Valor_Compra_Base']
@@ -287,6 +290,66 @@ def preparar_dataframe_compra(df):
     df_compra['Peso_Total_Ajustado'] = df_compra['Cantidad_Final'] * df_compra['Peso_Articulo']
     df_compra.drop(columns=['_empaque'], inplace=True)
     return df_compra
+
+
+def recalcular_editor_compra(df_editor):
+    """Recalcula la cantidad efectiva y totales de compra respetando la edición del usuario."""
+    if df_editor is None or df_editor.empty:
+        return pd.DataFrame() if df_editor is None else df_editor
+
+    df_resultado = df_editor.copy()
+    df_resultado['Uds a Comprar'] = pd.to_numeric(df_resultado.get('Uds a Comprar', 0), errors='coerce').fillna(0)
+    df_resultado['Ud Empaque'] = pd.to_numeric(df_resultado.get('Ud Empaque', 0), errors='coerce').fillna(0)
+    df_resultado['Costo_Promedio_UND'] = pd.to_numeric(df_resultado.get('Costo_Promedio_UND', 0), errors='coerce').fillna(0)
+    df_resultado['Peso_Articulo'] = pd.to_numeric(df_resultado.get('Peso_Articulo', 0), errors='coerce').fillna(0)
+
+    uds_sugerida = pd.to_numeric(df_resultado.get('Uds a Comprar Sugerida', df_resultado['Uds a Comprar']), errors='coerce').fillna(0)
+    empaque_sugerido = pd.to_numeric(df_resultado.get('Ud Empaque Sugerida', df_resultado['Ud Empaque']), errors='coerce').fillna(0)
+
+    modifico_uds = df_resultado['Uds a Comprar'] != uds_sugerida
+    modifico_empaque = df_resultado['Ud Empaque'] != empaque_sugerido
+
+    df_resultado['Cantidad_Final'] = np.select(
+        [
+            modifico_empaque & (df_resultado['Ud Empaque'] > 0),
+            modifico_uds & ~modifico_empaque,
+        ],
+        [
+            df_resultado['Ud Empaque'],
+            df_resultado['Uds a Comprar'],
+        ],
+        default=np.where(df_resultado['Ud Empaque'] > 0, df_resultado['Ud Empaque'], df_resultado['Uds a Comprar'])
+    )
+
+    df_resultado['Fuente_Cantidad'] = np.select(
+        [
+            modifico_empaque & (df_resultado['Ud Empaque'] > 0),
+            modifico_uds & ~modifico_empaque,
+        ],
+        [
+            'Ud Empaque (editada)',
+            'Uds a Comprar (editada)',
+        ],
+        default=np.where(df_resultado['Ud Empaque'] > 0, 'Ud Empaque (sugerida)', 'Uds a Comprar (sugerida)')
+    )
+
+    df_resultado['Valor Compra Base'] = df_resultado['Uds a Comprar'] * df_resultado['Costo_Promedio_UND']
+    df_resultado['Valor de la Compra'] = df_resultado['Cantidad_Final'] * df_resultado['Costo_Promedio_UND']
+    df_resultado['Impacto_Empaque'] = df_resultado['Valor de la Compra'] - df_resultado['Valor Compra Base']
+    df_resultado['Peso Total (kg)'] = df_resultado['Cantidad_Final'] * df_resultado['Peso_Articulo']
+    return df_resultado
+
+
+def aplicar_edicion_visible_compra(df_original, df_editado_visible):
+    """Aplica cambios del data editor manteniendo columnas ocultas y metadatos."""
+    if df_original is None or df_original.empty:
+        return df_original
+
+    df_actualizado = df_original.copy()
+    columnas_editables = [col for col in ['Seleccionar', 'Uds a Comprar', 'Ud Empaque'] if col in df_editado_visible.columns and col in df_actualizado.columns]
+    for columna in columnas_editables:
+        df_actualizado.loc[df_editado_visible.index, columna] = df_editado_visible[columna].values
+    return recalcular_editor_compra(df_actualizado)
 
 
 # --- 1. FUNCIONES DE CONEXIÓN Y GESTIÓN CON GOOGLE SHEETS ---
@@ -1643,21 +1706,21 @@ if active_tab == tab_titles[2]:
 
                 if select_all:
                     edited_df['Seleccionar'] = True
-                    st.session_state.df_compras_editor = edited_df.copy()
+                    st.session_state.df_compras_editor = aplicar_edicion_visible_compra(st.session_state.df_compras_editor, edited_df)
                     st.rerun()
                 if deselect_all:
                     edited_df['Seleccionar'] = False
-                    st.session_state.df_compras_editor = edited_df.copy()
+                    st.session_state.df_compras_editor = aplicar_edicion_visible_compra(st.session_state.df_compras_editor, edited_df)
                     st.rerun()
                 
                 if confirm_changes:
-                    st.session_state.df_compras_editor = edited_df
+                    st.session_state.df_compras_editor = aplicar_edicion_visible_compra(st.session_state.df_compras_editor, edited_df)
                     st.success("Cambios confirmados. Proceda a generar las órdenes a continuación.")
 
             # Corregido: st_session_state -> st.session.state
             df_seleccionados = st.session_state.df_compras_editor[
                 (st.session_state.df_compras_editor['Seleccionar']) & 
-                (st.session_state.df_compras_editor['Uds a Comprar'] > 0)
+                (pd.to_numeric(st.session_state.df_compras_editor['Cantidad_Final'], errors='coerce').fillna(0) > 0)
             ].copy()
 
             if not df_seleccionados.empty:
@@ -1685,16 +1748,7 @@ if active_tab == tab_titles[2]:
                 )
 
             if not df_seleccionados.empty:
-                df_seleccionados['Uds a Comprar'] = pd.to_numeric(df_seleccionados['Uds a Comprar'], errors='coerce').fillna(0)
-                df_seleccionados['Ud Empaque'] = pd.to_numeric(df_seleccionados['Ud Empaque'], errors='coerce').fillna(0)
-                df_seleccionados['Costo_Promedio_UND'] = pd.to_numeric(df_seleccionados['Costo_Promedio_UND'], errors='coerce').fillna(0)
-                df_seleccionados['Peso_Articulo'] = pd.to_numeric(df_seleccionados['Peso_Articulo'], errors='coerce').fillna(0)
-                # Para los cálculos, usar Ud Empaque si existe y es >0, si no Uds a Comprar
-                df_seleccionados['Cantidad_Final'] = np.where(df_seleccionados['Ud Empaque'] > 0, df_seleccionados['Ud Empaque'], df_seleccionados['Uds a Comprar'])
-                df_seleccionados['Valor Compra Base'] = df_seleccionados['Uds a Comprar'] * df_seleccionados['Costo_Promedio_UND']
-                df_seleccionados['Valor de la Compra'] = df_seleccionados['Cantidad_Final'] * df_seleccionados['Costo_Promedio_UND']
-                df_seleccionados['Impacto_Empaque'] = df_seleccionados['Valor de la Compra'] - df_seleccionados['Valor Compra Base']
-                df_seleccionados['Peso Total (kg)'] = df_seleccionados['Cantidad_Final'] * df_seleccionados['Peso_Articulo']
+                df_seleccionados = recalcular_editor_compra(df_seleccionados)
                 
                 valor_total_base = df_seleccionados['Valor Compra Base'].sum()
                 valor_total = df_seleccionados['Valor de la Compra'].sum()
@@ -1720,7 +1774,7 @@ if active_tab == tab_titles[2]:
                 for (proveedor, tienda), df_grupo in grouped:
                     with st.container(border=True):
                         st.markdown(f"#### Orden para **{proveedor}** ➡️ Destino: **{tienda}**")
-                        cols_orden = ['SKU', 'Descripcion', 'Uds a Comprar', 'Ud Empaque', 'Cantidad_Final', 'Costo_Promedio_UND', 'Valor Compra Base', 'Valor de la Compra', 'Peso Total (kg)']
+                        cols_orden = ['SKU', 'Descripcion', 'Uds a Comprar', 'Ud Empaque', 'Cantidad_Final', 'Fuente_Cantidad', 'Costo_Promedio_UND', 'Valor Compra Base', 'Valor de la Compra', 'Peso Total (kg)']
                         cols_orden = [c for c in cols_orden if c in df_grupo.columns]
                         st.dataframe(df_grupo[cols_orden], use_container_width=True)
 
